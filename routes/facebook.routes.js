@@ -8,6 +8,12 @@ const upload = require('../middleware/upload');
 const { broadcastSSE } = require('../middleware/sse');
 const { serializePage, serializePages } = require('../utils/public-serializer');
 const { validateContent } = require('../services/content-safety');
+const {
+  validateContentProfile,
+  normalizeContentProfile,
+  calculateOnboardingStatus,
+  buildPublicContentProfile
+} = require('../services/page-profile');
 
 // POST /api/post (or /api/facebook/post) - Instant Post Publishing
 router.post('/post', upload.single('image'), async (req, res, next) => {
@@ -199,6 +205,117 @@ const credentialLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: 'Too many credential update attempts. Please wait.' }
+});
+
+const profileLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many profile update attempts. Please wait.' }
+});
+
+// GET /api/facebook/pages/:id/content-profile - Fetch page content profile
+router.get('/pages/:id/content-profile', (req, res) => {
+  const page = storage.getPageById(req.params.id);
+  if (!page) {
+    return res.status(404).json({ success: false, error: 'Page not found.' });
+  }
+  const rawProfile = storage.getPageProfile(req.params.id);
+  const publicProfile = buildPublicContentProfile(rawProfile);
+  const onboardingStatus = page.onboardingStatus || calculateOnboardingStatus(publicProfile);
+  res.json({
+    success: true,
+    pageId: page.id,
+    pageName: page.name,
+    contentProfile: publicProfile,
+    onboardingStatus
+  });
+});
+
+// PUT /api/facebook/pages/:id/content-profile - Update and validate page content profile
+router.put('/pages/:id/content-profile', profileLimiter, (req, res) => {
+  const existing = storage.getPageById(req.params.id);
+  if (!existing) {
+    return res.status(404).json({ success: false, error: 'Page not found.' });
+  }
+
+  const result = storage.savePageProfile(req.params.id, req.body);
+  if (!result.success) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid content profile data.',
+      errors: result.errors || [result.error]
+    });
+  }
+
+  broadcastSSE('page_switched', {
+    activePage: serializePage(storage.getActivePage()),
+    pages: serializePages(storage.getConnectedPages())
+  });
+
+  res.json({
+    success: true,
+    pageId: req.params.id,
+    contentProfile: buildPublicContentProfile(result.contentProfile),
+    onboardingStatus: result.onboardingStatus
+  });
+});
+
+// POST /api/facebook/pages/:id/content-profile/validate - Dry-run validation of profile
+router.post('/pages/:id/content-profile/validate', (req, res) => {
+  const existing = storage.getPageById(req.params.id);
+  if (!existing) {
+    return res.status(404).json({ success: false, error: 'Page not found.' });
+  }
+
+  const validation = validateContentProfile(req.body);
+  if (!validation.valid) {
+    return res.status(400).json({
+      success: false,
+      valid: false,
+      errors: validation.errors
+    });
+  }
+
+  const normalized = normalizeContentProfile(req.body);
+  const onboardingStatus = calculateOnboardingStatus(normalized);
+
+  res.json({
+    success: true,
+    valid: true,
+    onboardingStatus,
+    contentProfile: buildPublicContentProfile(normalized)
+  });
+});
+
+// POST /api/facebook/pages/:id/content-profile/reset - Reset content profile to defaults
+router.post('/pages/:id/content-profile/reset', profileLimiter, (req, res) => {
+  const existing = storage.getPageById(req.params.id);
+  if (!existing) {
+    return res.status(404).json({ success: false, error: 'Page not found.' });
+  }
+
+  const { confirm } = req.body || {};
+  if (confirm !== true && confirm !== 'true') {
+    return res.status(400).json({
+      success: false,
+      error: 'Confirmation required to reset profile. Pass { "confirm": true }.'
+    });
+  }
+
+  const updatedPage = storage.resetPageProfile(req.params.id);
+  broadcastSSE('page_switched', {
+    activePage: serializePage(storage.getActivePage()),
+    pages: serializePages(storage.getConnectedPages())
+  });
+
+  res.json({
+    success: true,
+    pageId: req.params.id,
+    contentProfile: buildPublicContentProfile(updatedPage.contentProfile),
+    onboardingStatus: updatedPage.onboardingStatus || 'not_started'
+  });
 });
 
 // PUT /api/facebook/pages/:id/credential - Dedicated endpoint for page access token
