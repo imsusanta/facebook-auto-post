@@ -1,6 +1,13 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const {
+  createDefaultContentProfile,
+  normalizeContentProfile,
+  validateContentProfile,
+  migrateContentProfile,
+  calculateOnboardingStatus
+} = require('./page-profile');
 
 let DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 let SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
@@ -377,6 +384,7 @@ const storage = {
   getConnectedPages() {
     const s = this.getSettings();
     if (!Array.isArray(s.pages) || s.pages.length === 0) {
+      const initialProfile = createDefaultContentProfile();
       const initialPage = {
         id: s.pageId || '',
         name: s.pageName || 'My Facebook Page',
@@ -384,6 +392,8 @@ const storage = {
         accessToken: s.accessToken || '',
         category: 'General',
         systemPrompt: s.customSystemPrompt || DEFAULT_SYSTEM_PROMPT,
+        contentProfile: initialProfile,
+        onboardingStatus: calculateOnboardingStatus(initialProfile),
         connectedAt: s.updatedAt || new Date().toISOString(),
         isActive: true
       };
@@ -391,13 +401,19 @@ const storage = {
       s.activePageId = initialPage.id;
       writeJsonFile(SETTINGS_FILE, s);
     } else {
-      // Ensure all existing pages have systemPrompt field
+      // Ensure all existing pages have systemPrompt and contentProfile fields
       let changed = false;
-      s.pages.forEach(p => {
-        if (!p.systemPrompt) {
-          p.systemPrompt = s.customSystemPrompt || DEFAULT_SYSTEM_PROMPT;
+      s.pages = s.pages.map(p => {
+        let updatedPage = p;
+        if (!updatedPage.systemPrompt) {
+          updatedPage = { ...updatedPage, systemPrompt: s.customSystemPrompt || DEFAULT_SYSTEM_PROMPT };
           changed = true;
         }
+        if (!updatedPage.contentProfile) {
+          updatedPage = migrateContentProfile(updatedPage);
+          changed = true;
+        }
+        return updatedPage;
       });
       if (changed) writeJsonFile(SETTINGS_FILE, s);
     }
@@ -436,6 +452,9 @@ const storage = {
     const pages = this.getConnectedPages();
     
     const existingIndex = pages.findIndex(p => p.id === pageData.id);
+    const defaultProfile = pageData.contentProfile || createDefaultContentProfile({
+      niche: pageData.category && pageData.category !== 'General' ? pageData.category : ''
+    });
     const newPage = {
       id: pageData.id,
       name: pageData.name || 'Facebook Page',
@@ -443,6 +462,8 @@ const storage = {
       accessToken: pageData.accessToken,
       category: pageData.category || 'General',
       systemPrompt: pageData.systemPrompt || s.customSystemPrompt || DEFAULT_SYSTEM_PROMPT,
+      contentProfile: defaultProfile,
+      onboardingStatus: pageData.onboardingStatus || calculateOnboardingStatus(defaultProfile),
       connectedAt: new Date().toISOString(),
       isActive: pages.length === 0 || !!pageData.setAsActive
     };
@@ -542,6 +563,79 @@ const storage = {
 
     writeJsonFile(SETTINGS_FILE, s);
     return pages;
+  },
+
+  getPageProfile(pageId) {
+    const page = this.getPageById(pageId);
+    if (!page) return null;
+    return page.contentProfile || createDefaultContentProfile();
+  },
+
+  savePageProfile(pageId, profileInput) {
+    const validation = validateContentProfile(profileInput);
+    if (!validation.valid) {
+      return { success: false, errors: validation.errors };
+    }
+    const normalized = normalizeContentProfile(profileInput);
+    const onboardingStatus = calculateOnboardingStatus(normalized);
+
+    const updatedPage = this.updateConnectedPage(pageId, {
+      contentProfile: normalized,
+      onboardingStatus
+    });
+
+    if (!updatedPage) {
+      return { success: false, error: 'Page not found' };
+    }
+
+    return {
+      success: true,
+      page: updatedPage,
+      contentProfile: normalized,
+      onboardingStatus
+    };
+  },
+
+  resetPageProfile(pageId) {
+    const page = this.getPageById(pageId);
+    if (!page) return null;
+    const defaultProfile = createDefaultContentProfile({
+      niche: page.category && page.category !== 'General' ? page.category : ''
+    });
+    const updated = this.updateConnectedPage(pageId, {
+      contentProfile: defaultProfile,
+      onboardingStatus: 'not_started'
+    });
+    return updated;
+  },
+
+  migrateAllPages(options = {}) {
+    const { createBackup = true } = options;
+    const s = this.getSettings();
+    if (!Array.isArray(s.pages) || s.pages.length === 0) {
+      return { success: true, migratedCount: 0, pages: [] };
+    }
+
+    if (createBackup && fs.existsSync(SETTINGS_FILE)) {
+      const backupPath = path.join(DATA_DIR, `settings.backup.${Date.now()}.json`);
+      try {
+        fs.copyFileSync(SETTINGS_FILE, backupPath);
+        fs.chmodSync(backupPath, 0o600);
+      } catch (backupErr) {
+        console.warn('[Page Migration] Could not create backup file:', backupErr.message);
+      }
+    }
+
+    let migratedCount = 0;
+    s.pages = s.pages.map(page => {
+      const hadProfile = !!page.contentProfile;
+      const migrated = migrateContentProfile(page);
+      if (!hadProfile) migratedCount++;
+      return migrated;
+    });
+
+    writeJsonFile(SETTINGS_FILE, s);
+    return { success: true, migratedCount, totalPages: s.pages.length };
   },
 
   getCategories() {
