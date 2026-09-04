@@ -94,14 +94,17 @@ const {
   authMiddleware,
   safeCompare,
   createSession,
+  getSession,
   validateSession,
   destroySession,
   clearAllSessions,
   hasQueryCredentials,
   hashPassword,
   verifyPassword,
-  isAuthConfigured
+  isAuthConfigured,
+  requireRole
 } = require('../middleware/auth');
+const storage = require('../services/storage');
 
 const {
   validateSettingsPayload,
@@ -451,6 +454,89 @@ test('Auth: isAuthConfigured reports configuration state accurately', () => {
   } finally {
     process.env.ADMIN_API_KEY = origKey;
   }
+});
+
+test('Auth: Default super_admin user is initialized in storage', () => {
+  const superAdmin = storage.findUserByEmail('susantalohr@gmail.com');
+  assert.ok(superAdmin, 'Super admin user susantalohr@gmail.com must exist');
+  assert.strictEqual(superAdmin.email, 'susantalohr@gmail.com');
+  assert.strictEqual(superAdmin.role, 'super_admin');
+  assert.strictEqual(superAdmin.name, 'Susanta Lohar');
+  assert.ok(superAdmin.passwordHash, 'User must have a hashed password');
+  assert.ok(superAdmin.passwordSalt, 'User must have a salt');
+
+  // Verify valid password
+  assert.strictEqual(verifyPassword('admin@123', superAdmin.passwordHash, superAdmin.passwordSalt), true);
+  // Verify invalid password fails
+  assert.strictEqual(verifyPassword('wrongpass', superAdmin.passwordHash, superAdmin.passwordSalt), false);
+
+  // Case and whitespace insensitive lookup
+  const lookupUser = storage.findUserByEmail('  SUSANTALOHR@GMAIL.COM  ');
+  assert.ok(lookupUser);
+  assert.strictEqual(lookupUser.id, superAdmin.id);
+});
+
+test('Auth: User sessions attach identity and role', () => {
+  const user = { id: 'usr_test_1', email: 'susantalohr@gmail.com', name: 'Susanta Lohar', role: 'super_admin' };
+  const sessionId = createSession(user);
+  assert.ok(typeof sessionId === 'string' && sessionId.length === 64);
+
+  const session = getSession(sessionId);
+  assert.ok(session);
+  assert.strictEqual(session.user.id, 'usr_test_1');
+  assert.strictEqual(session.user.email, 'susantalohr@gmail.com');
+  assert.strictEqual(session.user.name, 'Susanta Lohar');
+  assert.strictEqual(session.user.role, 'super_admin');
+
+  destroySession(sessionId);
+  assert.strictEqual(getSession(sessionId), null);
+});
+
+test('Auth: requireRole middleware enforces role permissions', () => {
+  const superAdminGuard = requireRole(['super_admin']);
+  const adminGuard = requireRole(['admin', 'super_admin']);
+
+  // Super admin accessing super admin route
+  let nextCalled = false;
+  superAdminGuard({ user: { role: 'super_admin' } }, {}, () => { nextCalled = true; });
+  assert.strictEqual(nextCalled, true);
+
+  // Super admin accessing admin route
+  nextCalled = false;
+  adminGuard({ user: { role: 'super_admin' } }, {}, () => { nextCalled = true; });
+  assert.strictEqual(nextCalled, true);
+
+  // Editor rejected on super admin route with 403
+  let statusSent = 0;
+  let responseData = null;
+  const mockRes = {
+    status(s) { statusSent = s; return this; },
+    json(d) { responseData = d; }
+  };
+  superAdminGuard({ user: { role: 'editor' } }, mockRes, () => assert.fail('Should not proceed'));
+  assert.strictEqual(statusSent, 403);
+  assert.strictEqual(responseData.code, 'FORBIDDEN_ROLE');
+
+  // Missing user rejected with 401
+  statusSent = 0;
+  responseData = null;
+  superAdminGuard({}, mockRes, () => assert.fail('Should not proceed'));
+  assert.strictEqual(statusSent, 401);
+  assert.strictEqual(responseData.code, 'UNAUTHORIZED');
+});
+
+test('Auth: Public serializer strips passwordHash and passwordSalt from user objects', () => {
+  const superAdmin = storage.findUserByEmail('susantalohr@gmail.com');
+  assert.ok(superAdmin);
+  const sanitized = serializePublic(superAdmin);
+
+  assert.strictEqual(sanitized.email, 'susantalohr@gmail.com');
+  assert.strictEqual(sanitized.role, 'super_admin');
+  assert.strictEqual(sanitized.name, 'Susanta Lohar');
+  assert.strictEqual(sanitized.passwordHash, undefined);
+  assert.strictEqual(sanitized.passwordSalt, undefined);
+  assert.strictEqual(sanitized.password_hash, undefined);
+  assert.strictEqual(sanitized.password_salt, undefined);
 });
 
 // =========================================================================

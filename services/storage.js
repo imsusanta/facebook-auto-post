@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
@@ -8,6 +9,7 @@ const QUEUE_FILE = path.join(DATA_DIR, 'queue.json');
 const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
 const RULES_FILE = path.join(DATA_DIR, 'automation_rules.json');
 const TEMPLATES_FILE = path.join(DATA_DIR, 'templates.json');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -240,6 +242,101 @@ const storage = {
       adminPasswordHash: hash,
       adminPasswordSalt: salt
     });
+  },
+
+  // =========================================================================
+  // User Management & SaaS Accounts
+  // =========================================================================
+  initDefaultUsers() {
+    let users = readJsonFile(USERS_FILE, []);
+    if (!Array.isArray(users)) users = [];
+
+    const existingSuperAdmin = users.find(u => u && typeof u.email === 'string' && u.email.toLowerCase() === 'susantalohr@gmail.com');
+    if (!existingSuperAdmin) {
+      const salt = crypto.randomBytes(16).toString('hex');
+      const hash = crypto.pbkdf2Sync('admin@123', salt, 100000, 64, 'sha512').toString('hex');
+      const defaultUser = {
+        id: 'usr_superadmin_' + crypto.randomBytes(4).toString('hex'),
+        email: 'susantalohr@gmail.com',
+        name: 'Susanta Lohar',
+        role: 'super_admin',
+        passwordHash: hash,
+        passwordSalt: salt,
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      users.unshift(defaultUser);
+      writeJsonFile(USERS_FILE, users);
+    }
+    return users;
+  },
+
+  getUsers() {
+    return this.initDefaultUsers();
+  },
+
+  findUserByEmail(email) {
+    if (!email || typeof email !== 'string') return null;
+    const users = this.getUsers();
+    const cleanEmail = email.toLowerCase().trim();
+    return users.find(u => u && typeof u.email === 'string' && u.email.toLowerCase().trim() === cleanEmail) || null;
+  },
+
+  findUserById(id) {
+    if (!id || typeof id !== 'string') return null;
+    const users = this.getUsers();
+    return users.find(u => u && u.id === id) || null;
+  },
+
+  createUser({ email, password, name, role = 'user', status = 'active' }) {
+    if (!email || !password) throw new Error('Email and password are required.');
+    const cleanEmail = email.toLowerCase().trim();
+    const existing = this.findUserByEmail(cleanEmail);
+    if (existing) throw new Error('User with this email already exists.');
+
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
+
+    const newUser = {
+      id: 'usr_' + crypto.randomBytes(6).toString('hex'),
+      email: cleanEmail,
+      name: name || cleanEmail.split('@')[0],
+      role,
+      passwordHash: hash,
+      passwordSalt: salt,
+      status,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const users = this.getUsers();
+    users.push(newUser);
+    writeJsonFile(USERS_FILE, users);
+    return newUser;
+  },
+
+  updateUser(id, updates) {
+    const users = this.getUsers();
+    const index = users.findIndex(u => u.id === id);
+    if (index === -1) return null;
+
+    const current = users[index];
+    if (updates.password) {
+      const salt = crypto.randomBytes(16).toString('hex');
+      const hash = crypto.pbkdf2Sync(updates.password, salt, 100000, 64, 'sha512').toString('hex');
+      updates.passwordHash = hash;
+      updates.passwordSalt = salt;
+      delete updates.password;
+    }
+
+    users[index] = {
+      ...current,
+      ...updates,
+      updatedAt: new Date().toISOString()
+    };
+    writeJsonFile(USERS_FILE, users);
+    return users[index];
   },
 
   getConnectedPages() {

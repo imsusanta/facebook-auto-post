@@ -43,6 +43,10 @@ const SENSITIVE_KEY_NAMES = new Set([
   'admin_password_hash',
   'adminpasswordsalt',
   'admin_password_salt',
+  'passwordhash',
+  'password_hash',
+  'passwordsalt',
+  'password_salt',
   'salt',
   'hash'
 ]);

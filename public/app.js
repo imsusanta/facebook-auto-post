@@ -2914,26 +2914,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Admin Authentication Modal & Session Flow
+  // SaaS Email & Password Authentication Modal & Session Flow
   const adminAuthModal = document.getElementById('adminAuthModal');
   const adminModalTitle = document.getElementById('adminModalTitle');
   const adminModalSubtitle = document.getElementById('adminModalSubtitle');
   const adminAuthForm = document.getElementById('adminAuthForm');
-  const adminAuthKeyInput = document.getElementById('adminAuthKeyInput');
+  const adminAuthEmailInput = document.getElementById('adminAuthEmailInput');
+  const adminAuthPasswordInput = document.getElementById('adminAuthPasswordInput');
   const adminAuthError = document.getElementById('adminAuthError');
   const adminAuthSubmitBtn = document.getElementById('adminAuthSubmitBtn');
   const togglePasswordVisibilityBtn = document.getElementById('togglePasswordVisibilityBtn');
-
-  const adminSetupForm = document.getElementById('adminSetupForm');
-  const adminSetupPassword = document.getElementById('adminSetupPassword');
-  const adminSetupConfirm = document.getElementById('adminSetupConfirm');
-  const adminSetupError = document.getElementById('adminSetupError');
-  const adminSetupSubmitBtn = document.getElementById('adminSetupSubmitBtn');
 
   const adminDevLoginSection = document.getElementById('adminDevLoginSection');
   const adminDevLoginBtn = document.getElementById('adminDevLoginBtn');
 
   const adminLogoutBtn = document.getElementById('adminLogoutBtn');
+  const userAvatarLetter = document.getElementById('userAvatarLetter');
+  const displayProfileName = document.getElementById('displayProfileName');
+  const displayProfileRole = document.getElementById('displayProfileRole');
   const headerAuthActionBtn = document.getElementById('headerAuthActionBtn');
   const headerAuthActionText = document.getElementById('headerAuthActionText');
 
@@ -2947,16 +2945,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let isUserAuthenticated = false;
 
-  function updateAuthUI(authenticated) {
+  function updateAuthUI(authenticated, user = null) {
     isUserAuthenticated = authenticated;
+    if (user && typeof user === 'object') {
+      if (displayProfileName) {
+        displayProfileName.textContent = user.name || user.email || 'Susanta Lohar';
+      }
+      if (displayProfileRole) {
+        const roleLabel = user.role === 'super_admin' ? 'Super Admin' : (user.role === 'admin' ? 'Admin' : 'User');
+        displayProfileRole.textContent = roleLabel;
+      }
+      if (userAvatarLetter) {
+        const letter = (user.name || user.email || 'S')[0].toUpperCase();
+        userAvatarLetter.textContent = letter;
+      }
+    }
     if (headerAuthActionText) {
-      headerAuthActionText.textContent = authenticated ? 'Admin Active' : 'Login';
+      if (authenticated && user && user.role === 'super_admin') {
+        headerAuthActionText.textContent = 'Super Admin';
+      } else if (authenticated) {
+        headerAuthActionText.textContent = 'Admin Active';
+      } else {
+        headerAuthActionText.textContent = 'Login';
+      }
     }
     if (headerAuthActionBtn) {
       if (authenticated) {
         headerAuthActionBtn.classList.remove('bg-rose-50', 'text-rose-700', 'border-rose-200');
         headerAuthActionBtn.classList.add('bg-white', 'text-slate-700');
-        headerAuthActionBtn.title = 'Logged in as Admin';
+        headerAuthActionBtn.title = 'Logged in as ' + (user ? (user.name || user.email) : 'Admin');
       } else {
         headerAuthActionBtn.classList.add('bg-rose-50', 'text-rose-700', 'border-rose-200');
         headerAuthActionBtn.classList.remove('bg-white', 'text-slate-700');
@@ -2965,34 +2982,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function showAuthModal(setupRequired = false, isDev = false) {
+  function showAuthModal(isDev = false) {
     if (!adminAuthModal) return;
     adminAuthModal.classList.remove('hidden');
 
-    if (setupRequired) {
-      if (adminModalTitle) adminModalTitle.textContent = 'Setup Admin Password';
-      if (adminModalSubtitle) adminModalSubtitle.textContent = 'Create a secure password to protect your dashboard.';
-      if (adminAuthForm) adminAuthForm.classList.add('hidden');
-      if (adminSetupForm) {
-        adminSetupForm.classList.remove('hidden');
-        if (adminSetupPassword) {
-          adminSetupPassword.value = '';
-          adminSetupPassword.focus();
-        }
-        if (adminSetupConfirm) adminSetupConfirm.value = '';
-      }
-    } else {
-      if (adminModalTitle) adminModalTitle.textContent = 'Admin Login';
-      if (adminModalSubtitle) adminModalSubtitle.textContent = 'Enter your Admin Password or Key to access the dashboard.';
-      if (adminSetupForm) adminSetupForm.classList.add('hidden');
-      if (adminAuthForm) {
-        adminAuthForm.classList.remove('hidden');
-        if (adminAuthKeyInput) {
-          adminAuthKeyInput.value = '';
-          adminAuthKeyInput.focus();
-        }
-      }
-    }
+    if (adminModalTitle) adminModalTitle.textContent = 'Facebook AutoPost SaaS Login';
+    if (adminModalSubtitle) adminModalSubtitle.textContent = 'Log in with your administrator email and password.';
 
     if (adminDevLoginSection) {
       if (isDev) {
@@ -3003,21 +2998,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (adminAuthError) adminAuthError.classList.add('hidden');
-    if (adminSetupError) adminSetupError.classList.add('hidden');
     refreshIcons();
   }
 
   function hideAuthModal() {
     if (adminAuthModal) adminAuthModal.classList.add('hidden');
     if (adminAuthError) adminAuthError.classList.add('hidden');
-    if (adminSetupError) adminSetupError.classList.add('hidden');
   }
 
   // Toggle Password Visibility Eye Button
-  if (togglePasswordVisibilityBtn && adminAuthKeyInput) {
+  if (togglePasswordVisibilityBtn && adminAuthPasswordInput) {
     togglePasswordVisibilityBtn.addEventListener('click', () => {
-      const isPassword = adminAuthKeyInput.type === 'password';
-      adminAuthKeyInput.type = isPassword ? 'text' : 'password';
+      const isPassword = adminAuthPasswordInput.type === 'password';
+      adminAuthPasswordInput.type = isPassword ? 'text' : 'password';
       const icon = togglePasswordVisibilityBtn.querySelector('i');
       if (icon) {
         icon.setAttribute('data-lucide', isPassword ? 'eye-off' : 'eye');
@@ -3026,13 +3019,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Standard Login Submission
+  // SaaS Email & Password Login Submission
   if (adminAuthForm) {
     adminAuthForm.addEventListener('submit', async (e) => {
       e.preventDefault();
-      if (!adminAuthKeyInput) return;
-      const key = adminAuthKeyInput.value.trim();
-      if (!key) return;
+      const email = adminAuthEmailInput ? adminAuthEmailInput.value.trim() : '';
+      const password = adminAuthPasswordInput ? adminAuthPasswordInput.value.trim() : '';
+
+      if (!email || !password) {
+        if (adminAuthError) {
+          adminAuthError.textContent = 'Please enter both email and password.';
+          adminAuthError.classList.remove('hidden');
+        }
+        return;
+      }
 
       if (adminAuthSubmitBtn) {
         adminAuthSubmitBtn.disabled = true;
@@ -3044,18 +3044,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password: key, key })
+          body: JSON.stringify({ email, password })
         });
         const data = await res.json();
         if (data.success && data.authenticated) {
           hideAuthModal();
-          updateAuthUI(true);
+          updateAuthUI(true, data.user);
           initApp();
-        } else if (data.setupRequired) {
-          showAuthModal(true, true);
         } else {
           if (adminAuthError) {
-            adminAuthError.textContent = data.error || 'Invalid admin credentials.';
+            adminAuthError.textContent = data.error || 'Invalid email or password.';
             adminAuthError.classList.remove('hidden');
           }
         }
@@ -3068,68 +3066,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (adminAuthSubmitBtn) {
           adminAuthSubmitBtn.disabled = false;
           adminAuthSubmitBtn.innerHTML = '<i data-lucide="log-in" class="w-4 h-4"></i><span>Log In to Dashboard</span>';
-          refreshIcons();
-        }
-      }
-    });
-  }
-
-  // First-Time Setup Submission
-  if (adminSetupForm) {
-    adminSetupForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      if (!adminSetupPassword || !adminSetupConfirm) return;
-      const password = adminSetupPassword.value.trim();
-      const confirmPassword = adminSetupConfirm.value.trim();
-
-      if (password.length < 6) {
-        if (adminSetupError) {
-          adminSetupError.textContent = 'Password must be at least 6 characters long.';
-          adminSetupError.classList.remove('hidden');
-        }
-        return;
-      }
-
-      if (password !== confirmPassword) {
-        if (adminSetupError) {
-          adminSetupError.textContent = 'Passwords do not match.';
-          adminSetupError.classList.remove('hidden');
-        }
-        return;
-      }
-
-      if (adminSetupSubmitBtn) {
-        adminSetupSubmitBtn.disabled = true;
-        adminSetupSubmitBtn.innerHTML = '<span>Saving...</span>';
-      }
-      if (adminSetupError) adminSetupError.classList.add('hidden');
-
-      try {
-        const res = await fetch('/api/auth/setup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password, confirmPassword })
-        });
-        const data = await res.json();
-        if (data.success && data.authenticated) {
-          hideAuthModal();
-          updateAuthUI(true);
-          initApp();
-        } else {
-          if (adminSetupError) {
-            adminSetupError.textContent = data.error || 'Failed to set password.';
-            adminSetupError.classList.remove('hidden');
-          }
-        }
-      } catch {
-        if (adminSetupError) {
-          adminSetupError.textContent = 'Connection error. Please try again.';
-          adminSetupError.classList.remove('hidden');
-        }
-      } finally {
-        if (adminSetupSubmitBtn) {
-          adminSetupSubmitBtn.disabled = false;
-          adminSetupSubmitBtn.innerHTML = '<i data-lucide="check-circle" class="w-4 h-4"></i><span>Save Password & Log In</span>';
           refreshIcons();
         }
       }
@@ -3149,7 +3085,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const data = await res.json();
         if (data.success && data.authenticated) {
           hideAuthModal();
-          updateAuthUI(true);
+          updateAuthUI(true, data.user);
           initApp();
         } else {
           alert(data.error || 'Dev login unavailable.');
@@ -3172,7 +3108,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // ignore
     }
     updateAuthUI(false);
-    showAuthModal(false, true);
+    showAuthModal(true);
   }
 
   if (adminLogoutBtn) {
@@ -3192,11 +3128,11 @@ document.addEventListener('DOMContentLoaded', () => {
   if (headerAuthActionBtn) {
     headerAuthActionBtn.addEventListener('click', () => {
       if (isUserAuthenticated) {
-        if (confirm('Do you want to log out of the admin dashboard?')) {
+        if (confirm('Do you want to log out of the dashboard?')) {
           performLogout();
         }
       } else {
-        showAuthModal(false, true);
+        showAuthModal(true);
       }
     });
   }
@@ -3283,20 +3219,20 @@ document.addEventListener('DOMContentLoaded', () => {
         const data = await res.json();
         if (data.authenticated) {
           hideAuthModal();
-          updateAuthUI(true);
+          updateAuthUI(true, data.user);
           initApp();
           return;
         } else {
           updateAuthUI(false);
-          showAuthModal(Boolean(data.setupRequired), Boolean(data.isDev));
+          showAuthModal(Boolean(data.isDev));
           return;
         }
       }
       updateAuthUI(false);
-      showAuthModal(false, true);
+      showAuthModal(true);
     } catch {
       updateAuthUI(false);
-      showAuthModal(false, true);
+      showAuthModal(true);
     }
   }
 

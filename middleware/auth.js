@@ -97,7 +97,7 @@ function parseCookies(cookieHeader) {
 /**
  * Session Store Management
  */
-function createSession() {
+function createSession(user = null) {
   // Prune expired sessions
   const now = Date.now();
   for (const [id, s] of activeSessions.entries()) {
@@ -106,21 +106,31 @@ function createSession() {
 
   const sessionId = crypto.randomBytes(32).toString('hex');
   activeSessions.set(sessionId, {
+    user: user ? {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role
+    } : null,
     createdAt: now,
     expiresAt: now + SESSION_TTL_MS
   });
   return sessionId;
 }
 
-function validateSession(sessionId) {
-  if (!sessionId || typeof sessionId !== 'string') return false;
+function getSession(sessionId) {
+  if (!sessionId || typeof sessionId !== 'string') return null;
   const session = activeSessions.get(sessionId);
-  if (!session) return false;
+  if (!session) return null;
   if (session.expiresAt <= Date.now()) {
     activeSessions.delete(sessionId);
-    return false;
+    return null;
   }
-  return true;
+  return session;
+}
+
+function validateSession(sessionId) {
+  return Boolean(getSession(sessionId));
 }
 
 function destroySession(sessionId) {
@@ -215,7 +225,14 @@ function authMiddleware(req, res, next) {
   // 5. Check Session Cookie (authenticated browser sessions)
   const cookies = parseCookies(req.headers.cookie);
   const sessionId = cookies.auth_session;
-  if (sessionId && validateSession(sessionId)) {
+  const session = getSession(sessionId);
+  if (session) {
+    req.user = session.user || {
+      id: 'usr_superadmin',
+      email: 'susantalohr@gmail.com',
+      name: 'Susanta Lohar',
+      role: 'super_admin'
+    };
     return next();
   }
 
@@ -239,12 +256,34 @@ function authMiddleware(req, res, next) {
 
   if (headerToken) {
     if (expectedKey && typeof expectedKey === 'string' && expectedKey.trim() && safeCompare(headerToken, expectedKey.trim())) {
+      req.user = {
+        id: 'usr_system',
+        email: 'system@local',
+        name: 'System Admin',
+        role: 'super_admin'
+      };
       return next();
     }
     try {
+      const superAdmin = storage.findUserByEmail('susantalohr@gmail.com');
+      if (superAdmin && verifyPassword(headerToken, superAdmin.passwordHash, superAdmin.passwordSalt)) {
+        req.user = {
+          id: superAdmin.id,
+          email: superAdmin.email,
+          name: superAdmin.name,
+          role: superAdmin.role
+        };
+        return next();
+      }
       const settings = storage.getSettings();
       if (settings && settings.adminPasswordHash && settings.adminPasswordSalt) {
         if (verifyPassword(headerToken, settings.adminPasswordHash, settings.adminPasswordSalt)) {
+          req.user = {
+            id: 'usr_admin',
+            email: 'admin@local',
+            name: 'Administrator',
+            role: 'admin'
+          };
           return next();
         }
       }
@@ -280,10 +319,35 @@ function authMiddleware(req, res, next) {
   });
 }
 
+/**
+ * Role-based authorization middleware
+ */
+function requireRole(allowedRoles = ['admin', 'super_admin']) {
+  const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required.',
+        code: 'UNAUTHORIZED'
+      });
+    }
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Insufficient role permissions.',
+        code: 'FORBIDDEN_ROLE'
+      });
+    }
+    return next();
+  };
+}
+
 module.exports = {
   authMiddleware,
   safeCompare,
   createSession,
+  getSession,
   validateSession,
   destroySession,
   clearAllSessions,
@@ -291,5 +355,6 @@ module.exports = {
   parseCookies,
   hashPassword,
   verifyPassword,
-  isAuthConfigured
+  isAuthConfigured,
+  requireRole
 };
