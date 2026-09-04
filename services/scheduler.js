@@ -15,6 +15,14 @@ let currentClock = {
   newDate: (...args) => (args.length ? new Date(...args) : new Date())
 };
 
+function getDayString(date, timeZone = 'Asia/Kolkata') {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+  } catch {
+    return (date instanceof Date ? date : new Date(date)).toISOString().slice(0, 10);
+  }
+}
+
 class SchedulerService extends EventEmitter {
   constructor() {
     super();
@@ -43,6 +51,8 @@ class SchedulerService extends EventEmitter {
       now: () => Date.now(),
       newDate: (...args) => (args.length ? new Date(...args) : new Date())
     };
+    this.isProcessing = false;
+    this.lastAutoPostTime = 0;
     this.processingItemIds.clear();
   }
 
@@ -162,6 +172,9 @@ class SchedulerService extends EventEmitter {
       this.cronTask = null;
     }
     this.isRunning = false;
+    this.isProcessing = false;
+    this.lastAutoPostTime = 0;
+    this.processingItemIds.clear();
     this.nextRunTimestamp = null;
     this.emit('status', this.getStatus());
     console.log('[Scheduler] Automation & Cron stopped.');
@@ -194,10 +207,16 @@ class SchedulerService extends EventEmitter {
       return;
     }
 
-    // Safety check: Prevent duplicate triggers within 30 minutes
+    const activePage = currentStorage.getActivePage();
+    const contentProfile = activePage?.id ? currentStorage.getPageProfile(activePage.id) : null;
+    const isOnboarded = activePage && activePage.onboardingStatus && activePage.onboardingStatus !== 'not_started';
+    const minGapMinutes = (isOnboarded && contentProfile?.minimumPostGapMinutes) ? contentProfile.minimumPostGapMinutes : 30;
+    const minGapMs = minGapMinutes * 60 * 1000;
+
+    // Safety check: Prevent duplicate triggers within minimum post gap
     const now = currentClock.now();
-    if (now - this.lastAutoPostTime < 30 * 60 * 1000) {
-      console.log('[Scheduler] Cooldown active: An auto-post was published recently. Skipping duplicate trigger.');
+    if (this.lastAutoPostTime && (now - this.lastAutoPostTime < minGapMs)) {
+      console.log(`[Scheduler] Cooldown active: An auto-post was published recently (min gap: ${minGapMinutes}m). Skipping duplicate trigger.`);
       return;
     }
 
@@ -229,10 +248,14 @@ class SchedulerService extends EventEmitter {
       currentStorage.updateQueue(queue);
       this.emit('queue_updated', queue);
 
+      const pageProfile = item.pageId
+        ? currentStorage.getPageProfile(item.pageId)
+        : (currentStorage.getActivePage()?.id ? currentStorage.getPageProfile(currentStorage.getActivePage().id) : null);
+
       // Pre-publish safety check on queued post
       const safetyCheck = validateContent(
-        { message: item.message, imageUrl: item.imageUrl },
-        { history: currentStorage.getHistory(), isAutoPilot: false }
+        { message: item.message, imageUrl: item.imageUrl, contentProfile: pageProfile },
+        { history: currentStorage.getHistory(), isAutoPilot: false, contentProfile: pageProfile }
       );
 
       if (!safetyCheck.safe && safetyCheck.reasons.length > 0) {
@@ -261,6 +284,7 @@ class SchedulerService extends EventEmitter {
         message: item.message,
         imagePath: imagePath,
         imageUrl: imageUrl,
+        pageId: item.pageId || null,
         source: 'scheduler'
       });
 
@@ -268,6 +292,22 @@ class SchedulerService extends EventEmitter {
       item.completedAt = currentClock.newDate().toISOString();
       item.postId = result.postId;
       currentStorage.updateQueue(queue);
+
+      currentStorage.addHistory({
+        status: 'published',
+        postId: result.postId,
+        message: item.message,
+        imageUrl: item.imageUrl || null,
+        source: 'scheduler',
+        publishedAt: item.completedAt,
+        pageId: item.pageId || null,
+        contentPillar: item.contentPillar || null,
+        contentPillarId: item.contentPillarId || null,
+        contentType: item.contentType || null,
+        riskLevel: item.riskLevel || 'low',
+        approvalMode: item.approvalMode || 'manual',
+        profileVersion: item.profileVersion || 1
+      });
 
       this.emit('post_success', { item, result, source: 'scheduler' });
       this.emit('queue_updated', queue);
@@ -297,25 +337,83 @@ class SchedulerService extends EventEmitter {
     this.emit('status', this.getStatus());
     this.emit('autopilot_generating', { timestamp: currentClock.newDate().toISOString() });
 
-    const settings = currentStorage.getSettings();
-    const activePage = currentStorage.getActivePage();
-    const pageCategory = activePage?.category || '';
-
-    // Select category: Rotate or randomly pick from user's active categories
-    const allCategories = settings.selectedCategories && settings.selectedCategories.length > 0
-      ? settings.selectedCategories
-      : ['trending_news', 'science_nature', 'history_civilization', 'psychology_mind', 'world_geography', 'tech_inventions', 'philosophy_wisdom', 'sports_records'];
-    
-    // In unattended AutoPilot, prioritize evergreen educational categories over unverified trending news
-    let eligibleCategories = allCategories;
-    if (!customTopic && eligibleCategories.length > 1) {
-      eligibleCategories = eligibleCategories.filter(c => c !== 'trending_news');
-      if (eligibleCategories.length === 0) eligibleCategories = allCategories;
-    }
-
-    const selectedCategoryId = eligibleCategories[Math.floor(Math.random() * eligibleCategories.length)];
-
     try {
+      const settings = currentStorage.getSettings();
+      const activePage = currentStorage.getActivePage();
+      const pageCategory = activePage?.category || '';
+      const contentProfile = activePage?.id ? currentStorage.getPageProfile(activePage.id) : null;
+      const isOnboarded = activePage && activePage.onboardingStatus && activePage.onboardingStatus !== 'not_started';
+
+      // 1. Enforce maxPostsPerDay if profile is onboarded
+      if (isOnboarded && contentProfile && typeof contentProfile.maxPostsPerDay === 'number' && contentProfile.maxPostsPerDay > 0) {
+        const now = currentClock.newDate();
+        const todayStr = getDayString(now, contentProfile.timezone);
+        const history = currentStorage.getHistory() || [];
+        const postsToday = history.filter(item => {
+          if (item.status !== 'published' || !item.publishedAt) return false;
+          const matchesPage = activePage?.id ? item.pageId === activePage.id : !item.pageId;
+          if (!matchesPage) return false;
+          const itemDate = new Date(item.publishedAt);
+          return getDayString(itemDate, contentProfile.timezone) === todayStr;
+        });
+
+        if (postsToday.length >= contentProfile.maxPostsPerDay) {
+          console.log(`[AI Auto-Pilot] Daily post limit (${postsToday.length}/${contentProfile.maxPostsPerDay}) reached for today. Skipping auto-pilot.`);
+          return {
+            success: false,
+            skipped: true,
+            reason: `DAILY_POST_LIMIT_REACHED: Daily limit of ${contentProfile.maxPostsPerDay} posts reached for today.`
+          };
+        }
+      }
+
+      // 2. Enforce minimumPostGapMinutes if profile is onboarded
+      if (isOnboarded && contentProfile && typeof contentProfile.minimumPostGapMinutes === 'number' && contentProfile.minimumPostGapMinutes > 0) {
+        const minGapMs = contentProfile.minimumPostGapMinutes * 60 * 1000;
+        const nowMs = currentClock.now();
+        if (this.lastAutoPostTime && (nowMs - this.lastAutoPostTime < minGapMs)) {
+          const remainingMins = Math.ceil((minGapMs - (nowMs - this.lastAutoPostTime)) / 60000);
+          console.log(`[AI Auto-Pilot] Minimum post gap active (${remainingMins}m remaining). Skipping.`);
+          return {
+            success: false,
+            skipped: true,
+            reason: `MINIMUM_POST_GAP_ACTIVE: Minimum gap is ${contentProfile.minimumPostGapMinutes} minutes (${remainingMins}m remaining).`
+          };
+        }
+
+        const history = currentStorage.getHistory() || [];
+        const recentPublished = history
+          .filter(h => h.status === 'published' && h.publishedAt && (activePage?.id ? h.pageId === activePage.id : !h.pageId))
+          .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())[0];
+
+        if (recentPublished) {
+          const lastPublishedMs = new Date(recentPublished.publishedAt).getTime();
+          if (!isNaN(lastPublishedMs) && (nowMs - lastPublishedMs) < minGapMs) {
+            const remainingMins = Math.ceil((minGapMs - (nowMs - lastPublishedMs)) / 60000);
+            console.log(`[AI Auto-Pilot] Minimum post gap active from last published post (${remainingMins}m remaining). Skipping.`);
+            return {
+              success: false,
+              skipped: true,
+              reason: `MINIMUM_POST_GAP_ACTIVE: Minimum gap is ${contentProfile.minimumPostGapMinutes} minutes (${remainingMins}m remaining).`
+            };
+          }
+        }
+      }
+
+      // Select category: Rotate or randomly pick from user's active categories
+      const allCategories = settings.selectedCategories && settings.selectedCategories.length > 0
+        ? settings.selectedCategories
+        : ['trending_news', 'science_nature', 'history_civilization', 'psychology_mind', 'world_geography', 'tech_inventions', 'philosophy_wisdom', 'sports_records'];
+
+      // In unattended AutoPilot, prioritize evergreen educational categories over unverified trending news
+      let eligibleCategories = allCategories;
+      if (!customTopic && eligibleCategories.length > 1) {
+        eligibleCategories = eligibleCategories.filter(c => c !== 'trending_news');
+        if (eligibleCategories.length === 0) eligibleCategories = allCategories;
+      }
+
+      const selectedCategoryId = eligibleCategories[Math.floor(Math.random() * eligibleCategories.length)];
+
       console.log(`[AI Auto-Pilot] Auto-generating post for category: ${selectedCategoryId} (Page: "${activePage?.name || 'Default'}", Niche: "${pageCategory}")...`);
       
       const bundle = await currentAi.generateFullPostBundle({
@@ -333,12 +431,15 @@ class SchedulerService extends EventEmitter {
           imageUrl: bundle.image?.url,
           imagePath: bundle.image?.localPath,
           sources: bundle.sources || [],
-          isAiImage: !!bundle.image
+          isAiImage: !!bundle.image,
+          topic: customTopic,
+          contentProfile: contentProfile
         },
         {
           history: currentStorage.getHistory(),
           isAutoPilot: true,
-          pageCategory: pageCategory
+          pageCategory: pageCategory,
+          contentProfile: contentProfile
         }
       );
 
@@ -350,8 +451,38 @@ class SchedulerService extends EventEmitter {
       const isUnverifiedNews = isCurrentAffairs && !bundle.verified;
       const hasSafetyIssues = !safetyCheck.safe || (safetyCheck.reasons && safetyCheck.reasons.length > 0);
 
-      // BLOCK automatic publication if safety failed OR fallback was generated OR unverified news
-      if (hasSafetyIssues || isFallback || isUnverifiedNews) {
+      // Check approvalMode policy
+      let approvalBlockReason = '';
+      const approvalMode = contentProfile?.approvalMode || (isOnboarded ? 'manual' : 'low_risk_auto');
+
+      if (isOnboarded) {
+        if (approvalMode === 'manual') {
+          approvalBlockReason = 'Page DNA policy requires manual operator review before publishing (approvalMode: manual).';
+        } else if (approvalMode === 'low_risk_auto') {
+          const riskLevel = bundle.riskLevel || 'low';
+          if (riskLevel !== 'low') {
+            approvalBlockReason = `Page DNA policy requires manual review for ${riskLevel}-risk content (approvalMode: low_risk_auto).`;
+          }
+        } else if (approvalMode === 'trusted_categories_auto') {
+          const allowedTopics = Array.isArray(contentProfile?.allowedTopics)
+            ? contentProfile.allowedTopics.map(t => t.toLowerCase())
+            : [];
+          const pillarTitle = (bundle.strategy?.pillar || '').toLowerCase();
+          const categoryTitle = selectedCategoryId.toLowerCase();
+          const isAllowed = allowedTopics.length > 0 && (
+            allowedTopics.some(t => categoryTitle.includes(t) || t.includes(categoryTitle)) ||
+            (pillarTitle && allowedTopics.some(t => pillarTitle.includes(t) || t.includes(pillarTitle)))
+          );
+          if (!isAllowed) {
+            approvalBlockReason = `Category "${selectedCategoryId}" is not in trusted categories list; held for review (approvalMode: trusted_categories_auto).`;
+          }
+        }
+      }
+
+      const shouldHoldForReview = hasSafetyIssues || isFallback || isUnverifiedNews || Boolean(approvalBlockReason);
+
+      // BLOCK automatic publication if safety failed OR fallback was generated OR unverified news OR approval required
+      if (shouldHoldForReview) {
         let blockReason = '';
         const issues = [];
         if (hasSafetyIssues) {
@@ -370,8 +501,12 @@ class SchedulerService extends EventEmitter {
             issues.push('CURATED_FALLBACK');
           }
         }
+        if (approvalBlockReason) {
+          blockReason = approvalBlockReason;
+          issues.push(approvalBlockReason);
+        }
 
-        console.warn(`[AI Auto-Pilot] 🛑 Autopublish BLOCKED: ${blockReason}`);
+        console.warn(`[AI Auto-Pilot] 🛑 Autopublish HELD FOR REVIEW: ${blockReason}`);
 
         const queued = currentStorage.addToQueue({
           message: bundle.message,
@@ -380,7 +515,14 @@ class SchedulerService extends EventEmitter {
           status: 'review_required',
           generationSource: isFallback ? 'curated_fallback' : (bundle.generationSource || 'ai_generated'),
           verified: isFallback ? false : Boolean(bundle.verified),
-          issues: issues.length > 0 ? issues : [blockReason]
+          issues: issues.length > 0 ? issues : [blockReason],
+          pageId: activePage?.id || null,
+          contentPillar: bundle.strategy?.pillar || null,
+          contentPillarId: bundle.strategy?.pillarId || null,
+          contentType: bundle.strategy?.contentType || null,
+          riskLevel: bundle.riskLevel || 'low',
+          approvalMode: approvalMode,
+          profileVersion: contentProfile?.schemaVersion || 1
         });
 
         currentStorage.addHistory({
@@ -388,7 +530,14 @@ class SchedulerService extends EventEmitter {
           message: bundle.message,
           imageUrl: bundle.image?.url || null,
           error: blockReason,
-          source: 'ai_autopilot'
+          source: 'ai_autopilot',
+          pageId: activePage?.id || null,
+          contentPillar: bundle.strategy?.pillar || null,
+          contentPillarId: bundle.strategy?.pillarId || null,
+          contentType: bundle.strategy?.contentType || null,
+          riskLevel: bundle.riskLevel || 'low',
+          approvalMode: approvalMode,
+          profileVersion: contentProfile?.schemaVersion || 1
         });
 
         this.emit('autopilot_held_for_review', {
@@ -414,6 +563,7 @@ class SchedulerService extends EventEmitter {
         message: bundle.message,
         imagePath: bundle.image?.localPath || null,
         imageUrl: bundle.image?.url || null,
+        pageId: activePage?.id || null,
         source: 'ai_autopilot'
       });
 
@@ -425,7 +575,14 @@ class SchedulerService extends EventEmitter {
         message: bundle.message,
         imageUrl: bundle.image?.url || null,
         source: 'ai_autopilot',
-        publishedAt: currentClock.newDate().toISOString()
+        publishedAt: currentClock.newDate().toISOString(),
+        pageId: activePage?.id || null,
+        contentPillar: bundle.strategy?.pillar || null,
+        contentPillarId: bundle.strategy?.pillarId || null,
+        contentType: bundle.strategy?.contentType || null,
+        riskLevel: bundle.riskLevel || 'low',
+        approvalMode: approvalMode,
+        profileVersion: contentProfile?.schemaVersion || 1
       });
 
       this.emit('post_success', {

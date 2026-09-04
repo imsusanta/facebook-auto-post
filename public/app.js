@@ -21,6 +21,21 @@ window.fetch = async function(resource, init = {}) {
   return _nativeFetch.call(this, resource, init);
 };
 
+/**
+ * HTML Entity Encoder preventing DOM-based Cross-Site Scripting (XSS)
+ * Escapes &, <, >, ", ', and `
+ */
+function escapeHtml(str) {
+  if (typeof str !== 'string') return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+    .replace(/`/g, '&#096;');
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   // Global State
   let state = {
@@ -2389,11 +2404,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const studioName = document.getElementById('studioPageName');
     const studioCategory = document.getElementById('studioPageCategory');
     const studioPromptSnippet = document.getElementById('studioPagePromptSnippet');
+    const studioPageDnaBadgeText = document.getElementById('studioPageDnaBadgeText');
+    const studioOpenPageDnaBtn = document.getElementById('studioOpenPageDnaBtn');
 
     if (active) {
       if (studioLogo) studioLogo.src = active.pictureUrl || '/pariksha_notes_logo.jpg';
       if (studioName) studioName.textContent = active.name;
       if (studioCategory) studioCategory.textContent = active.category || 'General';
+      const isDnaComplete = active.onboardingStatus === 'completed' || active.onboardingStatus === 'complete';
+      if (studioPageDnaBadgeText) {
+        studioPageDnaBadgeText.textContent = isDnaComplete ? 'Page DNA ✓ (ডিএনএ সম্পন্ন)' : 'Page DNA (ডিএনএ সেটআপ)';
+      }
+      if (studioOpenPageDnaBtn) {
+        if (isDnaComplete) {
+          studioOpenPageDnaBtn.className = 'text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-lg border border-emerald-200 transition flex items-center gap-1 shadow-xs';
+        } else {
+          studioOpenPageDnaBtn.className = 'text-[11px] font-semibold text-purple-700 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 px-2.5 py-1 rounded-lg border border-purple-200 transition flex items-center gap-1 shadow-xs';
+        }
+      }
       if (studioPromptSnippet) {
         if (active.systemPrompt && active.systemPrompt.trim()) {
           const firstLine = active.systemPrompt.trim().split('\n')[0];
@@ -2494,19 +2522,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
     pages.forEach(p => {
       const isActive = p.id === state.activePageId;
+      const isDnaComplete = p.onboardingStatus === 'completed' || p.onboardingStatus === 'complete';
+      const dnaBadge = isDnaComplete
+        ? '<span class="bg-purple-50 text-purple-700 border border-purple-200 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-purple-500"></span>DNA Complete</span>'
+        : '<span class="bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>DNA Incomplete</span>';
+
+      const safeName = escapeHtml(p.name || 'Unnamed Page');
+      const safeCategory = escapeHtml(p.category || 'General');
+      const safePrompt = p.systemPrompt ? escapeHtml(p.systemPrompt) : 'No custom guidelines configured yet. AI uses default Bengali post rules.';
+      const safePic = escapeHtml(p.pictureUrl || '/pariksha_notes_logo.jpg');
+      const safeId = escapeHtml(p.id || '');
+
       const card = document.createElement('div');
       card.className = `p-5 rounded-2xl border transition-all ${isActive ? 'bg-gradient-to-br from-white via-indigo-50/20 to-purple-50/20 border-indigo-200 shadow-md ring-2 ring-indigo-500/20' : 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'}`;
       card.innerHTML = `
         <div class="flex items-start justify-between gap-3 mb-4">
           <div class="flex items-center gap-3.5 min-w-0">
-            <img src="${p.pictureUrl || '/pariksha_notes_logo.jpg'}" class="w-12 h-12 rounded-full object-cover ring-2 ${isActive ? 'ring-indigo-500' : 'ring-slate-200'} shrink-0">
+            <img src="${safePic}" class="w-12 h-12 rounded-full object-cover ring-2 ${isActive ? 'ring-indigo-500' : 'ring-slate-200'} shrink-0">
             <div class="min-w-0">
               <div class="flex items-center gap-1.5 flex-wrap">
-                <h4 class="text-sm font-bold text-slate-900 truncate">${p.name}</h4>
+                <h4 class="text-sm font-bold text-slate-900 truncate">${safeName}</h4>
                 ${isActive ? '<span class="bg-emerald-50 text-emerald-600 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Active</span>' : '<span class="bg-slate-100 text-slate-500 text-[10px] font-medium px-2 py-0.5 rounded-full">Connected</span>'}
+                ${dnaBadge}
               </div>
-              <p class="text-xs text-slate-500 font-medium mt-0.5">${p.category || 'General'}</p>
-              <p class="text-[11px] text-slate-400 font-mono mt-0.5 truncate">Page ID: ${p.id}</p>
+              <p class="text-xs text-slate-500 font-medium mt-0.5">${safeCategory}</p>
+              <p class="text-[11px] text-slate-400 font-mono mt-0.5 truncate">Page ID: ${safeId}</p>
             </div>
           </div>
         </div>
@@ -2515,6 +2555,10 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="flex justify-between">
             <span>Status:</span>
             <span class="font-semibold ${isActive ? 'text-indigo-600' : 'text-slate-600'}">${isActive ? 'Active for Auto-Post & Chat' : 'Standby / Connected'}</span>
+          </div>
+          <div class="flex justify-between">
+            <span>Page DNA Strategy:</span>
+            <span class="${isDnaComplete ? 'text-purple-700 font-bold' : 'text-amber-600 font-semibold'}">${isDnaComplete ? '✓ Configured & Ready' : '⚠ Incomplete / Setup Required'}</span>
           </div>
           <div class="flex justify-between">
             <span>Permissions:</span>
@@ -2529,27 +2573,31 @@ document.addEventListener('DOMContentLoaded', () => {
               ${p.systemPrompt ? '<span class="text-[9px] text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">Custom Rules</span>' : '<span class="text-[9px] text-slate-400">Default Rules</span>'}
             </div>
             <p class="text-[10.5px] text-slate-600 line-clamp-2 italic leading-relaxed">
-              ${p.systemPrompt ? p.systemPrompt : 'No custom guidelines configured yet. AI uses default Bengali post rules.'}
+              ${safePrompt}
             </p>
           </div>
         </div>
 
-        <div class="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
+        <div class="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 flex-wrap">
+          <button class="page-dna-btn px-3 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-semibold rounded-xl border border-purple-200 transition flex items-center justify-center gap-1.5" data-id="${safeId}" title="Page DNA Strategy Wizard">
+            <i data-lucide="dna" class="w-3.5 h-3.5 text-purple-600"></i>
+            <span>Page DNA</span>
+          </button>
           ${isActive ? `
-            <button class="edit-page-btn flex-1 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-xl border border-indigo-200 transition flex items-center justify-center gap-1.5" data-id="${p.id}">
+            <button class="edit-page-btn flex-1 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-xl border border-indigo-200 transition flex items-center justify-center gap-1.5" data-id="${safeId}">
               <i data-lucide="settings" class="w-3.5 h-3.5"></i>
-              <span>Edit Page & Guidelines</span>
+              <span>Edit Instructions</span>
             </button>
           ` : `
-            <button class="switch-page-btn flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl shadow-sm transition flex items-center justify-center gap-1.5" data-id="${p.id}">
+            <button class="switch-page-btn flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl shadow-sm transition flex items-center justify-center gap-1.5" data-id="${safeId}">
               <i data-lucide="arrow-right-left" class="w-3.5 h-3.5"></i>
               <span>Switch</span>
             </button>
-            <button class="edit-page-btn px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition flex items-center justify-center gap-1" data-id="${p.id}" title="Edit Guidelines">
+            <button class="edit-page-btn px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition flex items-center justify-center gap-1" data-id="${safeId}" title="Edit Guidelines">
               <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
               <span>Edit</span>
             </button>
-            <button class="delete-page-btn p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition" data-id="${p.id}" data-name="${p.name}" title="Disconnect Page">
+            <button class="delete-page-btn p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition" data-id="${safeId}" data-name="${safeName}" title="Disconnect Page">
               <i data-lucide="trash-2" class="w-4 h-4"></i>
             </button>
           `}
@@ -2558,6 +2606,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
       card.querySelectorAll('.switch-page-btn').forEach(btn => {
         btn.addEventListener('click', () => switchActivePage(btn.getAttribute('data-id')));
+      });
+
+      card.querySelectorAll('.page-dna-btn').forEach(btn => {
+        btn.addEventListener('click', () => openPageDnaModal(btn.getAttribute('data-id')));
       });
 
       card.querySelectorAll('.edit-page-btn').forEach(btn => {
@@ -2691,6 +2743,904 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
+  // ================= PAGE DNA ONBOARDING WIZARD =================
+  let currentDnaStep = 1;
+  let currentDnaPageId = null;
+
+  const pageDnaModal = document.getElementById('pageDnaModal');
+  const closePageDnaModalBtn = document.getElementById('closePageDnaModalBtn');
+  const openPageDnaFromEditBtn = document.getElementById('openPageDnaFromEditBtn');
+  const studioOpenPageDnaBtn = document.getElementById('studioOpenPageDnaBtn');
+  const dnaModalPageName = document.getElementById('dnaModalPageName');
+  const dnaModalPageId = document.getElementById('dnaModalPageId');
+  const dnaModalStatusBadge = document.getElementById('dnaModalStatusBadge');
+  const dnaCurrentPageId = document.getElementById('dnaCurrentPageId');
+  const dnaPrevStepBtn = document.getElementById('dnaPrevStepBtn');
+  const dnaNextStepBtn = document.getElementById('dnaNextStepBtn');
+  const dnaSaveProfileBtn = document.getElementById('dnaSaveProfileBtn');
+  const dnaResetProfileBtn = document.getElementById('dnaResetProfileBtn');
+  const dnaDryRunBtn = document.getElementById('dnaDryRunBtn');
+  const dnaPillarsList = document.getElementById('dnaPillarsList');
+  const dnaAddPillarBtn = document.getElementById('dnaAddPillarBtn');
+  const dnaMixTotalBadge = document.getElementById('dnaMixTotalBadge');
+  const dnaDraftIndicator = document.getElementById('dnaDraftIndicator');
+  const dnaReviewSummaryGrid = document.getElementById('dnaReviewSummaryGrid');
+
+  // Helper to update status badge in modal header
+  function updateDnaStatusBadge(status) {
+    if (!dnaModalStatusBadge) return;
+    if (status === 'completed' || status === 'complete') {
+      dnaModalStatusBadge.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200';
+      dnaModalStatusBadge.textContent = 'Complete (সম্পন্ন)';
+    } else {
+      dnaModalStatusBadge.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200';
+      dnaModalStatusBadge.textContent = 'Incomplete (অসম্পূর্ণ)';
+    }
+  }
+
+  // Helper to render pillars rows safely without innerHTML attribute interpolation
+  function renderPillarsList(pillars) {
+    if (!dnaPillarsList) return;
+    dnaPillarsList.innerHTML = '';
+
+    const list = Array.isArray(pillars) && pillars.length > 0 ? pillars : [
+      { title: '', description: '', targetAudienceSegment: '', weight: 100 }
+    ];
+
+    list.forEach((p, idx) => {
+      const row = document.createElement('div');
+      row.className = 'pillar-row p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2 relative';
+      row.innerHTML = `
+        <div class="flex items-center justify-between">
+          <span class="font-bold text-slate-700 text-xs flex items-center gap-1">
+            <span class="w-4 h-4 rounded-full bg-purple-100 text-purple-700 inline-flex items-center justify-center text-[10px]">${idx + 1}</span>
+            <span>Pillar Title / পিলারের নাম <span class="text-rose-500">*</span></span>
+          </span>
+          <div class="flex items-center gap-2">
+            <label class="text-[11px] text-slate-500 font-semibold">Weight %:</label>
+            <input type="number" min="1" max="100" class="pillar-weight w-14 p-1 border border-slate-200 rounded text-center font-bold text-purple-700 bg-white">
+            <button type="button" class="pillar-remove-btn text-slate-400 hover:text-rose-600 p-1 rounded" title="Remove Pillar">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        </div>
+        <input type="text" placeholder="e.g. বিগত বছরের প্রশ্ন ও সমাধান (Previous Year Q&A)" class="pillar-title w-full p-2 border border-slate-200 rounded-lg outline-none focus:border-purple-500 bg-white font-medium">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+          <input type="text" placeholder="সংক্ষিপ্ত বিবরণ (e.g. বিভিন্ন পরীক্ষার সমাধানসহ প্রশ্নোত্তর)" class="pillar-desc p-1.5 border border-slate-200 rounded-lg outline-none focus:border-purple-500 bg-white">
+          <input type="text" placeholder="টার্গেট পাঠক (e.g. WBCS Aspirants, Job Seekers)" class="pillar-segment p-1.5 border border-slate-200 rounded-lg outline-none focus:border-purple-500 bg-white">
+        </div>
+      `;
+
+      const weightInput = row.querySelector('.pillar-weight');
+      const titleInput = row.querySelector('.pillar-title');
+      const descInput = row.querySelector('.pillar-desc');
+      const segmentInput = row.querySelector('.pillar-segment');
+
+      if (weightInput) weightInput.value = p.weight !== undefined ? p.weight : 25;
+      if (titleInput) titleInput.value = p.title || '';
+      if (descInput) descInput.value = p.description || '';
+      if (segmentInput) segmentInput.value = p.targetAudienceSegment || '';
+
+      row.querySelector('.pillar-remove-btn')?.addEventListener('click', () => {
+        if (dnaPillarsList.children.length <= 1) {
+          alert('At least one pillar row must remain.');
+          return;
+        }
+        row.remove();
+        updatePillarWeightSum();
+        saveLocalDraft();
+      });
+
+      row.querySelectorAll('input').forEach(inp => {
+        inp.addEventListener('input', () => {
+          updatePillarWeightSum();
+          saveLocalDraft();
+        });
+      });
+
+      dnaPillarsList.appendChild(row);
+    });
+
+    updatePillarWeightSum();
+    refreshIcons();
+  }
+
+  // Gather current form data into a structured contentProfile object
+  function gatherProfileFromForm() {
+    const tone = [];
+    document.querySelectorAll('.dna-tone-cb:checked').forEach(cb => {
+      tone.push(cb.value);
+    });
+
+    const preferredFormats = [];
+    document.querySelectorAll('.dna-format-cb:checked').forEach(cb => {
+      preferredFormats.push(cb.value);
+    });
+
+    const pillars = [];
+    if (dnaPillarsList) {
+      dnaPillarsList.querySelectorAll('.pillar-row').forEach((row, idx) => {
+        const title = (row.querySelector('.pillar-title')?.value || '').trim();
+        const description = (row.querySelector('.pillar-desc')?.value || '').trim();
+        const targetAudienceSegment = (row.querySelector('.pillar-segment')?.value || '').trim();
+        const weight = parseInt(row.querySelector('.pillar-weight')?.value, 10) || 25;
+        if (title) {
+          pillars.push({
+            id: `pillar_${idx + 1}`,
+            title,
+            description,
+            targetAudienceSegment,
+            weight
+          });
+        }
+      });
+    }
+
+    const parseCsv = (val) => (val || '').split(',').map(s => s.trim()).filter(Boolean);
+
+    const mixEdu = parseInt(document.getElementById('dnaMixEduInput')?.value, 10) || 0;
+    const mixCom = parseInt(document.getElementById('dnaMixComInput')?.value, 10) || 0;
+    const mixAuth = parseInt(document.getElementById('dnaMixAuthInput')?.value, 10) || 0;
+    const mixPromo = parseInt(document.getElementById('dnaMixPromoInput')?.value, 10) || 0;
+    const mixTime = parseInt(document.getElementById('dnaMixTimeInput')?.value, 10) || 0;
+
+    return {
+      schemaVersion: 1,
+      niche: (document.getElementById('dnaNicheInput')?.value || '').trim(),
+      nicheDescription: (document.getElementById('dnaNicheDescInput')?.value || '').trim(),
+      primaryGoal: document.getElementById('dnaPrimaryGoalSelect')?.value || 'engagement',
+      secondaryGoals: [],
+      language: document.getElementById('dnaLanguageSelect')?.value || 'bn',
+      languageStyle: (document.getElementById('dnaLanguageStyleInput')?.value || '').trim() || 'Natural Bengali',
+      tone: tone.length > 0 ? tone : ['helpful', 'credible'],
+      audience: {
+        locations: parseCsv(document.getElementById('dnaAudienceLocationsInput')?.value),
+        ageRange: 'all',
+        professions: parseCsv(document.getElementById('dnaAudienceProfessionsInput')?.value),
+        interests: parseCsv(document.getElementById('dnaAudienceInterestsInput')?.value),
+        knowledgeLevel: document.getElementById('dnaKnowledgeLevelSelect')?.value || 'general'
+      },
+      contentPillars: pillars,
+      productsOrServices: [],
+      allowedTopics: parseCsv(document.getElementById('dnaAllowedTopicsInput')?.value),
+      blockedTopics: parseCsv(document.getElementById('dnaBlockedTopicsInput')?.value),
+      blockedClaims: parseCsv(document.getElementById('dnaBlockedClaimsInput')?.value),
+      preferredFormats: preferredFormats.length > 0 ? preferredFormats : ['infographic', 'story', 'tips'],
+      ctaStyle: document.getElementById('dnaCtaStyleSelect')?.value || 'soft',
+      hashtagStyle: 'minimal',
+      hashtagLimit: parseInt(document.getElementById('dnaHashtagLimitInput')?.value, 10) || 5,
+      emojiLimit: parseInt(document.getElementById('dnaEmojiLimitInput')?.value, 10) || 3,
+      preferredCaptionLength: {
+        min: parseInt(document.getElementById('dnaCaptionMinInput')?.value, 10) || 250,
+        max: parseInt(document.getElementById('dnaCaptionMaxInput')?.value, 10) || 800
+      },
+      timezone: (document.getElementById('dnaTimezoneInput')?.value || 'Asia/Kolkata').trim(),
+      maxPostsPerDay: parseInt(document.getElementById('dnaMaxPostsInput')?.value, 10) || 3,
+      minimumPostGapMinutes: parseInt(document.getElementById('dnaMinGapInput')?.value, 10) || 180,
+      promotionalPostLimitPercent: (() => {
+        const val = parseInt(document.getElementById('dnaPromoLimitInput')?.value, 10);
+        return isNaN(val) ? 20 : val;
+      })(),
+      contentMix: {
+        educational: mixEdu,
+        community: mixCom,
+        authority: mixAuth,
+        promotional: mixPromo,
+        timely: mixTime
+      },
+      sourcePolicy: {
+        requireSourcesForNews: !!document.getElementById('dnaRequireSourcesNewsCheck')?.checked,
+        requireOfficialSourceForAnnouncements: !!document.getElementById('dnaRequireSourcesAnnounceCheck')?.checked,
+        minimumSourcesForHighRiskClaims: parseInt(document.getElementById('dnaMinSourcesInput')?.value, 10) || 2
+      },
+      approvalMode: document.getElementById('dnaApprovalModeSelect')?.value || 'manual',
+      learnedPreferences: []
+    };
+  }
+
+  // Auto-save draft to sessionStorage
+  function saveLocalDraft() {
+    if (!currentDnaPageId) return;
+    try {
+      const data = gatherProfileFromForm();
+      window.sessionStorage.setItem(`page_dna_draft_${currentDnaPageId}`, JSON.stringify(data));
+      if (dnaDraftIndicator) {
+        dnaDraftIndicator.textContent = 'Draft auto-saved locally (' + new Date().toLocaleTimeString() + ')';
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Populate form fields from profile object
+  function loadProfileIntoForm(profile) {
+    if (!profile || typeof profile !== 'object') return;
+
+    if (document.getElementById('dnaNicheInput')) document.getElementById('dnaNicheInput').value = profile.niche || '';
+    if (document.getElementById('dnaNicheDescInput')) document.getElementById('dnaNicheDescInput').value = profile.nicheDescription || '';
+    if (document.getElementById('dnaPrimaryGoalSelect')) document.getElementById('dnaPrimaryGoalSelect').value = profile.primaryGoal || 'engagement';
+
+    const aud = profile.audience || {};
+    if (document.getElementById('dnaAudienceLocationsInput')) document.getElementById('dnaAudienceLocationsInput').value = Array.isArray(aud.locations) ? aud.locations.join(', ') : '';
+    if (document.getElementById('dnaAudienceProfessionsInput')) document.getElementById('dnaAudienceProfessionsInput').value = Array.isArray(aud.professions) ? aud.professions.join(', ') : '';
+    if (document.getElementById('dnaAudienceInterestsInput')) document.getElementById('dnaAudienceInterestsInput').value = Array.isArray(aud.interests) ? aud.interests.join(', ') : '';
+    if (document.getElementById('dnaKnowledgeLevelSelect')) document.getElementById('dnaKnowledgeLevelSelect').value = aud.knowledgeLevel || 'general';
+
+    if (document.getElementById('dnaLanguageSelect')) document.getElementById('dnaLanguageSelect').value = profile.language || 'bn';
+    if (document.getElementById('dnaLanguageStyleInput')) document.getElementById('dnaLanguageStyleInput').value = profile.languageStyle || 'Natural Bengali';
+
+    const tones = Array.isArray(profile.tone) ? profile.tone : ['helpful', 'credible'];
+    document.querySelectorAll('.dna-tone-cb').forEach(cb => {
+      cb.checked = tones.includes(cb.value);
+    });
+
+    if (document.getElementById('dnaCtaStyleSelect')) document.getElementById('dnaCtaStyleSelect').value = profile.ctaStyle || 'soft';
+
+    const formats = Array.isArray(profile.preferredFormats) ? profile.preferredFormats : ['infographic', 'story', 'tips'];
+    document.querySelectorAll('.dna-format-cb').forEach(cb => {
+      cb.checked = formats.includes(cb.value);
+    });
+
+    renderPillarsList(profile.contentPillars);
+
+    if (document.getElementById('dnaAllowedTopicsInput')) document.getElementById('dnaAllowedTopicsInput').value = Array.isArray(profile.allowedTopics) ? profile.allowedTopics.join(', ') : '';
+    if (document.getElementById('dnaBlockedTopicsInput')) document.getElementById('dnaBlockedTopicsInput').value = Array.isArray(profile.blockedTopics) ? profile.blockedTopics.join(', ') : '';
+    if (document.getElementById('dnaBlockedClaimsInput')) document.getElementById('dnaBlockedClaimsInput').value = Array.isArray(profile.blockedClaims) ? profile.blockedClaims.join(', ') : '';
+
+    const mix = profile.contentMix || { educational: 40, community: 20, authority: 15, promotional: 15, timely: 10 };
+    if (document.getElementById('dnaMixEduInput')) document.getElementById('dnaMixEduInput').value = mix.educational ?? 40;
+    if (document.getElementById('dnaMixComInput')) document.getElementById('dnaMixComInput').value = mix.community ?? 20;
+    if (document.getElementById('dnaMixAuthInput')) document.getElementById('dnaMixAuthInput').value = mix.authority ?? 15;
+    if (document.getElementById('dnaMixPromoInput')) document.getElementById('dnaMixPromoInput').value = mix.promotional ?? 15;
+    if (document.getElementById('dnaMixTimeInput')) document.getElementById('dnaMixTimeInput').value = mix.timely ?? 10;
+    updateMixSum();
+
+    if (document.getElementById('dnaPromoLimitInput')) document.getElementById('dnaPromoLimitInput').value = profile.promotionalPostLimitPercent ?? 20;
+
+    const cap = profile.preferredCaptionLength || { min: 250, max: 800 };
+    if (document.getElementById('dnaCaptionMinInput')) document.getElementById('dnaCaptionMinInput').value = cap.min ?? 250;
+    if (document.getElementById('dnaCaptionMaxInput')) document.getElementById('dnaCaptionMaxInput').value = cap.max ?? 800;
+
+    if (document.getElementById('dnaEmojiLimitInput')) document.getElementById('dnaEmojiLimitInput').value = profile.emojiLimit ?? 3;
+    if (document.getElementById('dnaHashtagLimitInput')) document.getElementById('dnaHashtagLimitInput').value = profile.hashtagLimit ?? 5;
+
+    const src = profile.sourcePolicy || {};
+    if (document.getElementById('dnaRequireSourcesNewsCheck')) document.getElementById('dnaRequireSourcesNewsCheck').checked = src.requireSourcesForNews !== false;
+    if (document.getElementById('dnaRequireSourcesAnnounceCheck')) document.getElementById('dnaRequireSourcesAnnounceCheck').checked = src.requireOfficialSourceForAnnouncements !== false;
+    if (document.getElementById('dnaMinSourcesInput')) document.getElementById('dnaMinSourcesInput').value = src.minimumSourcesForHighRiskClaims ?? 2;
+
+    if (document.getElementById('dnaApprovalModeSelect')) document.getElementById('dnaApprovalModeSelect').value = profile.approvalMode || 'manual';
+    if (document.getElementById('dnaMaxPostsInput')) document.getElementById('dnaMaxPostsInput').value = profile.maxPostsPerDay ?? 3;
+    if (document.getElementById('dnaMinGapInput')) document.getElementById('dnaMinGapInput').value = profile.minimumPostGapMinutes ?? 180;
+    if (document.getElementById('dnaTimezoneInput')) document.getElementById('dnaTimezoneInput').value = profile.timezone || 'Asia/Kolkata';
+  }
+
+  // Update Pillar weight sum badge
+  function updatePillarWeightSum() {
+    let total = 0;
+    if (dnaPillarsList) {
+      dnaPillarsList.querySelectorAll('.pillar-weight').forEach(inp => {
+        total += parseInt(inp.value, 10) || 0;
+      });
+    }
+    const badge = document.getElementById('dnaPillarTotalBadge');
+    if (badge) {
+      if (total === 100) {
+        badge.className = 'text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300';
+        badge.textContent = 'মোট ওয়েট: ১০০% ✓';
+      } else {
+        badge.className = 'text-xs font-bold px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 border border-rose-300';
+        badge.textContent = `মোট ওয়েট: ${total}% (১০০% আবশ্যক)`;
+      }
+    }
+    return total === 100;
+  }
+
+  // Update Mix sum badge
+  function updateMixSum() {
+    const mixEdu = parseInt(document.getElementById('dnaMixEduInput')?.value, 10) || 0;
+    const mixCom = parseInt(document.getElementById('dnaMixComInput')?.value, 10) || 0;
+    const mixAuth = parseInt(document.getElementById('dnaMixAuthInput')?.value, 10) || 0;
+    const mixPromo = parseInt(document.getElementById('dnaMixPromoInput')?.value, 10) || 0;
+    const mixTime = parseInt(document.getElementById('dnaMixTimeInput')?.value, 10) || 0;
+    const total = mixEdu + mixCom + mixAuth + mixPromo + mixTime;
+
+    if (dnaMixTotalBadge) {
+      if (total === 100) {
+        dnaMixTotalBadge.className = 'text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300';
+        dnaMixTotalBadge.textContent = 'মোট: ১০০% ✓';
+      } else {
+        dnaMixTotalBadge.className = 'text-xs font-bold px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 border border-rose-300';
+        dnaMixTotalBadge.textContent = `মোট: ${total}% (১০০% আবশ্যক)`;
+      }
+    }
+    return total === 100;
+  }
+
+  // Step navigation
+  function goToDnaStep(step) {
+    currentDnaStep = Math.max(1, Math.min(7, step));
+
+    for (let i = 1; i <= 7; i++) {
+      const container = document.getElementById(`dnaStepContainer${i}`);
+      if (container) {
+        if (i === currentDnaStep) {
+          container.classList.remove('hidden');
+        } else {
+          container.classList.add('hidden');
+        }
+      }
+    }
+
+    document.querySelectorAll('.dna-step-tab').forEach(tab => {
+      const tabStep = parseInt(tab.getAttribute('data-step'), 10);
+      if (tabStep === currentDnaStep) {
+        tab.className = 'dna-step-tab px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition bg-purple-600 text-white font-bold shadow-xs';
+      } else if (tabStep < currentDnaStep) {
+        tab.className = 'dna-step-tab px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition bg-purple-50 text-purple-700 font-semibold';
+      } else {
+        tab.className = 'dna-step-tab px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition hover:bg-slate-200/60 text-slate-500';
+      }
+    });
+
+    if (dnaPrevStepBtn) {
+      dnaPrevStepBtn.disabled = currentDnaStep === 1;
+    }
+    if (dnaNextStepBtn) {
+      if (currentDnaStep === 7) {
+        dnaNextStepBtn.classList.add('hidden');
+      } else {
+        dnaNextStepBtn.classList.remove('hidden');
+      }
+    }
+    if (dnaSaveProfileBtn) {
+      if (currentDnaStep === 7) {
+        dnaSaveProfileBtn.classList.remove('hidden');
+      } else {
+        dnaSaveProfileBtn.classList.add('hidden');
+      }
+    }
+
+    if (currentDnaStep === 4) {
+      updateMixSum();
+    }
+
+    if (currentDnaStep === 7) {
+      buildReviewSummary();
+      runProfileValidation();
+    }
+
+    refreshIcons();
+  }
+
+  // Build review cards safely using DOM textContent
+  function buildReviewSummary() {
+    if (!dnaReviewSummaryGrid) return;
+    dnaReviewSummaryGrid.innerHTML = '';
+    const profile = gatherProfileFromForm();
+
+    // Card 1: Niche & Purpose
+    const card1 = document.createElement('div');
+    card1.className = 'p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1';
+    card1.innerHTML = `
+      <span class="font-bold text-slate-800 text-xs flex items-center gap-1">
+        <i data-lucide="target" class="w-3.5 h-3.5 text-purple-600"></i>
+        Niche & Purpose
+      </span>
+    `;
+    const pNiche = document.createElement('p');
+    pNiche.className = 'text-slate-700 font-semibold';
+    pNiche.textContent = profile.niche || 'Not Specified';
+    const pGoal = document.createElement('p');
+    pGoal.className = 'text-slate-500 text-[11px]';
+    pGoal.textContent = `Goal: ${profile.primaryGoal} | Level: ${profile.audience.knowledgeLevel}`;
+    card1.appendChild(pNiche);
+    card1.appendChild(pGoal);
+    dnaReviewSummaryGrid.appendChild(card1);
+
+    // Card 2: Voice & Language
+    const card2 = document.createElement('div');
+    card2.className = 'p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1';
+    card2.innerHTML = `
+      <span class="font-bold text-slate-800 text-xs flex items-center gap-1">
+        <i data-lucide="message-square" class="w-3.5 h-3.5 text-indigo-600"></i>
+        Voice & Language
+      </span>
+    `;
+    const pLang = document.createElement('p');
+    pLang.className = 'text-slate-700 font-semibold';
+    const langLabel = profile.language === 'bn' ? 'Bengali (বাংলা)' : profile.language === 'en' ? 'English' : 'Bilingual';
+    pLang.textContent = `Language: ${langLabel}`;
+    const pTone = document.createElement('p');
+    pTone.className = 'text-slate-500 text-[11px]';
+    pTone.textContent = `Tones: ${Array.isArray(profile.tone) ? profile.tone.join(', ') : ''}`;
+    card2.appendChild(pLang);
+    card2.appendChild(pTone);
+    dnaReviewSummaryGrid.appendChild(card2);
+
+    // Card 3: Content Pillars
+    const card3 = document.createElement('div');
+    card3.className = 'p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1';
+    const spanPillars = document.createElement('span');
+    spanPillars.className = 'font-bold text-slate-800 text-xs flex items-center gap-1';
+    spanPillars.innerHTML = '<i data-lucide="columns" class="w-3.5 h-3.5 text-blue-600"></i>';
+    const spanPillarsText = document.createTextNode(` Content Pillars (${profile.contentPillars.length})`);
+    spanPillars.appendChild(spanPillarsText);
+    card3.appendChild(spanPillars);
+
+    const ulPillars = document.createElement('ul');
+    ulPillars.className = 'text-[11px] text-slate-600 list-disc list-inside space-y-0.5';
+    if (profile.contentPillars.length > 0) {
+      profile.contentPillars.forEach(p => {
+        const li = document.createElement('li');
+        li.className = 'truncate';
+        li.textContent = `${p.title} (${p.weight}%)`;
+        ulPillars.appendChild(li);
+      });
+    } else {
+      const li = document.createElement('li');
+      li.className = 'text-amber-600';
+      li.textContent = 'No pillars added';
+      ulPillars.appendChild(li);
+    }
+    card3.appendChild(ulPillars);
+    dnaReviewSummaryGrid.appendChild(card3);
+
+    // Card 4: Mix & Automation
+    const card4 = document.createElement('div');
+    card4.className = 'p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1';
+    card4.innerHTML = `
+      <span class="font-bold text-slate-800 text-xs flex items-center gap-1">
+        <i data-lucide="pie-chart" class="w-3.5 h-3.5 text-emerald-600"></i>
+        Mix & Automation
+      </span>
+    `;
+    const pMix = document.createElement('p');
+    pMix.className = 'text-[11px] text-slate-600';
+    pMix.textContent = `Edu: ${profile.contentMix.educational}% | Com: ${profile.contentMix.community}% | Auth: ${profile.contentMix.authority}% | Promo: ${profile.contentMix.promotional}% | Timely: ${profile.contentMix.timely}%`;
+    const pAppr = document.createElement('p');
+    pAppr.className = 'text-slate-500 text-[11px]';
+    pAppr.textContent = `Approval: ${profile.approvalMode} | Max/Day: ${profile.maxPostsPerDay}`;
+    card4.appendChild(pMix);
+    card4.appendChild(pAppr);
+    dnaReviewSummaryGrid.appendChild(card4);
+
+    refreshIcons();
+  }
+
+  // Dry-run live validation via API
+  async function runProfileValidation() {
+    if (!currentDnaPageId) return;
+    const box = document.getElementById('dnaValidationBox');
+    const title = document.getElementById('dnaValidationTitle');
+    const desc = document.getElementById('dnaValidationDesc');
+    const icon = document.getElementById('dnaValidationIcon');
+
+    const profile = gatherProfileFromForm();
+
+    if (title) title.textContent = 'Validating profile...';
+    if (desc) desc.textContent = 'Checking criteria against Page DNA validation engine...';
+
+    try {
+      const res = await fetch(`/api/facebook/pages/${currentDnaPageId}/content-profile/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profile)
+      });
+      const data = await res.json();
+
+      if (data.success && data.valid) {
+        if (box) box.className = 'p-3.5 rounded-xl border bg-emerald-50 border-emerald-200 flex items-start gap-2.5';
+        if (icon) icon.innerHTML = '<i data-lucide="check-circle" class="w-4 h-4 text-emerald-600"></i>';
+        if (title) title.textContent = 'Validation Passed (ভ্যালিডেশন সফল)';
+        if (desc) desc.textContent = `Status: ${data.onboardingStatus === 'complete' ? 'Completed (সম্পূর্ণ অনবোর্ডিং)' : 'Incomplete (কিছু ফিল্ড বাকি আছে তবে গ্রহণযোগ্য)'}. All constraints met.`;
+        updateDnaStatusBadge(data.onboardingStatus);
+      } else {
+        if (box) box.className = 'p-3.5 rounded-xl border bg-rose-50 border-rose-200 flex items-start gap-2.5';
+        if (icon) icon.innerHTML = '<i data-lucide="alert-triangle" class="w-4 h-4 text-rose-600"></i>';
+        if (title) title.textContent = 'Validation Warnings / Issues';
+        const errList = Array.isArray(data.errors) ? data.errors.map(e => e.message || e).join('; ') : (data.error || 'Invalid configuration');
+        if (desc) desc.textContent = errList;
+      }
+    } catch (err) {
+      if (title) title.textContent = 'Validation Check Unavailable';
+      if (desc) desc.textContent = err.message;
+    }
+
+    refreshIcons();
+  }
+
+  // Open Page DNA modal
+  async function openPageDnaModal(pageId) {
+    const page = (state.pages || []).find(p => p.id === pageId) || (state.pages || []).find(p => p.id === state.activePageId) || (state.pages || [])[0];
+    if (!page) {
+      alert('No page found to configure Page DNA.');
+      return;
+    }
+
+    currentDnaPageId = page.id;
+    if (dnaCurrentPageId) dnaCurrentPageId.value = page.id;
+    if (dnaModalPageName) dnaModalPageName.textContent = page.name || 'Facebook Page';
+    if (dnaModalPageId) dnaModalPageId.textContent = page.id;
+
+    let profile = page.contentProfile || null;
+    let status = page.onboardingStatus || 'not_started';
+
+    try {
+      const res = await fetch(`/api/facebook/pages/${page.id}/content-profile`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.contentProfile) {
+          profile = data.contentProfile;
+          status = data.onboardingStatus || status;
+        }
+      }
+    } catch (e) {
+      console.warn('[Page DNA] Could not fetch remote profile:', e.message);
+    }
+
+    const localDraftRaw = window.sessionStorage.getItem(`page_dna_draft_${page.id}`);
+    if (localDraftRaw) {
+      try {
+        const localDraft = JSON.parse(localDraftRaw);
+        if (localDraft && typeof localDraft === 'object') {
+          profile = { ...profile, ...localDraft };
+          if (dnaDraftIndicator) dnaDraftIndicator.textContent = 'Restored from uncommitted local draft';
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    updateDnaStatusBadge(status);
+    loadProfileIntoForm(profile);
+    goToDnaStep(1);
+
+    if (pageDnaModal) pageDnaModal.classList.remove('hidden');
+    refreshIcons();
+  }
+
+  // Preset Applicator
+  function applyDnaPreset(presetName) {
+    if (presetName === 'exam') {
+      loadProfileIntoForm({
+        niche: 'সরকারি চাকরি প্রস্তুতি ও স্টাডি নোটস (Govt Exam Preparation)',
+        nicheDescription: 'পশ্চিমবঙ্গ ও ভারতের সমস্ত প্রতিযোগিতামূলক পরীক্ষার (WBCS, SSC, Rail, Police) সাধারণ জ্ঞান, বিগত বছরের প্রশ্ন ও অধ্যায়ভিত্তিক আলোচনা।',
+        primaryGoal: 'education',
+        language: 'bn',
+        languageStyle: 'সহজ ও প্রাঞ্জল চলিত বাংলা',
+        tone: ['helpful', 'credible', 'inspiring'],
+        ctaStyle: 'question',
+        audience: {
+          locations: ['West Bengal', 'Kolkata', 'Tripura'],
+          professions: ['Students', 'Job Seekers', 'WBCS Aspirants'],
+          interests: ['WBCS', 'SSC', 'General Knowledge', 'Current Affairs'],
+          knowledgeLevel: 'intermediate'
+        },
+        contentPillars: [
+          { title: 'বিগত বছরের প্রশ্ন ও সমাধান (Previous Year Q&A)', description: 'বিভিন্ন পরীক্ষার গুরুত্বপূর্ণ প্রশ্ন ও সমাধান', targetAudienceSegment: 'Job Seekers', weight: 35 },
+          { title: 'বিষয়ভিত্তিক স্টাডি নোটস (Subject Notes)', description: 'ইতিহাস, ভূগোল, সংবিধান ও বিজ্ঞানের সংক্ষিপ্ত নোটস', targetAudienceSegment: 'Students', weight: 30 },
+          { title: 'দৈনিক কুইজ ও সেলফ টেস্ট (Daily Quiz)', description: 'প্রতিদিনের অনুশীলন কুইজ ও সেলফ অ্যাসেসমেন্ট', targetAudienceSegment: 'Aspirants', weight: 25 },
+          { title: 'পরীক্ষার বিজ্ঞপ্তি ও কৌশল (Exam Updates & Strategy)', description: 'সিলেবাস গাইড ও প্রস্তুতি কৌশল', targetAudienceSegment: 'All', weight: 10 }
+        ],
+        contentMix: { educational: 50, community: 20, authority: 15, promotional: 5, timely: 10 },
+        promotionalPostLimitPercent: 10,
+        sourcePolicy: {
+          requireSourcesForNews: true,
+          requireOfficialSourceForAnnouncements: true,
+          minimumSourcesForHighRiskClaims: 2
+        },
+        approvalMode: 'manual'
+      });
+    } else if (presetName === 'food') {
+      loadProfileIntoForm({
+        niche: 'বাঙালি খাবার ও রেসিপি (Bengali Cuisine & Recipes)',
+        nicheDescription: 'ঐতিহ্যবাহী বাঙালি রান্না, রেস্তোরাঁর জনপ্রিয় পদ এবং সহজ ঘরোয়া রান্নার টিপস।',
+        primaryGoal: 'community',
+        language: 'bn',
+        languageStyle: 'ঘরোয়া ও উষ্ণ বাংলা',
+        tone: ['friendly', 'helpful', 'conversational'],
+        ctaStyle: 'soft',
+        audience: {
+          locations: ['Kolkata', 'West Bengal', 'Dhaka'],
+          professions: ['Home Cooks', 'Foodies'],
+          interests: ['Traditional Recipes', 'Sweets', 'Kitchen Hacks'],
+          knowledgeLevel: 'beginner'
+        },
+        contentPillars: [
+          { title: 'ঐতিহ্যবাহী বাংলা রান্না (Traditional Dishes)', description: 'মাছের পদ, মিষ্টি ও খাঁটি বাঙালি খাবারের রেসিপি', targetAudienceSegment: 'Home Cooks', weight: 35 },
+          { title: 'চটজলদি সহজ রেসিপি (Quick 15-min Recipes)', description: '১০-১৫ মিনিটে তৈরি সহজ খাবার', targetAudienceSegment: 'Working People', weight: 25 },
+          { title: 'রান্নার দরকারি টিপস (Kitchen Tips)', description: 'মসলা সংরক্ষণ ও রান্নার কৌশল', targetAudienceSegment: 'All', weight: 25 },
+          { title: 'স্ট্রিট ফুড ও সুইটস এক্সপ্লোর (Street Food & Sweets)', description: 'কলকাতার স্ট্রিট ফুড ও মিষ্টির গল্প', targetAudienceSegment: 'Foodies', weight: 15 }
+        ],
+        contentMix: { educational: 40, community: 30, authority: 15, promotional: 5, timely: 10 },
+        promotionalPostLimitPercent: 10,
+        sourcePolicy: {
+          requireSourcesForNews: true,
+          requireOfficialSourceForAnnouncements: false,
+          minimumSourcesForHighRiskClaims: 2
+        },
+        approvalMode: 'manual'
+      });
+    } else if (presetName === 'shop') {
+      loadProfileIntoForm({
+        niche: 'পোশাক ও ফ্যাশন ট্রেন্ডস (Clothing & Fashion Trends)',
+        nicheDescription: 'আধুনিক শাড়ি, এথনিক ওয়্যার এবং ট্রেন্ডি ফ্যাশন কালেকশন ও স্টাইলিং গাইড।',
+        primaryGoal: 'sales',
+        language: 'bn_en',
+        languageStyle: 'স্মার্ট ও ট্রেন্ডি বাংলা-ইংরেজি মিশ্রণ',
+        tone: ['friendly', 'inspiring', 'conversational'],
+        ctaStyle: 'strong',
+        audience: {
+          locations: ['Kolkata', 'West Bengal', 'Bangalore'],
+          professions: ['Women', 'Professionals', 'Students'],
+          interests: ['Sarees', 'Ethnic Wear', 'Fashion Styling'],
+          knowledgeLevel: 'general'
+        },
+        contentPillars: [
+          { title: 'নতুন ফ্যাশন কালেকশন (New Arrivals)', description: 'সাপ্তাহিক নতুন শাড়ি ও পোশাক শোকেস', targetAudienceSegment: 'Shoppers', weight: 35 },
+          { title: 'স্টাইলিং টিপস ও ম্যাচিং (Styling Guides)', description: 'কোন পোশাকের সাথে কোন গয়না মানাবে', targetAudienceSegment: 'Fashion Lovers', weight: 25 },
+          { title: 'গ্রাহক সন্তুষ্টি ও রিভিউ (Customer Stories)', description: 'গ্রাহকদের ছবি ও রিভিউ', targetAudienceSegment: 'Potential Buyers', weight: 20 },
+          { title: 'উৎসবের অফার ও সেল (Special Offers)', description: 'ডিসকাউন্ট ও লিমিটেড এডিশন সেল', targetAudienceSegment: 'All', weight: 20 }
+        ],
+        contentMix: { educational: 30, community: 25, authority: 15, promotional: 20, timely: 10 },
+        promotionalPostLimitPercent: 25,
+        sourcePolicy: {
+          requireSourcesForNews: true,
+          requireOfficialSourceForAnnouncements: false,
+          minimumSourcesForHighRiskClaims: 2
+        },
+        approvalMode: 'manual'
+      });
+    } else if (presetName === 'news') {
+      loadProfileIntoForm({
+        niche: 'চলতি ঘটনা ও তথ্য বিশ্লেষণ (Current Affairs & Fact Analysis)',
+        nicheDescription: 'জাতীয় ও আন্তর্জাতিক গুরুত্বপূর্ণ খবরের নির্ভরযোগ্য তথ্য ও সহজ ব্যাখ্যা।',
+        primaryGoal: 'authority',
+        language: 'bn',
+        languageStyle: 'নিরপেক্ষ, প্রাঞ্জল ও বস্তুনিষ্ঠ বাংলা',
+        tone: ['analytical', 'credible', 'authoritative'],
+        ctaStyle: 'question',
+        audience: {
+          locations: ['India', 'West Bengal', 'Global'],
+          professions: ['Informed Citizens', 'Educators', 'Students'],
+          interests: ['Current Affairs', 'Technology', 'Geopolitics'],
+          knowledgeLevel: 'intermediate'
+        },
+        contentPillars: [
+          { title: 'দৈনিক সংবাদ সারসংক্ষেপ (Daily Brief)', description: 'দিনের প্রধান খবরগুলোর সংক্ষিপ্তসার', targetAudienceSegment: 'General Readers', weight: 35 },
+          { title: 'ঘটনার প্রেক্ষাপট ও বিশ্লেষণ (Context & Analysis)', description: 'গুরুত্বপূর্ণ ঘটনার পেছনের কারণ ও প্রভাব', targetAudienceSegment: 'Curious Readers', weight: 30 },
+          { title: 'ফ্যাক্ট-চেক ও তথ্য যাচাই (Fact Check)', description: 'গুজব নিরসন ও সঠিক তথ্যের উৎস', targetAudienceSegment: 'All', weight: 20 },
+          { title: 'আজকের দিনে ইতিহাস (This Day in History)', description: 'ঐতিহাসিক ঘটনার স্মরণ ও গুরুত্ব', targetAudienceSegment: 'History Buffs', weight: 15 }
+        ],
+        contentMix: { educational: 35, community: 15, authority: 30, promotional: 0, timely: 20 },
+        promotionalPostLimitPercent: 5,
+        sourcePolicy: {
+          requireSourcesForNews: true,
+          requireOfficialSourceForAnnouncements: true,
+          minimumSourcesForHighRiskClaims: 2
+        },
+        approvalMode: 'manual'
+      });
+    }
+    updatePillarWeightSum();
+    updateMixSum();
+    saveLocalDraft();
+  }
+
+  // Wire Preset Buttons
+  document.getElementById('dnaPresetExamBtn')?.addEventListener('click', () => applyDnaPreset('exam'));
+  document.getElementById('dnaPresetFoodBtn')?.addEventListener('click', () => applyDnaPreset('food'));
+  document.getElementById('dnaPresetShopBtn')?.addEventListener('click', () => applyDnaPreset('shop'));
+  document.getElementById('dnaPresetNewsBtn')?.addEventListener('click', () => applyDnaPreset('news'));
+
+  // Wire Add Pillar Button
+  dnaAddPillarBtn?.addEventListener('click', () => {
+    if (!dnaPillarsList) return;
+    const currentCount = dnaPillarsList.children.length;
+    if (currentCount >= 8) {
+      alert('Maximum 8 content pillars allowed.');
+      return;
+    }
+    const row = document.createElement('div');
+    row.className = 'pillar-row p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2 relative';
+    row.innerHTML = `
+      <div class="flex items-center justify-between">
+        <span class="font-bold text-slate-700 text-xs flex items-center gap-1">
+          <span class="w-4 h-4 rounded-full bg-purple-100 text-purple-700 inline-flex items-center justify-center text-[10px]">${currentCount + 1}</span>
+          <span>Pillar Title / পিলারের নাম <span class="text-rose-500">*</span></span>
+        </span>
+        <div class="flex items-center gap-2">
+          <label class="text-[11px] text-slate-500 font-semibold">Weight %:</label>
+          <input type="number" min="1" max="100" class="pillar-weight w-14 p-1 border border-slate-200 rounded text-center font-bold text-purple-700 bg-white">
+          <button type="button" class="pillar-remove-btn text-slate-400 hover:text-rose-600 p-1 rounded" title="Remove Pillar">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+      </div>
+      <input type="text" placeholder="e.g. বিষয়ভিত্তিক স্টাডি নোটস" class="pillar-title w-full p-2 border border-slate-200 rounded-lg outline-none focus:border-purple-500 bg-white font-medium">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+        <input type="text" placeholder="সংক্ষিপ্ত বিবরণ" class="pillar-desc p-1.5 border border-slate-200 rounded-lg outline-none focus:border-purple-500 bg-white">
+        <input type="text" placeholder="টার্গেট পাঠক (e.g. Students)" class="pillar-segment p-1.5 border border-slate-200 rounded-lg outline-none focus:border-purple-500 bg-white">
+      </div>
+    `;
+
+    const weightInput = row.querySelector('.pillar-weight');
+    if (weightInput) weightInput.value = 25;
+
+    row.querySelector('.pillar-remove-btn')?.addEventListener('click', () => {
+      if (dnaPillarsList.children.length <= 1) {
+        alert('At least one pillar row must remain.');
+        return;
+      }
+      row.remove();
+      updatePillarWeightSum();
+      saveLocalDraft();
+    });
+    row.querySelectorAll('input').forEach(inp => {
+      inp.addEventListener('input', () => {
+        updatePillarWeightSum();
+        saveLocalDraft();
+      });
+    });
+    dnaPillarsList.appendChild(row);
+    updatePillarWeightSum();
+    refreshIcons();
+    saveLocalDraft();
+  });
+
+  // Wire Mix Input Listeners
+  document.querySelectorAll('.dna-mix-input').forEach(inp => {
+    inp.addEventListener('input', () => {
+      updateMixSum();
+      saveLocalDraft();
+    });
+  });
+
+  // Wire Tab Buttons
+  document.querySelectorAll('.dna-step-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const step = parseInt(tab.getAttribute('data-step'), 10);
+      goToDnaStep(step);
+    });
+  });
+
+  // Wire Prev / Next Buttons
+  dnaPrevStepBtn?.addEventListener('click', () => {
+    goToDnaStep(currentDnaStep - 1);
+  });
+  dnaNextStepBtn?.addEventListener('click', () => {
+    goToDnaStep(currentDnaStep + 1);
+  });
+  dnaDryRunBtn?.addEventListener('click', () => {
+    runProfileValidation();
+  });
+
+  // Save Page DNA Profile Handler
+  dnaSaveProfileBtn?.addEventListener('click', async () => {
+    if (!currentDnaPageId) return;
+
+    const totalPillars = updatePillarWeightSum();
+    if (!totalPillars) {
+      alert('Content pillar weights must sum to exactly 100%. Please adjust before saving.');
+      goToDnaStep(3);
+      return;
+    }
+
+    const totalMix = updateMixSum();
+    if (!totalMix) {
+      alert('Content mix percentages must sum to exactly 100%. Please adjust before saving.');
+      goToDnaStep(4);
+      return;
+    }
+
+    dnaSaveProfileBtn.disabled = true;
+    dnaSaveProfileBtn.innerHTML = `<span class="animate-spin mr-1">⌛</span> Saving Profile...`;
+
+    try {
+      const profile = gatherProfileFromForm();
+      const res = await fetch(`/api/facebook/pages/${currentDnaPageId}/content-profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profile)
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        window.sessionStorage.removeItem(`page_dna_draft_${currentDnaPageId}`);
+
+        // Update local pages state
+        const targetPage = (state.pages || []).find(p => p.id === currentDnaPageId);
+        if (targetPage) {
+          targetPage.contentProfile = data.contentProfile;
+          targetPage.onboardingStatus = data.onboardingStatus;
+        }
+
+        renderAccountsView();
+        updateStudioPageBanner();
+
+        if (pageDnaModal) pageDnaModal.classList.add('hidden');
+
+        state.notifications.unshift({
+          id: `notif_${Date.now()}`,
+          text: `Page DNA saved! Onboarding status: ${data.onboardingStatus}.`,
+          time: 'Just now',
+          type: 'success'
+        });
+        if (bellBadgeDot) bellBadgeDot.classList.remove('hidden');
+
+        alert(`Page DNA saved successfully! Onboarding Status: ${data.onboardingStatus}.`);
+      } else {
+        const errs = Array.isArray(data.errors) ? data.errors.map(e => e.message || e).join('\n') : (data.error || 'Validation error');
+        alert('Could not save Page DNA:\n' + errs);
+      }
+    } catch (err) {
+      alert('Network error saving Page DNA: ' + err.message);
+    } finally {
+      dnaSaveProfileBtn.disabled = false;
+      dnaSaveProfileBtn.innerHTML = `<i data-lucide="save" class="w-3.5 h-3.5"></i><span>Save Page DNA (সংরক্ষণ করুন)</span>`;
+      refreshIcons();
+    }
+  });
+
+  // Reset Page DNA Profile Handler
+  dnaResetProfileBtn?.addEventListener('click', async () => {
+    if (!currentDnaPageId) return;
+    if (!confirm('Are you sure you want to reset this Page DNA to defaults? This will erase all custom pillars and strategies.')) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/facebook/pages/${currentDnaPageId}/content-profile/reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true })
+      });
+      const data = await res.json();
+      if (data.success) {
+        window.sessionStorage.removeItem(`page_dna_draft_${currentDnaPageId}`);
+        loadProfileIntoForm(data.contentProfile);
+        updateDnaStatusBadge('not_started');
+
+        const targetPage = (state.pages || []).find(p => p.id === currentDnaPageId);
+        if (targetPage) {
+          targetPage.contentProfile = data.contentProfile;
+          targetPage.onboardingStatus = 'not_started';
+        }
+
+        renderAccountsView();
+        updateStudioPageBanner();
+        goToDnaStep(1);
+        alert('Page DNA profile has been reset to defaults.');
+      } else {
+        alert('Reset failed: ' + (data.error || 'Server error'));
+      }
+    } catch (err) {
+      alert('Error resetting profile: ' + err.message);
+    }
+  });
+
+  // Auto-save listeners on all inputs in modal
+  if (pageDnaModal) {
+    pageDnaModal.addEventListener('input', () => saveLocalDraft());
+    pageDnaModal.addEventListener('change', () => saveLocalDraft());
+  }
+
+  // Modal open & close buttons
+  closePageDnaModalBtn?.addEventListener('click', () => {
+    if (pageDnaModal) pageDnaModal.classList.add('hidden');
+  });
+
+  openPageDnaFromEditBtn?.addEventListener('click', () => {
+    if (editPageModal) editPageModal.classList.add('hidden');
+    const pageId = editPageIdInput ? editPageIdInput.value : state.activePageId;
+    openPageDnaModal(pageId);
+  });
+
+  studioOpenPageDnaBtn?.addEventListener('click', () => {
+    openPageDnaModal(state.activePageId);
+  });
 
   // Toggle Header Page Dropdown
   if (headerPageSwitcherBtn && headerPageDropdown) {

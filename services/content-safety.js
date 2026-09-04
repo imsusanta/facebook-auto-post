@@ -157,7 +157,8 @@ function validateContent(postData = {}, options = {}) {
   const {
     history = [],
     isAutoPilot = false,
-    pageCategory = ''
+    pageCategory = '',
+    contentProfile = postData.contentProfile || null
   } = options;
 
   const caption = postData.message || postData.post_caption || '';
@@ -183,6 +184,25 @@ function validateContent(postData = {}, options = {}) {
       reasons.push(`Caption too long (${charCount} chars). Maximum 6,000 characters allowed.`);
       issueCodes.push('LONG_CAPTION');
     }
+
+    // Page DNA Preferred Caption Length Bounds
+    if (contentProfile && contentProfile.preferredCaptionLength) {
+      const prefMin = typeof contentProfile.preferredCaptionLength.min === 'number' ? contentProfile.preferredCaptionLength.min : 0;
+      const prefMax = typeof contentProfile.preferredCaptionLength.max === 'number' ? contentProfile.preferredCaptionLength.max : 6000;
+      if (charCount >= 30 && prefMin > 30 && charCount < prefMin) {
+        warnings.push(`Caption length (${charCount} chars) is below profile preferred minimum (${prefMin} chars).`);
+        if (!issueCodes.includes('CAPTION_LENGTH_BELOW_PREFERENCE')) {
+          issueCodes.push('CAPTION_LENGTH_BELOW_PREFERENCE');
+        }
+      }
+      if (charCount <= 6000 && prefMax < 6000 && charCount > prefMax) {
+        warnings.push(`Caption length (${charCount} chars) exceeds profile preferred maximum (${prefMax} chars).`);
+        if (!issueCodes.includes('CAPTION_LENGTH_EXCEEDS_PREFERENCE')) {
+          issueCodes.push('CAPTION_LENGTH_EXCEEDS_PREFERENCE');
+        }
+        reviewRequired = true;
+      }
+    }
   }
 
   // 2. Mojibake / Corrupted Encoding Check
@@ -196,18 +216,24 @@ function validateContent(postData = {}, options = {}) {
     warnings.push('No topic or category specified.');
   }
 
-  // 4. Excessive Emojis Check
+  // 4. Excessive Emojis Check (Profile-aware limit, default 25)
   const emojiMatches = caption.match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu) || [];
-  if (emojiMatches.length > 25) {
-    warnings.push(`Excessive emojis detected (${emojiMatches.length}). Recommended maximum is 15.`);
+  const emojiLimit = (contentProfile && typeof contentProfile.emojiLimit === 'number' && contentProfile.emojiLimit >= 0)
+    ? contentProfile.emojiLimit
+    : 25;
+  if (emojiMatches.length > emojiLimit) {
+    warnings.push(`Excessive emojis detected (${emojiMatches.length}). Limit is ${emojiLimit}.`);
     issueCodes.push('EXCESSIVE_EMOJIS');
     reviewRequired = true;
   }
 
-  // 5. Excessive Hashtags Check
+  // 5. Excessive Hashtags Check (Profile-aware limit, default 15)
   const hashtags = caption.match(/#[\w\u0980-\u09FF]+/g) || [];
-  if (hashtags.length > 15) {
-    warnings.push(`Excessive hashtags detected (${hashtags.length}). Recommended maximum is 10.`);
+  const hashtagLimit = (contentProfile && typeof contentProfile.hashtagLimit === 'number' && contentProfile.hashtagLimit >= 0)
+    ? contentProfile.hashtagLimit
+    : 15;
+  if (hashtags.length > hashtagLimit) {
+    warnings.push(`Excessive hashtags detected (${hashtags.length}). Limit is ${hashtagLimit}.`);
     issueCodes.push('EXCESSIVE_HASHTAGS');
     reviewRequired = true;
   }
@@ -221,6 +247,47 @@ function validateContent(postData = {}, options = {}) {
     if (!sourceCheck.valid) {
       issueCodes.push('MISSING_SOURCE');
       reasons.push(`News or sensitive claims cannot be published without verified sources: ${sourceCheck.errors.join(' ')}`);
+      reviewRequired = true;
+    }
+  }
+
+  // 6b. Page DNA Announcement & Official Source Verification
+  const ANNOUNCEMENT_PATTERNS = [
+    /পরীক্ষার\s*তারিখ/i,
+    /এডমিট\s*কার্ড/i,
+    /রেজাল্ট/i,
+    /ফলাফল/i,
+    /অফিসিয়াল\s*বিজ্ঞপ্তি/i,
+    /চাকরির\s*বিজ্ঞপ্তি/i,
+    /\bexam\s*date\b/i,
+    /\badmit\s*card\b/i,
+    /\bresult\s*declared\b/i,
+    /\bofficial\s*notification\b/i,
+    /\brecruitment\s*notice\b/i
+  ];
+  const requireOfficialAnnouncementSource = contentProfile?.sourcePolicy?.requireOfficialSourceForAnnouncements ?? false;
+  if (requireOfficialAnnouncementSource && ANNOUNCEMENT_PATTERNS.some(p => p.test(caption))) {
+    const hasOfficial = Array.isArray(sources) && sources.some(s =>
+      s && (s.isOfficial === true || (typeof s.url === 'string' && /\.(gov|edu|nic)(\.|\/)/i.test(s.url)))
+    );
+    if (!hasOfficial) {
+      reasons.push('Official source required for announcements, exam dates, admit cards, or recruitment notices under Page DNA source policy.');
+      if (!issueCodes.includes('MISSING_OFFICIAL_SOURCE')) {
+        issueCodes.push('MISSING_OFFICIAL_SOURCE');
+      }
+      reviewRequired = true;
+    }
+  }
+
+  // 6c. Page DNA Minimum Sources for High-Risk Claims
+  const minHighRiskSources = contentProfile?.sourcePolicy?.minimumSourcesForHighRiskClaims;
+  if (hasSensitiveClaim && typeof minHighRiskSources === 'number' && minHighRiskSources > 1) {
+    const validSourcesCount = Array.isArray(sources) ? sources.filter(s => isValidPublicUrl(s.url)).length : 0;
+    if (validSourcesCount < minHighRiskSources) {
+      reasons.push(`High-risk sensitive claims require at least ${minHighRiskSources} verified sources (found: ${validSourcesCount}).`);
+      if (!issueCodes.includes('INSUFFICIENT_SOURCES')) {
+        issueCodes.push('INSUFFICIENT_SOURCES');
+      }
       reviewRequired = true;
     }
   }
@@ -258,12 +325,46 @@ function validateContent(postData = {}, options = {}) {
     }
   }
 
-  // 10. Banned / Prohibited Keywords Check
+  // 10. Banned / Prohibited Keywords Check (Global)
   for (const banned of BANNED_PATTERNS) {
     if (banned.test(caption)) {
       reasons.push('Caption contains prohibited keywords or spam patterns violating community standards.');
       issueCodes.push('BANNED_CONTENT');
       break;
+    }
+  }
+
+  // 10b. Page DNA Blocked Topics Check
+  if (contentProfile && Array.isArray(contentProfile.blockedTopics) && contentProfile.blockedTopics.length > 0) {
+    const checkTargets = [caption, postData.topic, postData.title, postData.imagePrompt].filter(Boolean).join(' ').toLowerCase();
+    for (const blocked of contentProfile.blockedTopics) {
+      if (typeof blocked !== 'string') continue;
+      const cleanBlocked = blocked.trim().toLowerCase();
+      if (!cleanBlocked) continue;
+      if (checkTargets.includes(cleanBlocked)) {
+        reasons.push(`Content touches prohibited topic "${blocked}" blocked by Page DNA policy.`);
+        if (!issueCodes.includes('BLOCKED_TOPIC_VIOLATION')) {
+          issueCodes.push('BLOCKED_TOPIC_VIOLATION');
+        }
+        reviewRequired = true;
+      }
+    }
+  }
+
+  // 10c. Page DNA Blocked Claims Check
+  if (contentProfile && Array.isArray(contentProfile.blockedClaims) && contentProfile.blockedClaims.length > 0) {
+    const lowerCaption = caption.toLowerCase();
+    for (const claim of contentProfile.blockedClaims) {
+      if (typeof claim !== 'string') continue;
+      const cleanClaim = claim.trim().toLowerCase();
+      if (!cleanClaim) continue;
+      if (lowerCaption.includes(cleanClaim)) {
+        reasons.push(`Content asserts prohibited claim "${claim}" blocked by Page DNA policy.`);
+        if (!issueCodes.includes('BLOCKED_CLAIM_VIOLATION')) {
+          issueCodes.push('BLOCKED_CLAIM_VIOLATION');
+        }
+        reviewRequired = true;
+      }
     }
   }
 

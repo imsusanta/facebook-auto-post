@@ -12,6 +12,8 @@
  * - Business booleans are applied ONLY in specialized serializers
  */
 
+const { buildPublicContentProfile } = require('../services/page-profile');
+
 const SENSITIVE_KEY_NAMES = new Set([
   'accesstoken',
   'access_token',
@@ -210,6 +212,12 @@ function serializePage(page) {
   const sanitized = deepSanitize(page);
   sanitized.hasToken = typeof page.accessToken === 'string' && page.accessToken.trim().length > 0;
   sanitized.connected = sanitized.hasToken;
+  if (page.contentProfile) {
+    sanitized.contentProfile = buildPublicContentProfile(page.contentProfile);
+    sanitized.onboardingStatus = page.onboardingStatus || sanitized.contentProfile?.onboardingStatus || 'not_started';
+  } else {
+    sanitized.onboardingStatus = page.onboardingStatus || 'not_started';
+  }
   return sanitized;
 }
 

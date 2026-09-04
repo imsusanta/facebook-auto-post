@@ -4,6 +4,7 @@ const path = require('path');
 const sharp = require('sharp');
 const storage = require('./storage');
 const { FALLBACK_VIRAL_POSTS, getFallbackForCategory, getFallbacks } = require('./ai/fallbacks');
+const { buildPageContext } = require('./ai/page-context');
 
 const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) {
@@ -691,10 +692,16 @@ Respond ONLY with a valid JSON object matching this schema:
       defaultBadge = activeCategory?.badge || dynamicTopicObj.badge;
     }
 
-    // 1. Identify Target Page & its dedicated System Prompt
+    // 1. Identify Target Page & its dedicated System Prompt and Content Profile
     const targetPage = targetPageId ? (storage.getPageById(targetPageId) || storage.getActivePage()) : storage.getActivePage();
     const pageName = targetPage?.name || settings.pageName || 'Facebook Page';
     const pageSystemPrompt = storage.getPageSystemPrompt(targetPage?.id);
+    const contentProfile = (typeof optionsOrTopic === 'object' && optionsOrTopic?.contentProfile)
+      ? optionsOrTopic.contentProfile
+      : (targetPage?.contentProfile || storage.getPageProfile(targetPage?.id));
+
+    const recentHistory = storage.getHistory() || [];
+    const verifiedFactPack = (typeof optionsOrTopic === 'object' && optionsOrTopic?.verifiedFactPack) || null;
 
     // 2. Identify Reference Template & its Learned Profile
     if (!template && targetTemplateId) {
@@ -712,63 +719,32 @@ ${template.sample ? `- Reference Caption Structure Example:\n"""\n${template.sam
 Make sure the post caption and card headline mimic this exact structure and formatting!`;
     }
 
-    console.log(`[AI Service] Generating post for page "${pageName}" (Template: "${template?.title || 'None'}"), Topic: "${effectiveTopic}"`);
+    // 3. Build Page Context adhering to strict prompt hierarchy
+    const pageContext = buildPageContext({
+      page: targetPage,
+      contentProfile,
+      category: activeCategory?.title || defaultBadge,
+      recentHistory,
+      objective: effectiveTopic,
+      verifiedFactPack,
+      customSystemPrompt: pageSystemPrompt
+    });
+
+    console.log(`[AI Service] Generating post for page "${pageName}" (Template: "${template?.title || 'None'}", ContentType: "${pageContext.contentType}", Pillar: "${pageContext.selectedPillar?.title || 'None'}"), Topic: "${effectiveTopic}"`);
+
+    let systemPrompt = pageContext.systemInstruction;
+    if (templateGuidelines) {
+      systemPrompt += templateGuidelines;
+    }
 
     const isCustomRequest = !isAutoTopic;
-    const customIntentRule = isCustomRequest
-      ? `\nUSER TOPIC / INSTRUCTION:
+    if (isCustomRequest) {
+      systemPrompt += `\n\n[USER TOPIC / INSTRUCTION]
 The user provided a specific topic / instruction: "${effectiveTopic}".
-HONOR THE USER'S EXACT INTENT, TOPIC, AND DESIRED TONE (whether it is an educational post, story, breaking news, product promotion, sale/discount, holiday greeting, or opinion). Do NOT distort the user's intent into an unrelated subject!`
-      : '';
+HONOR THE USER'S EXACT INTENT, TOPIC, AND DESIRED TONE. Do NOT distort the user's intent into an unrelated subject!`;
+    }
 
-    const systemPrompt = `You are the lead content creator and social media manager for the Facebook page "${pageName}".
-Your task is to write an engaging, high-converting, viral Facebook post in natural Bengali based on the user's topic and instruction, AND formulate the matching 2-line headline card for the image thumbnail.
-
-PAGE-SPECIFIC INSTRUCTIONS & CONTENT GUIDELINES (MANDATORY):
-"${pageSystemPrompt}"
-Strictly adhere to this page's niche, brand tone, audience profile, and content requirements!
-${templateGuidelines}
-${customIntentRule}
-
-CRITICAL RULES:
-1. Follow the page's guidelines and the user's topic faithfully, accurately, and engagingly.
-2. Tone: Natural, engaging, authentic, and suitable for Facebook audiences.
-3. The thumbnail headline card MUST have EXACTLY 2 short, punchy lines with key subject words highlighted:
-   - "line1_red": The main subject or keyword in Bengali (rendered in Bold Accent Color #EF4444).
-   - "line1_white": The remaining words of Line 1 in Bengali (White text).
-   - "line2_white": The opening words of Line 2 in Bengali (White text).
-   - "line2_yellow": The punchline, climax, or main takeaway in Bengali (rendered in Bright Yellow #FBBF24).
-4. "search_term": Precise English search query to find or generate the matching high-res photo.
-5. "badge": 2-3 words category badge in Bengali (e.g. "${defaultBadge}").
-6. "post_caption": The complete Facebook post text in natural Bengali matching the page guidelines and reference template, with emojis and suitable hashtags for "${pageName}" (do NOT use #ParikshaNotes).
-7. ANTI-AI SLOP & NATURAL HUMAN VOICE RULES:
-   - NO THROAT-CLEARING: NEVER use introductory filler like "চলুন জেনে নিই...", "আজকে আমরা কথা বলব...", "জানুন কিছু অজানা তথ্য:", "এখানে জরুরি কিছু তথ্য দেওয়া হলো: 👇". Start immediately with the core event, fact, or story.
-   - NO FORMATTING SLOP: Do NOT spam emojis on every single line or bullet. Use only 2-3 tasteful emojis across the entire post. Never use bold bullet headers like "**ভারতের প্রথম সৌর মিশন:**" on every point.
-   - NO IMPORTANCE PUFFERY: Avoid dramatic clichés like "মুকুটে জুড়ল আরও একটি পালক", "এক যুগান্তকারী মোড়", "ইতিহাসের এক অবিস্মরণীয় অধ্যায়", "অনন্য কৃতিত্ব", "প্রকৃতির এক রহস্যময় ইঞ্জিন". Let concrete facts carry the weight.
-   - NO RHETORICAL SETUPS: Do NOT use fake drama like "🤔 হ্যাঁ, আমরা কথা বলছি ... নিয়ে!".
-   - NO CANNED ENGAGEMENT BAIT: Do NOT end with generic bot questions like "আপনার কী মনে হয়? নিচে কমেন্টে জানান! 👇" or "কমেন্টে আপনার শুভকামনা জানান! 💬👇". End with an authentic personal thought, concrete takeaway, or stop cleanly.
-
-Output MUST be a single valid JSON object with keys:
-{
-  "badge": "...",
-  "line1_red": "...",
-  "line1_white": "...",
-  "line2_white": "...",
-  "line2_yellow": "...",
-  "search_term": "...",
-  "post_caption": "..."
-}`;
-
-    const uniqueSeed = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
-    const userPrompt = isCustomRequest
-      ? `Generate an authentic, engaging Facebook post for: "${effectiveTopic}".
-Category: ${activeCategory?.title || defaultBadge}.
-Seed: ${uniqueSeed}.
-Respond ONLY with the JSON object.`
-      : `Generate a completely UNIQUE, FASCINATING, and BRAND NEW viral post for: "${effectiveTopic}".
-Category: ${activeCategory?.title || defaultBadge}.
-Random Seed: ${uniqueSeed}. Make sure this is completely different and fresh.
-Respond ONLY with the JSON object.`;
+    const userPrompt = `${pageContext.userPromptContext}\n\nRespond ONLY with the single valid JSON object.`;
 
     let result = null;
 
@@ -837,6 +813,24 @@ Respond ONLY with the JSON object.`;
       result.generationSource = 'curated_fallback';
       result.verified = false;
       console.log(`[AI Service] Using diverse dynamic curated fallback post: "${result.line1_red}" (Category: ${result.category || 'General'})`);
+    }
+
+    if (result) {
+      result.strategy = {
+        pillar: pageContext.selectedPillar ? pageContext.selectedPillar.title : null,
+        pillarId: pageContext.selectedPillar ? pageContext.selectedPillar.id : null,
+        contentType: pageContext.contentType,
+        targetAudience: contentProfile?.audience?.professions?.[0] || 'General'
+      };
+      result.profileVersion = contentProfile?.schemaVersion || 1;
+      result.riskLevel = pageContext.riskLevel;
+      const captionText = result.post_caption || '';
+      result.qualityReview = {
+        charCount: captionText.length,
+        hasPillar: !!pageContext.selectedPillar,
+        withinLengthBounds: captionText.length >= (contentProfile?.preferredCaptionLength?.min || 200) &&
+                            captionText.length <= (contentProfile?.preferredCaptionLength?.max || 900)
+      };
     }
 
     return result;
@@ -1115,6 +1109,10 @@ Respond ONLY with the JSON object.`;
       generationSource: structuredData.isFallback ? 'curated_fallback' : 'ai_model',
       verified: !structuredData.isFallback && Array.isArray(structuredData.sources) && structuredData.sources.length > 0,
       sources: structuredData.sources || [],
+      strategy: structuredData.strategy || null,
+      profileVersion: structuredData.profileVersion || 1,
+      riskLevel: structuredData.riskLevel || 'low',
+      qualityReview: structuredData.qualityReview || null,
       cardData: {
         badge: structuredData.badge,
         line1_red: structuredData.line1_red,
@@ -1269,6 +1267,14 @@ Write a completely fresh, brand new engaging post in natural Bengali.`;
 
     const activePage = storage.getActivePage();
     const pageName = activePage?.name || settings.pageName || "Facebook Page";
+    const pageProfile = activePage?.contentProfile || (activePage?.id ? storage.getPageProfile(activePage.id) : null);
+    const pillarsContext = Array.isArray(pageProfile?.contentPillars) && pageProfile.contentPillars.length > 0
+      ? `\nPrioritize topics matching the Page Content Pillars: ${pageProfile.contentPillars.map(p => p.title).join(', ')}.`
+      : '';
+    const nicheContext = pageProfile?.niche
+      ? `\nPage Niche: "${pageProfile.niche}". Cater specifically to this audience persona!`
+      : '';
+
     let targetCategory = null;
     if (category) {
       targetCategory = categories.find(c => c.id === category || c.title.includes(category));
@@ -1278,7 +1284,7 @@ Write a completely fresh, brand new engaging post in natural Bengali.`;
     const keywordText = keyword ? keyword.trim() : '';
 
     const systemPrompt = `You are the chief content strategist for the Facebook page "${pageName}".
-Your task is to generate ${count} completely unique, irresistible, and viral topic ideas for Facebook posts.
+Your task is to generate ${count} completely unique, irresistible, and viral topic ideas for Facebook posts.${nicheContext}${pillarsContext}
 Bengali audience loves fascinating science, space mysteries, brain hacks, ancient history, deep ocean, and strange nature facts.
 
 Output format MUST be a valid JSON array containing ${count} objects with these exact keys:
