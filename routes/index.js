@@ -15,6 +15,10 @@ const templatesRoutes = require('./templates.routes');
 // Mount Webhook route first (Meta handles its own challenge and verification)
 router.use('/webhook', webhooksRoutes);
 
+// Mount Auth routes (Login, logout, session check)
+const authRoutes = require('./auth.routes');
+router.use('/auth', authRoutes);
+
 // Apply API authentication middleware to all subsequent routes
 router.use(authMiddleware);
 

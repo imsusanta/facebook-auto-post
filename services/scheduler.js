@@ -309,11 +309,28 @@ class SchedulerService extends EventEmitter {
         }
       );
 
-      // BLOCK automatic publication if safety failed OR emergency fallback was generated
-      if (!safetyCheck.safe || bundle.isFallback) {
-        const blockReason = !safetyCheck.safe
-          ? `Content safety policy block: ${safetyCheck.reasons.join('; ')}`
-          : 'Emergency static fallback generated due to AI provider outage; automatic publishing halted for quality assurance.';
+      // Fallback policy enforcement:
+      // - fallbackAutoPublishEnabled defaults to false
+      // - no current-affairs fallback can auto-publish
+      // - no hardcoded fallback claim is considered verified
+      const fallbackAutoPublishEnabled = settings.fallbackAutoPublishEnabled === true;
+      const isCurrentAffairs = selectedCategoryId === 'trending_news';
+      const isBlockedFallback = bundle.isFallback && (!fallbackAutoPublishEnabled || isCurrentAffairs || !bundle.verified);
+
+      // BLOCK automatic publication if safety failed OR fallback was generated
+      if (!safetyCheck.safe || isBlockedFallback || bundle.isFallback) {
+        let blockReason = '';
+        if (!safetyCheck.safe) {
+          blockReason = `Content safety policy block: ${safetyCheck.reasons.join('; ')}`;
+        } else if (bundle.isFallback) {
+          if (isCurrentAffairs) {
+            blockReason = 'Current-affairs fallback posts cannot be auto-published without verified live sources.';
+          } else if (!fallbackAutoPublishEnabled) {
+            blockReason = 'Curated static fallback generated; fallbackAutoPublishEnabled is false (unverified fallbacks held for review).';
+          } else {
+            blockReason = 'Curated fallback generated without verified source metadata; held for manual review.';
+          }
+        }
 
         console.warn(`[AI Auto-Pilot] 🛑 Autopublish BLOCKED: ${blockReason}`);
 

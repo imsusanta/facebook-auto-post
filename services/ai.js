@@ -199,7 +199,7 @@ const FALLBACK_VIRAL_POSTS = [
     post_caption: `💻 প্রযুক্তির ভবিষ্যৎ: কোয়ান্টাম কম্পিউটারের অবিশ্বাস্য গতি ও বিপ্লব! ⚡🔬\n\nপ্রথাগত সাধারণ বাইনারি কম্পিউটারের চেয়ে কোটি কোটি গুণ দ্রুত কাজ করতে সক্ষম এই কোয়ান্টাম কম্পিউটার।\n\n📌 কোয়ান্টাম কম্পিউটিংয়ের শক্তি:\n🔹 সাধারণ কম্পিউটার কাজ করে বিটস (০ এবং ১) দিয়ে; কোয়ান্টাম কম্পিউটার ব্যবহার করে কিউবিটস (Qubits)।\n🔹 সুপারপজিশন ও এনট্যাঙ্গেলমেন্টের কারণে এটি একসাথে লক্ষ লক্ষ জটিল হিসাব করতে পারে।\n🔹 ওষুধ আবিষ্কার, জটিল রোগের সমাধান ও মহাকাশের সিমুলেশনে এটি যুগান্তকারী পরিবর্তন আনবে।\n\nভবিষ্যতের পৃথিবী বদলে দিতে কোয়ান্টাম প্রযুক্তিই হতে চলেছে প্রধান হাতিয়ার! 🚀💡\n\n#QuantumComputing #FutureTech #ArtificialIntelligence #TechnologyNews #TechRevolution #BanglaTech`
   },
   {
-    category: 'philosophy_wisdom',
+    category: 'sports_records',
     badge: 'খেলার খবর',
     line1_red: 'নীরজ চোপড়া',
     line1_white: 'অলিম্পিক ও বিশ্বমঞ্চে',
@@ -207,6 +207,16 @@ const FALLBACK_VIRAL_POSTS = [
     line2_yellow: 'সোনার হরফে লেখা সাফল্য!',
     search_term: 'Neeraj Chopra throwing javelin stadium competition national jersey 8k photography',
     post_caption: `🥇 অদম্য জেদ আর কঠোর পরিশ্রমে ইতিহাস: ভারতের গোল্ডেন বয় নীরজ চোপড়া! 🇮🇳✨\n\nঅ্যাথলেটিক্সে ভারতের বহু দশকের পদক খরা কাটিয়ে দেশকে বারবার বিশ্বসেরার আসনে বসিয়েছেন হরিয়ানার এই তারকা।\n\n📌 সাফল্যের কিছু মাইলফলক:\n🔹 টোকিও অলিম্পিক্সে ৮৭.৫৮ মিটার থ্রো করে অ্যাথলেটিক্সে ভারতের প্রথম ব্যক্তিগত সোনা জয়।\n🔹 বিশ্ব অ্যাথলেটিক্স চ্যাম্পিয়নশিপ এবং ডায়মন্ড লিগেও চ্যাম্পিয়ন হয়ে ভারতের নাম উজ্জ্বল করেছেন।\n🔹 চোট-আঘাত পেরিয়েও নিজের ধারাবাহিক পারফরম্যান্স দিয়ে আজ তরুণ প্রজন্মের সবচেয়ে বড় অনুপ্রেরণা।\n\nপরিশ্রমের কোনো বিকল্প নেই, নীরজ চোপড়া তার জ্বলন্ত প্রমাণ! 🇮🇳🔥\n\n#NeerajChopra #GoldenBoy #IndianAthletics #JavelinThrow #Inspiration #SportsHero #SportsNews`
+  },
+  {
+    category: 'philosophy_wisdom',
+    badge: 'জীবনদর্শন',
+    line1_red: 'ইকিগাই দর্শন',
+    line1_white: 'জাপানিদের দীর্ঘ ও সুখী জীবনের',
+    line2_white: 'গোপন ৪টি সোনালী সূত্র, যা বদলে',
+    line2_yellow: 'দিতে পারে আপনার বেঁচে থাকার অর্থ!',
+    search_term: 'Japanese Ikigai balance Zen garden peaceful morning meditation 8k photography',
+    post_caption: `🌸 দীর্ঘ, সুস্থ ও সুখী জীবনের জাপানি রহস্য: 'ইকিগাই' (Ikigai) দর্শন! 🌿✨\n\nজাপানের ওকিনাওয়া দ্বীপের মানুষ পৃথিবীর মধ্যে সবচেয়ে বেশি দিন বাঁচেন এবং সুস্থ থাকেন। তাদের এই শতায়ু জীবনের মূল চাবিকাঠি হলো 'ইকিগাই'—যার সহজ অর্থ হলো 'সকালে ঘুম থেকে ওঠার কারণ' বা জীবনের উদ্দেশ্য।\n\n📌 ইকিগাই দর্শনের ৪টি মূল স্তম্ভ:\n১. আপনি কী করতে ভালোবাসেন (Passion)\n২. কোন কাজে আপনি পারদর্শী (Vocation)\n৩. পৃথিবীর বা সমাজের কোন জিনিসটির প্রয়োজন (Mission)\n৪. কোন কাজের বিনিময়ে আপনি উপার্জন করতে পারেন (Profession)\n\nএই চারটির মিলনস্থলই হলো আপনার ইকিগাই। নিজের জীবনের লক্ষ্য খুঁজে নিন এবং প্রতিটি দিন আনন্দে বাঁচুন! 💡✨\n\n#Ikigai #LifeWisdom #Philosophy #Mindfulness #JapaneseWisdom #Inspiration #PersonalGrowth`
   }
 ];
 
@@ -620,6 +630,7 @@ class AIService {
     if (!str) return '';
     return str.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1F018}-\u{1F270}\u{2388}\u{200D}\u{FE0F}]/gu, '')
               .replace(/[*_#`~]/g, '')
+              .replace(/\s+/g, ' ')
               .trim();
   }
 
@@ -1191,6 +1202,9 @@ Respond ONLY with the JSON object.`;
       message: structuredData.post_caption,
       category: category ? { id: category.id, title: category.title } : null,
       isFallback: !!structuredData.isFallback,
+      generationSource: structuredData.isFallback ? 'curated_fallback' : 'ai_model',
+      verified: !structuredData.isFallback && Array.isArray(structuredData.sources) && structuredData.sources.length > 0,
+      sources: structuredData.sources || [],
       cardData: {
         badge: structuredData.badge,
         line1_red: structuredData.line1_red,

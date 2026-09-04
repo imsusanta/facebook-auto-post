@@ -1,15 +1,18 @@
 /**
  * Settings Validation Middleware
- * Enforces strict allowlist, prevents prototype pollution, and validates field types/lengths.
+ * Enforces strict allowlist, prevents prototype pollution, validates field types/lengths,
+ * rejects secrets from general settings, and validates cron schedules using node-cron.
  */
 
+const cron = require('node-cron');
+
+// Non-secret settings allowlist for general configuration
 const ALLOWED_SETTINGS_KEYS = new Set([
   'pageName',
   'pageId',
-  'accessToken',
-  'geminiApiKey',
   'autoPostEnabled',
   'autoPilotEnabled',
+  'fallbackAutoPublishEnabled',
   'cronSchedule',
   'cronLabel',
   'selectedCategories',
@@ -18,12 +21,27 @@ const ALLOWED_SETTINGS_KEYS = new Set([
   'customSystemPrompt',
   'isDemoMode',
   'pictureUrl',
-  'activePageId',
-  'webhookVerifyToken'
+  'activePageId'
 ]);
 
-// Basic 5-part cron syntax regex (supports standard values, ranges, steps, lists, wildcards)
-const CRON_REGEX = /^(\*|[0-9,\-\*\/]+)\s+(\*|[0-9,\-\*\/]+)\s+(\*|[0-9,\-\*\/]+)\s+(\*|[0-9,\-\*\/]+)\s+(\*|[0-9,\-\*\/]+)$/;
+// Explicitly forbidden secret fields in general settings
+const FORBIDDEN_SECRET_KEYS = new Set([
+  'accesstoken',
+  'access_token',
+  'pageaccesstoken',
+  'page_access_token',
+  'geminiapikey',
+  'gemini_api_key',
+  'webhookverifytoken',
+  'webhook_verify_token',
+  'verifytoken',
+  'verify_token',
+  'password',
+  'secret',
+  'token',
+  'apikey',
+  'api_key'
+]);
 
 /**
  * Check recursively for prototype pollution keys
@@ -54,13 +72,26 @@ function validateSettingsPayload(payload) {
     return { valid: false, error: 'Prototype pollution detected in request body.' };
   }
 
-  // 2. Allowlist Check
-  const unknownKeys = Object.keys(payload).filter(k => !ALLOWED_SETTINGS_KEYS.has(k));
+  // 2. Reject any secret field attempts in general settings
+  const payloadKeys = Object.keys(payload);
+  const secretKeyAttempt = payloadKeys.find(k => {
+    const lower = k.toLowerCase().replace(/[-_]/g, '');
+    return FORBIDDEN_SECRET_KEYS.has(k.toLowerCase()) || FORBIDDEN_SECRET_KEYS.has(lower);
+  });
+  if (secretKeyAttempt) {
+    return {
+      valid: false,
+      error: `Secret field "${secretKeyAttempt}" is forbidden in general settings. Use dedicated credential endpoints.`
+    };
+  }
+
+  // 3. Allowlist Check
+  const unknownKeys = payloadKeys.filter(k => !ALLOWED_SETTINGS_KEYS.has(k));
   if (unknownKeys.length > 0) {
     return { valid: false, error: `Disallowed or unexpected settings fields: ${unknownKeys.join(', ')}` };
   }
 
-  // 3. Type and Range Checks
+  // 4. Type and Range Checks
   if ('intervalMinutes' in payload) {
     const num = Number(payload.intervalMinutes);
     if (!Number.isInteger(num) || num < 1 || num > 1440) {
@@ -69,7 +100,7 @@ function validateSettingsPayload(payload) {
   }
 
   if ('cronSchedule' in payload) {
-    if (typeof payload.cronSchedule !== 'string' || !CRON_REGEX.test(payload.cronSchedule.trim())) {
+    if (typeof payload.cronSchedule !== 'string' || !cron.validate(payload.cronSchedule.trim())) {
       return { valid: false, error: 'cronSchedule must be a valid 5-part cron expression (e.g. "0 9,14,20 * * *").' };
     }
   }
@@ -85,7 +116,7 @@ function validateSettingsPayload(payload) {
     }
   }
 
-  const booleanFields = ['autoPostEnabled', 'autoPilotEnabled', 'includeAiImage', 'isDemoMode'];
+  const booleanFields = ['autoPostEnabled', 'autoPilotEnabled', 'fallbackAutoPublishEnabled', 'includeAiImage', 'isDemoMode'];
   for (const field of booleanFields) {
     if (field in payload && typeof payload[field] !== 'boolean') {
       return { valid: false, error: `${field} must be a boolean.` };
@@ -95,13 +126,10 @@ function validateSettingsPayload(payload) {
   const stringLengthLimits = {
     pageName: 200,
     pageId: 100,
-    accessToken: 1000,
-    geminiApiKey: 300,
     cronLabel: 200,
     customSystemPrompt: 10000,
     pictureUrl: 2000,
-    activePageId: 100,
-    webhookVerifyToken: 200
+    activePageId: 100
   };
 
   for (const [field, maxLen] of Object.entries(stringLengthLimits)) {
@@ -126,7 +154,8 @@ function validateSettings(req, res, next) {
   if (!result.valid) {
     return res.status(400).json({
       success: false,
-      error: result.error
+      error: result.error,
+      code: 'INVALID_SETTINGS_PAYLOAD'
     });
   }
   next();
@@ -135,5 +164,6 @@ function validateSettings(req, res, next) {
 module.exports = {
   validateSettings,
   validateSettingsPayload,
-  ALLOWED_SETTINGS_KEYS
+  ALLOWED_SETTINGS_KEYS,
+  FORBIDDEN_SECRET_KEYS
 };

@@ -2245,11 +2245,44 @@ document.addEventListener('DOMContentLoaded', () => {
       savePageSettingsBtn.textContent = 'Saving...';
 
       try {
+        const geminiKey = pageSettingsGeminiKey ? pageSettingsGeminiKey.value.trim() : '';
+        const accessToken = pageSettingsAccessToken ? pageSettingsAccessToken.value.trim() : '';
+        const pageId = pageSettingsPageId ? pageSettingsPageId.value.trim() : '';
+        const isDemo = pageSettingsDemoMode ? pageSettingsDemoMode.checked : false;
+
+        // 1. Update Gemini key via dedicated endpoint if changed
+        if (geminiKey) {
+          const gemRes = await fetch('/api/settings/gemini-credential', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apiKey: geminiKey })
+          });
+          const gemData = await gemRes.json();
+          if (!gemData.success) {
+            alert('Failed to save Gemini key: ' + (gemData.error || 'Validation error'));
+            return;
+          }
+        }
+
+        // 2. Update Facebook token via dedicated endpoint if changed
+        const targetPageId = pageId || state.settings.pageId || (state.pages && state.pages[0]?.id);
+        if (accessToken && targetPageId) {
+          const fbRes = await fetch(`/api/facebook/pages/${targetPageId}/credential`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ accessToken })
+          });
+          const fbData = await fbRes.json();
+          if (!fbData.success) {
+            alert('Failed to save Facebook token: ' + (fbData.error || 'Validation error'));
+            return;
+          }
+        }
+
+        // 3. Save general non-secret configuration
         const payload = {
-          pageId: pageSettingsPageId.value.trim(),
-          accessToken: pageSettingsAccessToken.value.trim(),
-          geminiApiKey: pageSettingsGeminiKey.value.trim(),
-          isDemoMode: pageSettingsDemoMode.checked
+          pageId: targetPageId,
+          isDemoMode: isDemo
         };
 
         const res = await fetch('/api/settings', {
@@ -2264,9 +2297,11 @@ document.addEventListener('DOMContentLoaded', () => {
           pageSettingsStatusMsg.className = 'p-2.5 rounded-xl text-xs font-medium bg-emerald-50 text-emerald-700';
           pageSettingsStatusMsg.textContent = '✅ Settings saved successfully!';
           fetchStatus();
+        } else {
+          alert('Failed to save settings: ' + (data.error || 'Server error'));
         }
       } catch (err) {
-        alert('Failed to save settings');
+        alert('Failed to save settings: ' + err.message);
       } finally {
         savePageSettingsBtn.disabled = false;
         savePageSettingsBtn.textContent = 'Save Changes';
@@ -2587,8 +2622,20 @@ document.addEventListener('DOMContentLoaded', () => {
       submitEditPageBtn.innerHTML = `<span class="animate-spin mr-1">⌛</span> Saving...`;
 
       try {
+        if (accessToken && accessToken.trim()) {
+          const credRes = await fetch(`/api/facebook/pages/${pageId}/credential`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ accessToken: accessToken.trim() })
+          });
+          const credData = await credRes.json();
+          if (!credData.success) {
+            alert('Failed to update page access token: ' + (credData.error || 'Validation error'));
+            return;
+          }
+        }
+
         const payload = { name, category, systemPrompt };
-        if (accessToken) payload.accessToken = accessToken;
 
         const res = await fetch(`/api/facebook/pages/${pageId}`, {
           method: 'PUT',
@@ -2867,11 +2914,101 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Initial Boot
-  fetchStatus();
-  fetchConnectedPages();
-  fetchTemplates();
-  connectSSE();
-  renderDashboardQueue();
-  refreshIcons();
+  // Admin Authentication Modal & Session Flow
+  const adminAuthModal = document.getElementById('adminAuthModal');
+  const adminAuthForm = document.getElementById('adminAuthForm');
+  const adminAuthKeyInput = document.getElementById('adminAuthKeyInput');
+  const adminAuthError = document.getElementById('adminAuthError');
+  const adminAuthSubmitBtn = document.getElementById('adminAuthSubmitBtn');
+
+  function showAuthModal() {
+    if (adminAuthModal) {
+      adminAuthModal.classList.remove('hidden');
+      if (adminAuthKeyInput) {
+        adminAuthKeyInput.value = '';
+        adminAuthKeyInput.focus();
+      }
+    }
+  }
+
+  function hideAuthModal() {
+    if (adminAuthModal) {
+      adminAuthModal.classList.add('hidden');
+    }
+    if (adminAuthError) {
+      adminAuthError.classList.add('hidden');
+    }
+  }
+
+  if (adminAuthForm) {
+    adminAuthForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!adminAuthKeyInput) return;
+      const key = adminAuthKeyInput.value.trim();
+      if (!key) return;
+
+      if (adminAuthSubmitBtn) {
+        adminAuthSubmitBtn.disabled = true;
+        adminAuthSubmitBtn.innerHTML = '<span>Verifying...</span>';
+      }
+      if (adminAuthError) adminAuthError.classList.add('hidden');
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key })
+        });
+        const data = await res.json();
+        if (data.success) {
+          hideAuthModal();
+          initApp();
+        } else {
+          if (adminAuthError) {
+            adminAuthError.textContent = data.error || 'Invalid admin credentials.';
+            adminAuthError.classList.remove('hidden');
+          }
+        }
+      } catch (err) {
+        if (adminAuthError) {
+          adminAuthError.textContent = 'Connection error. Please try again.';
+          adminAuthError.classList.remove('hidden');
+        }
+      } finally {
+        if (adminAuthSubmitBtn) {
+          adminAuthSubmitBtn.disabled = false;
+          adminAuthSubmitBtn.innerHTML = '<span>Unlock Dashboard</span>';
+        }
+      }
+    });
+  }
+
+  function initApp() {
+    fetchStatus();
+    fetchConnectedPages();
+    fetchTemplates();
+    connectSSE();
+    renderDashboardQueue();
+    refreshIcons();
+  }
+
+  // Session verification on initial load
+  async function checkAuthAndInit() {
+    try {
+      const res = await fetch('/api/auth/session');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.authenticated) {
+          hideAuthModal();
+          initApp();
+          return;
+        }
+      }
+      showAuthModal();
+    } catch {
+      showAuthModal();
+    }
+  }
+
+  checkAuthAndInit();
 });

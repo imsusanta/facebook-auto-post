@@ -17,28 +17,36 @@ const apiRoutes = require('./routes');
 const scheduler = require('./services/scheduler');
 const logger = require('./utils/logger');
 
+const { isOriginAllowed } = require('./utils/cors-validator');
+
 const app = express();
 
-// Security Headers via Helmet
+// Security Headers via Helmet with explicit CSP directives
+// Note: 'unsafe-inline' for scripts/styles is narrowly retained due to Tailwind CDN and inline config
 app.use(helmet({
-  contentSecurityPolicy: false, // Frontend relies on Tailwind CDN, Lucide CDN, and remote media
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "https://cdn.tailwindcss.com", "https://unpkg.com", "'unsafe-inline'"],
+      styleSrc: ["'self'", "https://fonts.googleapis.com", "'unsafe-inline'"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+      imgSrc: ["'self'", "data:", "blob:", "https:"],
+      connectSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+      frameAncestors: ["'none'"]
+    }
+  },
   crossOriginEmbedderPolicy: false
 }));
 
 // CORS Configuration with strict origin controls
-const rawAllowed = process.env.ALLOWED_ORIGINS || '';
-const allowedOrigins = rawAllowed
-  ? rawAllowed.split(',').map(o => o.trim()).filter(Boolean)
-  : ['http://localhost:3000', 'http://127.0.0.1:3000'];
-
 const corsOptions = {
   origin: (origin, callback) => {
-    // Allow server-to-server, curl, same-origin, or missing origin
+    // Allow server-to-server, curl, same-origin (missing origin header)
     if (!origin) return callback(null, true);
-    if (
-      allowedOrigins.includes(origin) ||
-      (NODE_ENV === 'development' && /^http:\/\/localhost(:\d+)?$/.test(origin))
-    ) {
+    if (isOriginAllowed(origin)) {
       return callback(null, true);
     }
     return callback(new Error('Blocked by CORS policy: Origin not allowed.'));

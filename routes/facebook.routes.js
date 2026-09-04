@@ -179,9 +179,62 @@ router.get('/pages/:id', (req, res) => {
   res.json({ success: true, page: serializePage(page) });
 });
 
-// PUT /api/facebook/pages/:id - Edit connected page info and custom system prompt
+const rateLimit = require('express-rate-limit');
+
+const credentialLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many credential update attempts. Please wait.' }
+});
+
+// PUT /api/facebook/pages/:id/credential - Dedicated endpoint for page access token
+router.put('/pages/:id/credential', credentialLimiter, async (req, res) => {
+  const { accessToken } = req.body || {};
+  if (!accessToken || typeof accessToken !== 'string' || accessToken.trim().length < 15 || accessToken.trim().length > 1000) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid access token format. Must be between 15 and 1000 characters.',
+      code: 'INVALID_CREDENTIAL'
+    });
+  }
+
+  const existing = storage.getPageById(req.params.id);
+  if (!existing) {
+    return res.status(404).json({ success: false, error: 'Page not found.', code: 'PAGE_NOT_FOUND' });
+  }
+
+  const cleanToken = accessToken.trim();
+  storage.updateConnectedPage(req.params.id, { accessToken: cleanToken });
+
+  const activePage = storage.getActivePage();
+  if (activePage && activePage.id === req.params.id) {
+    storage.saveSettings({ accessToken: cleanToken });
+  }
+
+  broadcastSSE('page_switched', {
+    activePage: serializePage(storage.getActivePage()),
+    pages: serializePages(storage.getConnectedPages())
+  });
+
+  return res.json({
+    success: true,
+    configured: true
+  });
+});
+
+// PUT /api/facebook/pages/:id - Edit connected page general info and custom system prompt
 router.put('/pages/:id', async (req, res, next) => {
-  const { name, category, accessToken, systemPrompt, pictureUrl } = req.body;
+  if ('accessToken' in req.body) {
+    return res.status(400).json({
+      success: false,
+      error: 'Access token cannot be updated via general page endpoint. Use PUT /api/facebook/pages/:id/credential.',
+      code: 'CREDENTIAL_UPDATE_FORBIDDEN'
+    });
+  }
+
+  const { name, category, systemPrompt, pictureUrl } = req.body;
   try {
     const existing = storage.getPageById(req.params.id);
     if (!existing) {
@@ -191,7 +244,6 @@ router.put('/pages/:id', async (req, res, next) => {
     const updates = {};
     if (typeof name === 'string' && name.trim()) updates.name = name.trim();
     if (typeof category === 'string' && category.trim()) updates.category = category.trim();
-    if (typeof accessToken === 'string' && accessToken.trim()) updates.accessToken = accessToken.trim();
     if (typeof systemPrompt === 'string') updates.systemPrompt = systemPrompt.trim();
     if (typeof pictureUrl === 'string' && pictureUrl.trim()) updates.pictureUrl = pictureUrl.trim();
 
