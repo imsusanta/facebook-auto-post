@@ -100,10 +100,14 @@ db.exec(`
 
 // Seed or migrate default user from settings.json if exists
 function seedDefaultAdmin() {
+  const isDevOrTest = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+  const initialPassword = process.env.ADMIN_INITIAL_PASSWORD || process.env.ADMIN_PASSWORD || (isDevOrTest ? 'admin123' : null);
+  if (!initialPassword) return;
+
   const existingUser = db.prepare('SELECT id FROM users LIMIT 1').get();
   if (!existingUser) {
     const adminId = 'usr_admin_' + Date.now();
-    const defaultPasswordHash = bcrypt.hashSync('admin123', 10);
+    const defaultPasswordHash = bcrypt.hashSync(initialPassword, 10);
     
     // Read old settings if present
     let oldSettings = {};

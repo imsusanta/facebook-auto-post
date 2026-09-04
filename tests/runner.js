@@ -422,6 +422,42 @@ describe('3. Real HTTP Auth & Session Flow', () => {
     const checkData = await checkRes.json();
     assert.strictEqual(checkData.authenticated, false);
   });
+
+  test('Default user seeding is prohibited when NODE_ENV is unset or production', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-seed-test-'));
+    try {
+      storage.setDataDir(tempDir);
+      const origEnv = process.env.NODE_ENV;
+
+      // Test A: NODE_ENV unset -> does not seed
+      delete process.env.NODE_ENV;
+      const unsetUsers = storage.initDefaultUsers();
+      assert.strictEqual(unsetUsers.length, 0, 'Must not seed default user when NODE_ENV is unset');
+
+      // Test B: NODE_ENV=production -> does not seed
+      process.env.NODE_ENV = 'production';
+      const prodUsers = storage.initDefaultUsers();
+      assert.strictEqual(prodUsers.length, 0, 'Must not seed default user when NODE_ENV is production');
+
+      // Restore
+      process.env.NODE_ENV = origEnv;
+    } finally {
+      storage.setDataDir(testDataDir);
+      try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  test('User responses never include passwordHash, passwordSalt, or reset tokens', async () => {
+    const res = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'susantalohr@gmail.com', password: 'admin@123' })
+    });
+    const data = await res.json();
+    assert.strictEqual(data.user.passwordHash, undefined);
+    assert.strictEqual(data.user.passwordSalt, undefined);
+    assert.strictEqual(data.user.resetToken, undefined);
+  });
 });
 
 // =========================================================================

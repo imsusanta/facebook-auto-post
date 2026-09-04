@@ -282,9 +282,10 @@ const storage = {
 
     const existingSuperAdmin = users.find(u => u && typeof u.email === 'string' && u.email.toLowerCase() === 'susantalohr@gmail.com');
     if (!existingSuperAdmin) {
-      // In production, NEVER seed a hardcoded default password.
+      // In production or when NODE_ENV is unset, NEVER seed a hardcoded default password.
       // Require explicit environment variable or allow dev/test fallback
-      const initialPassword = process.env.ADMIN_INITIAL_PASSWORD || process.env.ADMIN_PASSWORD || (process.env.NODE_ENV === 'production' ? null : 'admin@123');
+      const isDevOrTest = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+      const initialPassword = process.env.ADMIN_INITIAL_PASSWORD || process.env.ADMIN_PASSWORD || (isDevOrTest ? 'admin@123' : null);
       if (initialPassword) {
         const salt = crypto.randomBytes(16).toString('hex');
         const hash = crypto.pbkdf2Sync(initialPassword, salt, 100000, 64, 'sha512').toString('hex');
