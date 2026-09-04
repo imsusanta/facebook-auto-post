@@ -2916,30 +2916,117 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Admin Authentication Modal & Session Flow
   const adminAuthModal = document.getElementById('adminAuthModal');
+  const adminModalTitle = document.getElementById('adminModalTitle');
+  const adminModalSubtitle = document.getElementById('adminModalSubtitle');
   const adminAuthForm = document.getElementById('adminAuthForm');
   const adminAuthKeyInput = document.getElementById('adminAuthKeyInput');
   const adminAuthError = document.getElementById('adminAuthError');
   const adminAuthSubmitBtn = document.getElementById('adminAuthSubmitBtn');
+  const togglePasswordVisibilityBtn = document.getElementById('togglePasswordVisibilityBtn');
 
-  function showAuthModal() {
-    if (adminAuthModal) {
-      adminAuthModal.classList.remove('hidden');
-      if (adminAuthKeyInput) {
-        adminAuthKeyInput.value = '';
-        adminAuthKeyInput.focus();
+  const adminSetupForm = document.getElementById('adminSetupForm');
+  const adminSetupPassword = document.getElementById('adminSetupPassword');
+  const adminSetupConfirm = document.getElementById('adminSetupConfirm');
+  const adminSetupError = document.getElementById('adminSetupError');
+  const adminSetupSubmitBtn = document.getElementById('adminSetupSubmitBtn');
+
+  const adminDevLoginSection = document.getElementById('adminDevLoginSection');
+  const adminDevLoginBtn = document.getElementById('adminDevLoginBtn');
+
+  const adminLogoutBtn = document.getElementById('adminLogoutBtn');
+  const headerAuthActionBtn = document.getElementById('headerAuthActionBtn');
+  const headerAuthActionText = document.getElementById('headerAuthActionText');
+
+  const adminPasswordUpdateForm = document.getElementById('adminPasswordUpdateForm');
+  const adminCurrentPasswordInput = document.getElementById('adminCurrentPasswordInput');
+  const adminNewPasswordInput = document.getElementById('adminNewPasswordInput');
+  const adminConfirmPasswordInput = document.getElementById('adminConfirmPasswordInput');
+  const adminPasswordStatusMsg = document.getElementById('adminPasswordStatusMsg');
+  const adminPasswordSubmitBtn = document.getElementById('adminPasswordSubmitBtn');
+  const adminSettingsLogoutBtn = document.getElementById('adminSettingsLogoutBtn');
+
+  let isUserAuthenticated = false;
+
+  function updateAuthUI(authenticated) {
+    isUserAuthenticated = authenticated;
+    if (headerAuthActionText) {
+      headerAuthActionText.textContent = authenticated ? 'Admin Active' : 'Login';
+    }
+    if (headerAuthActionBtn) {
+      if (authenticated) {
+        headerAuthActionBtn.classList.remove('bg-rose-50', 'text-rose-700', 'border-rose-200');
+        headerAuthActionBtn.classList.add('bg-white', 'text-slate-700');
+        headerAuthActionBtn.title = 'Logged in as Admin';
+      } else {
+        headerAuthActionBtn.classList.add('bg-rose-50', 'text-rose-700', 'border-rose-200');
+        headerAuthActionBtn.classList.remove('bg-white', 'text-slate-700');
+        headerAuthActionBtn.title = 'Click to Log In';
       }
     }
   }
 
-  function hideAuthModal() {
-    if (adminAuthModal) {
-      adminAuthModal.classList.add('hidden');
+  function showAuthModal(setupRequired = false, isDev = false) {
+    if (!adminAuthModal) return;
+    adminAuthModal.classList.remove('hidden');
+
+    if (setupRequired) {
+      if (adminModalTitle) adminModalTitle.textContent = 'Setup Admin Password';
+      if (adminModalSubtitle) adminModalSubtitle.textContent = 'Create a secure password to protect your dashboard.';
+      if (adminAuthForm) adminAuthForm.classList.add('hidden');
+      if (adminSetupForm) {
+        adminSetupForm.classList.remove('hidden');
+        if (adminSetupPassword) {
+          adminSetupPassword.value = '';
+          adminSetupPassword.focus();
+        }
+        if (adminSetupConfirm) adminSetupConfirm.value = '';
+      }
+    } else {
+      if (adminModalTitle) adminModalTitle.textContent = 'Admin Login';
+      if (adminModalSubtitle) adminModalSubtitle.textContent = 'Enter your Admin Password or Key to access the dashboard.';
+      if (adminSetupForm) adminSetupForm.classList.add('hidden');
+      if (adminAuthForm) {
+        adminAuthForm.classList.remove('hidden');
+        if (adminAuthKeyInput) {
+          adminAuthKeyInput.value = '';
+          adminAuthKeyInput.focus();
+        }
+      }
     }
-    if (adminAuthError) {
-      adminAuthError.classList.add('hidden');
+
+    if (adminDevLoginSection) {
+      if (isDev) {
+        adminDevLoginSection.classList.remove('hidden');
+      } else {
+        adminDevLoginSection.classList.add('hidden');
+      }
     }
+
+    if (adminAuthError) adminAuthError.classList.add('hidden');
+    if (adminSetupError) adminSetupError.classList.add('hidden');
+    refreshIcons();
   }
 
+  function hideAuthModal() {
+    if (adminAuthModal) adminAuthModal.classList.add('hidden');
+    if (adminAuthError) adminAuthError.classList.add('hidden');
+    if (adminSetupError) adminSetupError.classList.add('hidden');
+  }
+
+  // Toggle Password Visibility Eye Button
+  if (togglePasswordVisibilityBtn && adminAuthKeyInput) {
+    togglePasswordVisibilityBtn.addEventListener('click', () => {
+      const isPassword = adminAuthKeyInput.type === 'password';
+      adminAuthKeyInput.type = isPassword ? 'text' : 'password';
+      const icon = togglePasswordVisibilityBtn.querySelector('i');
+      if (icon) {
+        icon.setAttribute('data-lucide', isPassword ? 'eye-off' : 'eye');
+        refreshIcons();
+      }
+    });
+  }
+
+  // Standard Login Submission
   if (adminAuthForm) {
     adminAuthForm.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -2957,19 +3044,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key })
+          body: JSON.stringify({ password: key, key })
         });
         const data = await res.json();
-        if (data.success) {
+        if (data.success && data.authenticated) {
           hideAuthModal();
+          updateAuthUI(true);
           initApp();
+        } else if (data.setupRequired) {
+          showAuthModal(true, true);
         } else {
           if (adminAuthError) {
             adminAuthError.textContent = data.error || 'Invalid admin credentials.';
             adminAuthError.classList.remove('hidden');
           }
         }
-      } catch (err) {
+      } catch {
         if (adminAuthError) {
           adminAuthError.textContent = 'Connection error. Please try again.';
           adminAuthError.classList.remove('hidden');
@@ -2977,7 +3067,200 @@ document.addEventListener('DOMContentLoaded', () => {
       } finally {
         if (adminAuthSubmitBtn) {
           adminAuthSubmitBtn.disabled = false;
-          adminAuthSubmitBtn.innerHTML = '<span>Unlock Dashboard</span>';
+          adminAuthSubmitBtn.innerHTML = '<i data-lucide="log-in" class="w-4 h-4"></i><span>Log In to Dashboard</span>';
+          refreshIcons();
+        }
+      }
+    });
+  }
+
+  // First-Time Setup Submission
+  if (adminSetupForm) {
+    adminSetupForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!adminSetupPassword || !adminSetupConfirm) return;
+      const password = adminSetupPassword.value.trim();
+      const confirmPassword = adminSetupConfirm.value.trim();
+
+      if (password.length < 6) {
+        if (adminSetupError) {
+          adminSetupError.textContent = 'Password must be at least 6 characters long.';
+          adminSetupError.classList.remove('hidden');
+        }
+        return;
+      }
+
+      if (password !== confirmPassword) {
+        if (adminSetupError) {
+          adminSetupError.textContent = 'Passwords do not match.';
+          adminSetupError.classList.remove('hidden');
+        }
+        return;
+      }
+
+      if (adminSetupSubmitBtn) {
+        adminSetupSubmitBtn.disabled = true;
+        adminSetupSubmitBtn.innerHTML = '<span>Saving...</span>';
+      }
+      if (adminSetupError) adminSetupError.classList.add('hidden');
+
+      try {
+        const res = await fetch('/api/auth/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password, confirmPassword })
+        });
+        const data = await res.json();
+        if (data.success && data.authenticated) {
+          hideAuthModal();
+          updateAuthUI(true);
+          initApp();
+        } else {
+          if (adminSetupError) {
+            adminSetupError.textContent = data.error || 'Failed to set password.';
+            adminSetupError.classList.remove('hidden');
+          }
+        }
+      } catch {
+        if (adminSetupError) {
+          adminSetupError.textContent = 'Connection error. Please try again.';
+          adminSetupError.classList.remove('hidden');
+        }
+      } finally {
+        if (adminSetupSubmitBtn) {
+          adminSetupSubmitBtn.disabled = false;
+          adminSetupSubmitBtn.innerHTML = '<i data-lucide="check-circle" class="w-4 h-4"></i><span>Save Password & Log In</span>';
+          refreshIcons();
+        }
+      }
+    });
+  }
+
+  // Quick Dev Login
+  if (adminDevLoginBtn) {
+    adminDevLoginBtn.addEventListener('click', async () => {
+      adminDevLoginBtn.disabled = true;
+      adminDevLoginBtn.innerHTML = '<span>Logging in...</span>';
+      try {
+        const res = await fetch('/api/auth/dev-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await res.json();
+        if (data.success && data.authenticated) {
+          hideAuthModal();
+          updateAuthUI(true);
+          initApp();
+        } else {
+          alert(data.error || 'Dev login unavailable.');
+        }
+      } catch {
+        alert('Could not connect for dev login.');
+      } finally {
+        adminDevLoginBtn.disabled = false;
+        adminDevLoginBtn.innerHTML = '<i data-lucide="zap" class="w-3.5 h-3.5 text-amber-600"></i><span>⚡ One-Click Dev Login (Local Development)</span>';
+        refreshIcons();
+      }
+    });
+  }
+
+  // Logout Handler Function
+  async function performLogout() {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // ignore
+    }
+    updateAuthUI(false);
+    showAuthModal(false, true);
+  }
+
+  if (adminLogoutBtn) {
+    adminLogoutBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      performLogout();
+    });
+  }
+
+  if (adminSettingsLogoutBtn) {
+    adminSettingsLogoutBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      performLogout();
+    });
+  }
+
+  if (headerAuthActionBtn) {
+    headerAuthActionBtn.addEventListener('click', () => {
+      if (isUserAuthenticated) {
+        if (confirm('Do you want to log out of the admin dashboard?')) {
+          performLogout();
+        }
+      } else {
+        showAuthModal(false, true);
+      }
+    });
+  }
+
+  // Password Update Form in Settings
+  if (adminPasswordUpdateForm) {
+    adminPasswordUpdateForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const currentPassword = adminCurrentPasswordInput ? adminCurrentPasswordInput.value.trim() : '';
+      const newPassword = adminNewPasswordInput ? adminNewPasswordInput.value.trim() : '';
+      const confirmPassword = adminConfirmPasswordInput ? adminConfirmPasswordInput.value.trim() : '';
+
+      if (newPassword.length < 6) {
+        if (adminPasswordStatusMsg) {
+          adminPasswordStatusMsg.className = 'p-2.5 rounded-xl text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200 block';
+          adminPasswordStatusMsg.textContent = 'New password must be at least 6 characters.';
+        }
+        return;
+      }
+
+      if (newPassword !== confirmPassword) {
+        if (adminPasswordStatusMsg) {
+          adminPasswordStatusMsg.className = 'p-2.5 rounded-xl text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200 block';
+          adminPasswordStatusMsg.textContent = 'Passwords do not match.';
+        }
+        return;
+      }
+
+      if (adminPasswordSubmitBtn) {
+        adminPasswordSubmitBtn.disabled = true;
+        adminPasswordSubmitBtn.innerHTML = '<span>Saving...</span>';
+      }
+
+      try {
+        const res = await fetch('/api/settings/admin-credential', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ currentPassword, newPassword, confirmPassword })
+        });
+        const data = await res.json();
+        if (data.success) {
+          if (adminPasswordStatusMsg) {
+            adminPasswordStatusMsg.className = 'p-2.5 rounded-xl text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 block';
+            adminPasswordStatusMsg.textContent = 'Admin password updated successfully!';
+          }
+          if (adminCurrentPasswordInput) adminCurrentPasswordInput.value = '';
+          if (adminNewPasswordInput) adminNewPasswordInput.value = '';
+          if (adminConfirmPasswordInput) adminConfirmPasswordInput.value = '';
+        } else {
+          if (adminPasswordStatusMsg) {
+            adminPasswordStatusMsg.className = 'p-2.5 rounded-xl text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200 block';
+            adminPasswordStatusMsg.textContent = data.error || 'Failed to update password.';
+          }
+        }
+      } catch {
+        if (adminPasswordStatusMsg) {
+          adminPasswordStatusMsg.className = 'p-2.5 rounded-xl text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200 block';
+          adminPasswordStatusMsg.textContent = 'Connection error updating password.';
+        }
+      } finally {
+        if (adminPasswordSubmitBtn) {
+          adminPasswordSubmitBtn.disabled = false;
+          adminPasswordSubmitBtn.innerHTML = '<i data-lucide="save" class="w-3.5 h-3.5"></i><span>Update Password</span>';
+          refreshIcons();
         }
       }
     });
@@ -3000,13 +3283,20 @@ document.addEventListener('DOMContentLoaded', () => {
         const data = await res.json();
         if (data.authenticated) {
           hideAuthModal();
+          updateAuthUI(true);
           initApp();
+          return;
+        } else {
+          updateAuthUI(false);
+          showAuthModal(Boolean(data.setupRequired), Boolean(data.isDev));
           return;
         }
       }
-      showAuthModal();
+      updateAuthUI(false);
+      showAuthModal(false, true);
     } catch {
-      showAuthModal();
+      updateAuthUI(false);
+      showAuthModal(false, true);
     }
   }
 

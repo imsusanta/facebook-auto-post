@@ -117,17 +117,19 @@
 
     <!-- Bottom User Profile Widget -->
     <div class="p-4 border-t border-slate-100 bg-white">
-      <div id="profileTrigger" class="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 cursor-pointer transition">
-        <div class="flex items-center gap-3">
-          <div class="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-600 to-indigo-400 text-white font-bold flex items-center justify-center text-sm shadow-sm">
+      <div class="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 transition">
+        <div id="profileTrigger" class="flex items-center gap-3 cursor-pointer flex-1 min-w-0" title="Manage Accounts">
+          <div class="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-600 to-indigo-400 text-white font-bold flex items-center justify-center text-sm shadow-sm shrink-0">
             S
           </div>
-          <div>
-            <h4 id="displayProfileName" class="text-sm font-semibold text-slate-800 leading-tight">Sushanta Digital</h4>
+          <div class="truncate">
+            <h4 id="displayProfileName" class="text-sm font-semibold text-slate-800 leading-tight truncate">Sushanta Digital</h4>
             <p id="displayProfileRole" class="text-xs text-slate-400 font-medium">Admin</p>
           </div>
         </div>
-        <i data-lucide="chevron-down" class="w-4 h-4 text-slate-400"></i>
+        <button id="adminLogoutBtn" class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition shrink-0" title="Log Out Admin">
+          <i data-lucide="log-out" class="w-4 h-4"></i>
+        </button>
       </div>
     </div>
   </aside>
@@ -193,6 +195,12 @@
         <button id="notificationBtn" class="w-10 h-10 rounded-xl bg-white border border-slate-200/80 flex items-center justify-center text-slate-600 hover:bg-slate-50 relative shadow-sm transition" title="Notifications">
           <i data-lucide="bell" class="w-4 h-4 text-slate-600"></i>
           <span id="bellBadgeDot" class="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-rose-500"></span>
+        </button>
+
+        <!-- Admin Auth Status / Login Action -->
+        <button id="headerAuthActionBtn" class="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200/80 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-sm transition" title="Admin Session">
+          <i data-lucide="shield" class="w-3.5 h-3.5 text-indigo-600"></i>
+          <span id="headerAuthActionText">Admin</span>
         </button>
       </div>
     </header>
@@ -1792,6 +1800,49 @@
             </div>
           </div>
         </div>
+
+        <!-- Admin Password & Access Security Card -->
+        <div class="saas-card p-6 max-w-xl">
+          <div class="flex items-center gap-2.5 mb-1">
+            <div class="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+              <i data-lucide="shield-check" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <h3 class="text-lg font-bold text-slate-900">Admin Security & Password</h3>
+              <p class="text-xs text-slate-500">Update dashboard administrator password and manage active session</p>
+            </div>
+          </div>
+
+          <form id="adminPasswordUpdateForm" class="mt-5 space-y-4 text-xs">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Current Password (if configured)</label>
+              <input type="password" id="adminCurrentPasswordInput" placeholder="Enter current password" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-mono">
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">New Admin Password</label>
+              <input type="password" id="adminNewPasswordInput" placeholder="At least 6 characters" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-mono" required>
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Confirm New Password</label>
+              <input type="password" id="adminConfirmPasswordInput" placeholder="Re-enter new password" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-mono" required>
+            </div>
+
+            <div id="adminPasswordStatusMsg" class="hidden p-2.5 rounded-xl text-xs font-medium"></div>
+
+            <div class="pt-4 flex items-center justify-between border-t border-slate-100">
+              <button type="button" id="adminSettingsLogoutBtn" class="text-xs font-semibold text-rose-600 hover:text-rose-700 border border-rose-200 hover:bg-rose-50 px-4 py-2 rounded-xl bg-white shadow-sm transition flex items-center gap-1.5">
+                <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
+                <span>Log Out Admin</span>
+              </button>
+              <button type="submit" id="adminPasswordSubmitBtn" class="text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 px-5 py-2 rounded-xl shadow-sm transition flex items-center gap-1.5">
+                <i data-lucide="save" class="w-3.5 h-3.5"></i>
+                <span>Update Password</span>
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
 
       <!-- ================= 9. VIEW: INTEGRATIONS ================= -->
@@ -1827,28 +1878,41 @@
     </main>
   </div>
 
-  <!-- ================= ADMIN AUTHENTICATION MODAL ================= -->
+  <!-- ================= ADMIN AUTHENTICATION / LOGIN MODAL ================= -->
   <div id="adminAuthModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
     <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full mx-4 p-6 space-y-5 animate-in fade-in zoom-in-95 duration-200">
+      
+      <!-- Modal Header -->
       <div class="text-center space-y-2">
-        <div class="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-3">
-          <i data-lucide="lock" class="w-6 h-6"></i>
+        <div class="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-2">
+          <i data-lucide="shield-check" class="w-6 h-6"></i>
         </div>
-        <h3 class="text-xl font-bold text-slate-900">Admin Authentication Required</h3>
-        <p class="text-xs text-slate-500">Please enter the server Admin Key to access the dashboard and APIs.</p>
+        <h3 id="adminModalTitle" class="text-xl font-bold text-slate-900">Admin Login</h3>
+        <p id="adminModalSubtitle" class="text-xs text-slate-500">Enter your Admin Password or Key to access the dashboard.</p>
       </div>
 
+      <!-- Mode: Standard Login Form -->
       <form id="adminAuthForm" class="space-y-4">
         <div>
-          <label for="adminAuthKeyInput" class="block text-xs font-semibold text-slate-700 mb-1">Admin API Key</label>
-          <input
-            type="password"
-            id="adminAuthKeyInput"
-            placeholder="Enter ADMIN_API_KEY"
-            class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
-            required
-            autocomplete="current-password"
-          >
+          <label for="adminAuthKeyInput" class="block text-xs font-semibold text-slate-700 mb-1">Admin Password or Key</label>
+          <div class="relative">
+            <input
+              type="password"
+              id="adminAuthKeyInput"
+              placeholder="Enter password or ADMIN_API_KEY"
+              class="w-full pl-3.5 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition font-mono"
+              required
+              autocomplete="current-password"
+            >
+            <button
+              type="button"
+              id="togglePasswordVisibilityBtn"
+              class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+              title="Show/Hide Password"
+            >
+              <i data-lucide="eye" class="w-4 h-4"></i>
+            </button>
+          </div>
         </div>
 
         <div id="adminAuthError" class="hidden p-2.5 rounded-xl text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200">
@@ -1858,11 +1922,64 @@
         <button
           type="submit"
           id="adminAuthSubmitBtn"
-          class="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl shadow-sm transition flex items-center justify-center gap-2"
+          class="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-sm font-semibold rounded-xl shadow-sm transition flex items-center justify-center gap-2"
         >
-          <span>Unlock Dashboard</span>
+          <i data-lucide="log-in" class="w-4 h-4"></i>
+          <span>Log In to Dashboard</span>
         </button>
       </form>
+
+      <!-- Mode: First-Time Setup Form (hidden by default, shown if setupRequired) -->
+      <form id="adminSetupForm" class="space-y-4 hidden">
+        <div>
+          <label for="adminSetupPassword" class="block text-xs font-semibold text-slate-700 mb-1">Create Admin Password</label>
+          <input
+            type="password"
+            id="adminSetupPassword"
+            placeholder="At least 6 characters"
+            class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition font-mono"
+            required
+            autocomplete="new-password"
+          >
+        </div>
+        <div>
+          <label for="adminSetupConfirm" class="block text-xs font-semibold text-slate-700 mb-1">Confirm Admin Password</label>
+          <input
+            type="password"
+            id="adminSetupConfirm"
+            placeholder="Re-enter password"
+            class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition font-mono"
+            required
+            autocomplete="new-password"
+          >
+        </div>
+
+        <div id="adminSetupError" class="hidden p-2.5 rounded-xl text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200">
+          Passwords do not match.
+        </div>
+
+        <button
+          type="submit"
+          id="adminSetupSubmitBtn"
+          class="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-sm font-semibold rounded-xl shadow-sm transition flex items-center justify-center gap-2"
+        >
+          <i data-lucide="check-circle" class="w-4 h-4"></i>
+          <span>Save Password & Log In</span>
+        </button>
+      </form>
+
+      <!-- Development Mode Quick Bypass / Login -->
+      <div id="adminDevLoginSection" class="hidden pt-3 border-t border-slate-100 text-center">
+        <button
+          type="button"
+          id="adminDevLoginBtn"
+          class="w-full py-2 px-3 bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-semibold rounded-xl border border-amber-200 transition flex items-center justify-center gap-1.5"
+        >
+          <i data-lucide="zap" class="w-3.5 h-3.5 text-amber-600"></i>
+          <span>⚡ One-Click Dev Login (Local Development)</span>
+        </button>
+      </div>
+
     </div>
   </div>
 

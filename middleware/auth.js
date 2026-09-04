@@ -6,6 +6,7 @@
 
 const crypto = require('crypto');
 const logger = require('../utils/logger');
+const storage = require('../services/storage');
 
 // In-memory session store: Map<sessionId, { createdAt: number, expiresAt: number }>
 const activeSessions = new Map();
@@ -30,6 +31,49 @@ function safeCompare(a, b) {
 }
 
 /**
+ * PBKDF2 Password Hashing & Verification
+ */
+function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
+  if (!password || typeof password !== 'string') {
+    throw new Error('Password must be a valid string');
+  }
+  const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
+  return { hash, salt };
+}
+
+function verifyPassword(password, hash, salt) {
+  if (!password || !hash || !salt || typeof password !== 'string') return false;
+  try {
+    const testHash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
+    const testBuf = Buffer.from(testHash, 'utf8');
+    const hashBuf = Buffer.from(hash, 'utf8');
+    if (testBuf.length !== hashBuf.length) return false;
+    return crypto.timingSafeEqual(testBuf, hashBuf);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check if the server has authentication configured
+ * Either ADMIN_API_KEY environment variable OR stored adminPasswordHash
+ */
+function isAuthConfigured() {
+  if (process.env.ADMIN_API_KEY && typeof process.env.ADMIN_API_KEY === 'string' && process.env.ADMIN_API_KEY.trim()) {
+    return true;
+  }
+  try {
+    const settings = storage.getSettings();
+    if (settings && settings.adminPasswordHash && settings.adminPasswordSalt) {
+      return true;
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
+/**
  * Parse cookies from request header
  */
 function parseCookies(cookieHeader) {
@@ -43,7 +87,7 @@ function parseCookies(cookieHeader) {
     const val = pair.substring(idx + 1).trim();
     try {
       cookies[key] = decodeURIComponent(val);
-    } catch (e) {
+    } catch {
       cookies[key] = val;
     }
   }
@@ -139,13 +183,25 @@ function authMiddleware(req, res, next) {
   }
 
   // 3. Allow Public Auth Endpoints to bypass
-  if (path === '/auth/login' || path === '/auth/status' || originalUrl.startsWith('/api/auth/login') || originalUrl.startsWith('/api/auth/status')) {
+  if (
+    path === '/auth/login' ||
+    path === '/auth/setup' ||
+    path === '/auth/dev-login' ||
+    path === '/auth/logout' ||
+    path === '/auth/session' ||
+    path === '/auth/status' ||
+    originalUrl.startsWith('/api/auth/login') ||
+    originalUrl.startsWith('/api/auth/setup') ||
+    originalUrl.startsWith('/api/auth/dev-login') ||
+    originalUrl.startsWith('/api/auth/logout') ||
+    originalUrl.startsWith('/api/auth/session') ||
+    originalUrl.startsWith('/api/auth/status')
+  ) {
     return next();
   }
 
   const isProduction = process.env.NODE_ENV === 'production';
   const devBypass = process.env.DEV_AUTH_BYPASS === 'true';
-  const expectedKey = process.env.ADMIN_API_KEY;
 
   // 4. Development Bypass Check (ONLY allowed when NODE_ENV !== 'production' AND DEV_AUTH_BYPASS === 'true')
   if (!isProduction && devBypass) {
@@ -156,8 +212,49 @@ function authMiddleware(req, res, next) {
     return next();
   }
 
-  // 5. Fail closed if ADMIN_API_KEY is not configured
-  if (!expectedKey || typeof expectedKey !== 'string' || !expectedKey.trim()) {
+  // 5. Check Session Cookie (authenticated browser sessions)
+  const cookies = parseCookies(req.headers.cookie);
+  const sessionId = cookies.auth_session;
+  if (sessionId && validateSession(sessionId)) {
+    return next();
+  }
+
+  // 6. Check Header Credentials (x-admin-key or Authorization: Bearer)
+  const adminKeyHeader = req.headers['x-admin-key'];
+  const authHeader = req.headers.authorization;
+
+  let headerToken = null;
+  if (typeof adminKeyHeader === 'string') {
+    headerToken = adminKeyHeader.trim();
+  } else if (typeof authHeader === 'string') {
+    const parts = authHeader.split(' ');
+    if (parts.length === 2 && (parts[0].toLowerCase() === 'bearer' || parts[0].toLowerCase() === 'token')) {
+      headerToken = parts[1].trim();
+    } else {
+      headerToken = authHeader.trim();
+    }
+  }
+
+  const expectedKey = process.env.ADMIN_API_KEY;
+
+  if (headerToken) {
+    if (expectedKey && typeof expectedKey === 'string' && expectedKey.trim() && safeCompare(headerToken, expectedKey.trim())) {
+      return next();
+    }
+    try {
+      const settings = storage.getSettings();
+      if (settings && settings.adminPasswordHash && settings.adminPasswordSalt) {
+        if (verifyPassword(headerToken, settings.adminPasswordHash, settings.adminPasswordSalt)) {
+          return next();
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 7. Fail closed if authentication is not configured on server
+  if (!isAuthConfigured()) {
     if (isProduction) {
       logger.error('[Security] Production server error: ADMIN_API_KEY is not configured. Failing closed.');
       return res.status(500).json({
@@ -175,34 +272,7 @@ function authMiddleware(req, res, next) {
     }
   }
 
-  // 6. Check Session Cookie
-  const cookies = parseCookies(req.headers.cookie);
-  const sessionId = cookies.auth_session;
-  if (sessionId && validateSession(sessionId)) {
-    return next();
-  }
-
-  // 7. Check Header Credentials (x-admin-key or Authorization: Bearer)
-  const adminKeyHeader = req.headers['x-admin-key'];
-  const authHeader = req.headers.authorization;
-
-  let headerToken = null;
-  if (typeof adminKeyHeader === 'string') {
-    headerToken = adminKeyHeader.trim();
-  } else if (typeof authHeader === 'string') {
-    const parts = authHeader.split(' ');
-    if (parts.length === 2 && (parts[0].toLowerCase() === 'bearer' || parts[0].toLowerCase() === 'token')) {
-      headerToken = parts[1].trim();
-    } else {
-      headerToken = authHeader.trim();
-    }
-  }
-
-  if (headerToken && safeCompare(headerToken, expectedKey)) {
-    return next();
-  }
-
-  // 8. Reject Unauthorized Request
+  // 8. Reject Unauthorized Request (auth configured, but credentials missing or invalid)
   return res.status(401).json({
     success: false,
     error: 'Unauthorized: Invalid or missing authentication credentials.',
@@ -218,5 +288,8 @@ module.exports = {
   destroySession,
   clearAllSessions,
   hasQueryCredentials,
-  parseCookies
+  parseCookies,
+  hashPassword,
+  verifyPassword,
+  isAuthConfigured
 };

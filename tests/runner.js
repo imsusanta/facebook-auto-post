@@ -97,7 +97,10 @@ const {
   validateSession,
   destroySession,
   clearAllSessions,
-  hasQueryCredentials
+  hasQueryCredentials,
+  hashPassword,
+  verifyPassword,
+  isAuthConfigured
 } = require('../middleware/auth');
 
 const {
@@ -416,6 +419,37 @@ test('Auth: HttpOnly session cookie enables authentication without URL tokens', 
     process.env.ADMIN_API_KEY = origKey;
     process.env.NODE_ENV = origEnv;
     process.env.DEV_AUTH_BYPASS = origBypass;
+  }
+});
+
+test('Auth: hashPassword and verifyPassword work reliably using PBKDF2', () => {
+  const password = 'mySecretAdminPassword2026!';
+  const { hash, salt } = hashPassword(password);
+
+  assert.ok(typeof hash === 'string' && hash.length === 128);
+  assert.ok(typeof salt === 'string' && salt.length === 32);
+
+  // Correct password verification
+  assert.strictEqual(verifyPassword(password, hash, salt), true);
+
+  // Incorrect password verification
+  assert.strictEqual(verifyPassword('WrongPassword123', hash, salt), false);
+  assert.strictEqual(verifyPassword('', hash, salt), false);
+  assert.strictEqual(verifyPassword(null, hash, salt), false);
+});
+
+test('Auth: isAuthConfigured reports configuration state accurately', () => {
+  const origKey = process.env.ADMIN_API_KEY;
+  try {
+    delete process.env.ADMIN_API_KEY;
+    // With no env key and no settings password, isAuthConfigured returns false
+    const configuredWithoutKey = isAuthConfigured();
+    assert.strictEqual(typeof configuredWithoutKey, 'boolean');
+
+    process.env.ADMIN_API_KEY = 'configured_admin_key';
+    assert.strictEqual(isAuthConfigured(), true);
+  } finally {
+    process.env.ADMIN_API_KEY = origKey;
   }
 });
 

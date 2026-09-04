@@ -226,6 +226,22 @@ const storage = {
     return updated;
   },
 
+  getAdminAuth() {
+    const s = this.getSettings();
+    return {
+      hasPassword: Boolean(s.adminPasswordHash && s.adminPasswordSalt),
+      hash: s.adminPasswordHash || null,
+      salt: s.adminPasswordSalt || null
+    };
+  },
+
+  setAdminPassword(hash, salt) {
+    return this.saveSettings({
+      adminPasswordHash: hash,
+      adminPasswordSalt: salt
+    });
+  },
+
   getConnectedPages() {
     const s = this.getSettings();
     if (!Array.isArray(s.pages) || s.pages.length === 0) {

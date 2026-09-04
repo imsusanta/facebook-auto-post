@@ -35,11 +35,16 @@ const SENSITIVE_KEY_NAMES = new Set([
   'private_key',
   'fbappsecret',
   'appsecret',
-  'app_secret',
   'credential',
   'credentials',
   'adminkey',
-  'admin_key'
+  'admin_key',
+  'adminpasswordhash',
+  'admin_password_hash',
+  'adminpasswordsalt',
+  'admin_password_salt',
+  'salt',
+  'hash'
 ]);
 
 /**
@@ -181,6 +186,10 @@ function serializeSettings(settings) {
   sanitized.facebookConnected = !!(
     (settings.accessToken && settings.accessToken.trim().length > 0) ||
     (Array.isArray(settings.pages) && settings.pages.some(p => p && (p.accessToken || p.access_token)))
+  );
+  sanitized.adminConfigured = !!(
+    (process.env.ADMIN_API_KEY && process.env.ADMIN_API_KEY.trim().length > 0) ||
+    (settings.adminPasswordHash && settings.adminPasswordHash.trim().length > 0)
   );
   if (Array.isArray(settings.pages)) {
     sanitized.pages = serializePages(settings.pages);

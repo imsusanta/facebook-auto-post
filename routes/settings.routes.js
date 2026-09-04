@@ -14,6 +14,7 @@ const ai = require('../services/ai');
 const { broadcastSSE } = require('../middleware/sse');
 const { serializeSettings } = require('../utils/public-serializer');
 const { validateSettings } = require('../middleware/settings-validator');
+const { hashPassword, verifyPassword } = require('../middleware/auth');
 
 // Strict rate limit for credential update endpoints
 const credentialLimiter = rateLimit({
@@ -92,6 +93,46 @@ router.put('/webhook-credential', credentialLimiter, (req, res) => {
   return res.json({
     success: true,
     configured: true
+  });
+});
+
+// PUT /api/settings/admin-credential - Update admin password
+router.put('/admin-credential', credentialLimiter, (req, res) => {
+  const { currentPassword, newPassword, confirmPassword } = req.body || {};
+
+  if (!newPassword || typeof newPassword !== 'string' || newPassword.trim().length < 6) {
+    return res.status(400).json({
+      success: false,
+      error: 'New admin password must be at least 6 characters long.',
+      code: 'PASSWORD_TOO_SHORT'
+    });
+  }
+
+  if (newPassword !== confirmPassword) {
+    return res.status(400).json({
+      success: false,
+      error: 'New passwords do not match.',
+      code: 'PASSWORDS_MISMATCH'
+    });
+  }
+
+  const adminAuth = storage.getAdminAuth();
+  if (adminAuth.hasPassword) {
+    if (!currentPassword || !verifyPassword(currentPassword, adminAuth.hash, adminAuth.salt)) {
+      return res.status(401).json({
+        success: false,
+        error: 'Current admin password is incorrect.',
+        code: 'INVALID_CURRENT_PASSWORD'
+      });
+    }
+  }
+
+  const { hash, salt } = hashPassword(newPassword.trim());
+  storage.setAdminPassword(hash, salt);
+
+  return res.json({
+    success: true,
+    message: 'Admin password updated successfully.'
   });
 });
 
