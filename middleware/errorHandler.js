@@ -6,8 +6,8 @@
 function redactSensitiveString(str) {
   if (typeof str !== 'string') return str;
   return str
-    .replace(/AIza[0-9A-Za-z_-]{35}/g, '[REDACTED_API_KEY]')
-    .replace(/EAA[0-9A-Za-z_-]{20,}/g, '[REDACTED_FB_TOKEN]')
+    .replace(/AIza[0-9A-Za-z_-]{25,}/g, '[REDACTED_API_KEY]')
+    .replace(/EAA[0-9A-Za-z_-]{15,}/g, '[REDACTED_FB_TOKEN]')
     .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
     .replace(/(?:key|token|secret|password)=([^\s&]+)/gi, '$1=[REDACTED]');
 }

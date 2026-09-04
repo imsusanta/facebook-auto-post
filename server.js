@@ -6,6 +6,8 @@
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const { PORT, NODE_ENV } = require('./config/env');
 const { UPLOADS_DIR } = require('./config/constants');
@@ -13,13 +15,63 @@ const { broadcastSSE } = require('./middleware/sse');
 const errorHandler = require('./middleware/errorHandler');
 const apiRoutes = require('./routes');
 const scheduler = require('./services/scheduler');
+const logger = require('./utils/logger');
 
 const app = express();
 
-// Standard SaaS Middlewares
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Security Headers via Helmet
+app.use(helmet({
+  contentSecurityPolicy: false, // Frontend relies on Tailwind CDN, Lucide CDN, and remote media
+  crossOriginEmbedderPolicy: false
+}));
+
+// CORS Configuration with strict origin controls
+const rawAllowed = process.env.ALLOWED_ORIGINS || '';
+const allowedOrigins = rawAllowed
+  ? rawAllowed.split(',').map(o => o.trim()).filter(Boolean)
+  : ['http://localhost:3000', 'http://127.0.0.1:3000'];
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow server-to-server, curl, same-origin, or missing origin
+    if (!origin) return callback(null, true);
+    if (
+      allowedOrigins.includes(origin) ||
+      (NODE_ENV === 'development' && /^http:\/\/localhost(:\d+)?$/.test(origin))
+    ) {
+      return callback(null, true);
+    }
+    return callback(new Error('Blocked by CORS policy: Origin not allowed.'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-key']
+};
+app.use(cors(corsOptions));
+
+// Safe Request Body Size Limits
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+// Rate Limiting
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 500, // 500 requests per 15 min
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many requests, please try again later.' }
+});
+
+const generateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30, // 30 generation requests per minute
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Generation rate limit reached. Please slow down.' }
+});
+
+app.use('/api', apiLimiter);
+app.use('/api/ai/generate', generateLimiter);
 
 // Serve static assets & uploaded media
 app.use('/uploads', express.static(path.join(__dirname, UPLOADS_DIR)));
@@ -44,11 +96,11 @@ scheduler.init();
 
 // Boot HTTP Server
 const server = app.listen(PORT, () => {
-  console.log('=======================================================');
-  console.log(`🚀 AutoPost Facebook Automation SaaS Engine`);
-  console.log(`🌐 Environment: ${NODE_ENV}`);
-  console.log(`📡 Local URL:   http://localhost:${PORT}`);
-  console.log('=======================================================');
+  logger.info('=======================================================');
+  logger.info(`🚀 AutoPost Facebook Automation SaaS Engine`);
+  logger.info(`🌐 Environment: ${NODE_ENV}`);
+  logger.info(`📡 Local URL:   http://localhost:${PORT}`);
+  logger.info('=======================================================');
 });
 
 module.exports = { app, server };
