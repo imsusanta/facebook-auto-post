@@ -33,4 +33,8 @@ router.use('/media', mediaRoutes);
 router.use('/settings', settingsRoutes);
 router.use('/templates', templatesRoutes);
 
+// SaaS Phase 1: Multi-Tenant Workspace Routes
+const v1WorkspacesRoutes = require('./v1/workspaces');
+router.use('/v1/workspaces', v1WorkspacesRoutes);
+
 module.exports = router;

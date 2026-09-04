@@ -244,6 +244,17 @@ function authMiddleware(req, res, next) {
     return next();
   }
 
+  // 4b. Test Environment Identity Header (ONLY allowed when NODE_ENV === 'test')
+  if (process.env.NODE_ENV === 'test' && req.headers['x-test-user-id']) {
+    req.authType = 'test';
+    req.user = {
+      id: req.headers['x-test-user-id'],
+      email: req.headers['x-test-user-email'] || 'test@example.com',
+      role: 'user'
+    };
+    return next();
+  }
+
   // 5. Check Session Cookie (authenticated browser sessions)
   const cookies = parseCookies(req.headers.cookie);
   const sessionId = cookies.auth_session || cookies['__Host-auth_session'];
