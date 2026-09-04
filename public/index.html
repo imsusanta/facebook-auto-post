@@ -1,0 +1,1747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AutoPost - Facebook Post Automation</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#EEF2FF',
+              100: '#E0E7FF',
+              500: '#6366F1',
+              600: '#4F46E5',
+              700: '#4338CA',
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="bg-[#F8FAFC] text-slate-900 flex h-screen overflow-hidden font-sans">
+
+  <!-- ================= LEFT SIDEBAR ================= -->
+  <aside class="w-64 bg-white border-r border-slate-200/80 flex flex-col justify-between shrink-0 h-full select-none z-20">
+    <div>
+      <!-- Brand / Logo -->
+      <div class="h-20 px-6 flex items-center gap-3.5 border-b border-slate-100/80 cursor-pointer" id="brandLogoHome">
+        <div class="w-10 h-10 rounded-full bg-[#1877F2] text-white flex items-center justify-center font-bold text-2xl shadow-sm tracking-tighter">
+          f
+        </div>
+        <div>
+          <h1 class="text-lg font-bold text-slate-900 tracking-tight leading-none">AutoPost</h1>
+          <p class="text-xs font-medium text-slate-400 mt-1">Facebook Automation</p>
+        </div>
+      </div>
+
+      <!-- Navigation Links -->
+      <div class="px-4 py-5 space-y-6 overflow-y-auto max-h-[calc(100vh-160px)]">
+        <!-- MAIN Section -->
+        <div>
+          <div class="text-[11px] font-bold text-slate-400 tracking-wider px-3 mb-2 uppercase">Main</div>
+          <nav class="space-y-1">
+            <a href="#" class="sidebar-item active" data-nav="dashboard">
+              <i data-lucide="layout-grid" class="w-4 h-4"></i>
+              <span>Dashboard</span>
+            </a>
+            <a href="#" class="sidebar-item" data-nav="create-post" id="navCreatePost">
+              <i data-lucide="edit-3" class="w-4 h-4"></i>
+              <span>Create Post</span>
+            </a>
+            <a href="#" class="sidebar-item" data-nav="queue">
+              <i data-lucide="layers" class="w-4 h-4"></i>
+              <span>Post Queue</span>
+              <span id="badgeQueueCount" class="ml-auto text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-semibold">0</span>
+            </a>
+            <a href="#" class="sidebar-item" data-nav="calendar">
+              <i data-lucide="calendar" class="w-4 h-4"></i>
+              <span>Calendar</span>
+            </a>
+            <a href="#" class="sidebar-item" data-nav="automation">
+              <i data-lucide="bot" class="w-4 h-4"></i>
+              <span>Automation</span>
+            </a>
+            <a href="#" class="sidebar-item" data-nav="templates">
+              <i data-lucide="file-text" class="w-4 h-4"></i>
+              <span>Templates</span>
+            </a>
+            <a href="#" class="sidebar-item" data-nav="media">
+              <i data-lucide="image" class="w-4 h-4"></i>
+              <span>Media Library</span>
+            </a>
+            <a href="#" class="sidebar-item" data-nav="accounts">
+              <i data-lucide="users" class="w-4 h-4"></i>
+              <span>Accounts</span>
+            </a>
+          </nav>
+        </div>
+
+        <!-- SETTINGS Section -->
+        <div>
+          <div class="text-[11px] font-bold text-slate-400 tracking-wider px-3 mb-2 uppercase">Settings</div>
+          <nav class="space-y-1">
+            <a href="#" class="sidebar-item" data-nav="settings">
+              <i data-lucide="settings" class="w-4 h-4"></i>
+              <span>Settings</span>
+            </a>
+            <a href="#" class="sidebar-item" data-nav="integrations">
+              <i data-lucide="link-2" class="w-4 h-4"></i>
+              <span>Integrations</span>
+            </a>
+            <a href="#" class="sidebar-item" data-nav="notifications" id="navNotifications">
+              <i data-lucide="bell" class="w-4 h-4"></i>
+              <span>Notifications</span>
+            </a>
+            <a href="#" class="sidebar-item" data-nav="activity">
+              <i data-lucide="activity" class="w-4 h-4"></i>
+              <span>Activity Log</span>
+            </a>
+          </nav>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom User Profile Widget -->
+    <div class="p-4 border-t border-slate-100 bg-white">
+      <div id="profileTrigger" class="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 cursor-pointer transition">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-600 to-indigo-400 text-white font-bold flex items-center justify-center text-sm shadow-sm">
+            S
+          </div>
+          <div>
+            <h4 id="displayProfileName" class="text-sm font-semibold text-slate-800 leading-tight">Sushanta Digital</h4>
+            <p id="displayProfileRole" class="text-xs text-slate-400 font-medium">Admin</p>
+          </div>
+        </div>
+        <i data-lucide="chevron-down" class="w-4 h-4 text-slate-400"></i>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ================= MAIN CONTENT AREA ================= -->
+  <div class="flex-1 flex flex-col h-full overflow-hidden relative">
+
+    <!-- Top Header Bar -->
+    <header class="px-8 pt-6 pb-4 flex items-center justify-between gap-4 bg-[#F8FAFC] border-b border-slate-100/60 shrink-0">
+      <div>
+        <h2 id="headerTitle" class="text-2xl font-bold text-slate-900 tracking-tight">Facebook Post Automation</h2>
+        <p id="headerSubtitle" class="text-sm text-slate-500 font-normal mt-0.5">
+          Create once. Schedule anytime. Publish <span class="text-indigo-600 font-semibold">automatically</span>.
+        </p>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <!-- Live SSE Status Indicator -->
+        <div id="liveStatusBadge" class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-slate-200/80 text-xs font-medium text-slate-600 shadow-sm">
+          <span class="relative flex h-2 w-2">
+            <span id="liveStatusPing" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span id="liveStatusDot" class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+          </span>
+          <span id="liveStatusText">Live Connected</span>
+        </div>
+
+        <!-- Quick Page Switcher Dropdown -->
+        <div class="relative">
+          <button id="headerPageSwitcherBtn" class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white border border-slate-200/90 text-xs font-semibold text-slate-800 hover:bg-slate-50 transition shadow-sm">
+            <img id="headerActivePageLogo" src="/pariksha_notes_logo.jpg" class="w-6 h-6 rounded-full object-cover ring-1 ring-indigo-500/40">
+            <div class="text-left hidden md:block max-w-[130px] truncate">
+              <span id="headerActivePageName" class="block font-bold text-slate-900 leading-none truncate">Connected Page</span>
+              <span class="text-[10px] text-emerald-600 font-medium">Active Page</span>
+            </div>
+            <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-400"></i>
+          </button>
+
+          <!-- Dropdown Menu -->
+          <div id="headerPageDropdown" class="hidden absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-2xl border border-slate-100 z-50 p-2 space-y-1">
+            <div class="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 flex items-center justify-between">
+              <span>Switch Facebook Page</span>
+              <span id="headerPagesCountBadge" class="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-md font-mono">1</span>
+            </div>
+            <div id="headerPagesList" class="max-h-60 overflow-y-auto space-y-1 py-1">
+              <!-- Dynamically populated -->
+            </div>
+            <div class="pt-1.5 border-t border-slate-100">
+              <button id="headerAddNewPageBtn" class="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-indigo-600 hover:bg-indigo-50 transition">
+                <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
+                <span>Connect Another Page</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- + Create New Post Button -->
+        <button id="openComposerBtn" class="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-sm font-semibold px-4 sm:px-5 py-2.5 rounded-xl shadow-sm transition flex items-center gap-2">
+          <i data-lucide="plus" class="w-4 h-4"></i>
+          <span>Create New Post</span>
+        </button>
+
+        <!-- Notification Bell -->
+        <button id="notificationBtn" class="w-10 h-10 rounded-xl bg-white border border-slate-200/80 flex items-center justify-center text-slate-600 hover:bg-slate-50 relative shadow-sm transition" title="Notifications">
+          <i data-lucide="bell" class="w-4 h-4 text-slate-600"></i>
+          <span id="bellBadgeDot" class="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-rose-500"></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Notification Flyout Drawer -->
+    <div id="notificationDrawer" class="absolute top-20 right-8 w-80 bg-white rounded-2xl shadow-2xl border border-slate-100 z-50 p-4 hidden notification-drawer">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
+        <div class="flex items-center gap-2">
+          <i data-lucide="bell" class="w-4 h-4 text-indigo-600"></i>
+          <h4 class="text-sm font-bold text-slate-900">Notifications</h4>
+        </div>
+        <button id="clearNotificationsBtn" class="text-[11px] text-indigo-600 hover:underline font-semibold">Mark all read</button>
+      </div>
+      <div id="notificationsList" class="space-y-2.5 max-h-80 overflow-y-auto">
+        <!-- Dynamically populated -->
+      </div>
+    </div>
+
+    <!-- Scrollable Workspace Body -->
+    <main class="flex-1 overflow-y-auto px-8 py-6 space-y-6">
+
+      <!-- ================= 1. VIEW: DASHBOARD ================= -->
+      <div id="view-dashboard" class="app-view space-y-6">
+        
+        <!-- 4 METRICS CARDS ROW -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
+          <!-- Metric 1: Total Posts -->
+          <div class="saas-card p-5 flex items-start gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-sky-50 text-sky-500 flex items-center justify-center shrink-0">
+              <i data-lucide="copy" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <div id="statTotalPosts" class="text-2xl font-bold text-slate-900 leading-tight">128</div>
+              <div class="text-xs font-medium text-slate-500 mt-0.5">Total Posts</div>
+              <div class="text-xs font-semibold text-emerald-600 mt-1.5">+12 this month</div>
+            </div>
+          </div>
+
+          <!-- Metric 2: Scheduled -->
+          <div class="saas-card p-5 flex items-start gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-500 flex items-center justify-center shrink-0">
+              <i data-lucide="calendar" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <div id="statScheduledPosts" class="text-2xl font-bold text-slate-900 leading-tight">24</div>
+              <div class="text-xs font-medium text-slate-500 mt-0.5">Scheduled</div>
+              <div id="statNextPostTime" class="text-xs font-semibold text-emerald-600 mt-1.5">Next post in 2h 30m</div>
+            </div>
+          </div>
+
+          <!-- Metric 3: Published -->
+          <div class="saas-card p-5 flex items-start gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-500 flex items-center justify-center shrink-0">
+              <i data-lucide="send" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <div id="statPublishedPosts" class="text-2xl font-bold text-slate-900 leading-tight">98</div>
+              <div class="text-xs font-medium text-slate-500 mt-0.5">Published</div>
+              <div class="text-xs font-semibold text-emerald-600 mt-1.5">+18% engagement</div>
+            </div>
+          </div>
+
+          <!-- Metric 4: Total Reach -->
+          <div class="saas-card p-5 flex items-start gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-amber-50 text-amber-500 flex items-center justify-center shrink-0">
+              <i data-lucide="trending-up" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <div id="statTotalReach" class="text-2xl font-bold text-slate-900 leading-tight">12.4K</div>
+              <div class="text-xs font-medium text-slate-500 mt-0.5">Total Reach</div>
+              <div class="text-xs font-semibold text-emerald-600 mt-1.5">+24% this month</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TWO-COLUMN DASHBOARD GRID -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+          <!-- LEFT COLUMN (~68% width) -->
+          <div class="lg:col-span-8 space-y-6">
+
+            <!-- CARD 1: CONTENT CALENDAR -->
+            <div class="saas-card p-6" id="dashboardCalendarCard">
+              <div class="flex items-center justify-between mb-5">
+                <div class="flex items-center gap-2.5">
+                  <i data-lucide="calendar" class="w-5 h-5 text-indigo-600"></i>
+                  <h3 class="text-base font-bold text-slate-900">Content Calendar</h3>
+                </div>
+
+                <div class="flex items-center gap-3">
+                  <!-- View Switcher -->
+                  <div class="flex items-center bg-slate-100 p-1 rounded-xl">
+                    <button class="cal-toggle-week text-xs font-semibold px-3 py-1 rounded-lg bg-indigo-50 text-indigo-600 shadow-sm transition">
+                      Week
+                    </button>
+                    <button class="cal-toggle-month text-xs font-medium px-3 py-1 rounded-lg text-slate-500 hover:text-slate-900 transition">
+                      Month
+                    </button>
+                  </div>
+
+                  <!-- Prev / Next Chevrons -->
+                  <div class="flex items-center gap-1">
+                    <button class="cal-nav-prev w-7 h-7 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-slate-800 transition">
+                      <i data-lucide="chevron-left" class="w-4 h-4"></i>
+                    </button>
+                    <button class="cal-nav-next w-7 h-7 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-slate-800 transition">
+                      <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Week Calendar Grid Container -->
+              <div id="dashboardWeekContainer">
+                <div class="grid grid-cols-8 text-center text-xs pb-3 border-b border-slate-100">
+                  <div class="text-slate-400 font-medium">Time</div>
+                  <div><div class="text-slate-500 font-medium">Mon</div><div class="text-slate-800 font-semibold text-xs mt-0.5">26 May</div></div>
+                  <div><div class="text-slate-500 font-medium">Tue</div><div class="text-slate-800 font-semibold text-xs mt-0.5">27 May</div></div>
+                  <div><div class="text-indigo-600 font-bold">Wed</div><div class="text-indigo-600 font-bold text-xs mt-0.5">28 May</div></div>
+                  <div><div class="text-slate-500 font-medium">Thu</div><div class="text-slate-800 font-semibold text-xs mt-0.5">29 May</div></div>
+                  <div><div class="text-slate-500 font-medium">Fri</div><div class="text-slate-800 font-semibold text-xs mt-0.5">30 May</div></div>
+                  <div><div class="text-slate-500 font-medium">Sat</div><div class="text-slate-800 font-semibold text-xs mt-0.5">31 May</div></div>
+                  <div><div class="text-slate-500 font-medium">Sun</div><div class="text-slate-800 font-semibold text-xs mt-0.5">1 Jun</div></div>
+                </div>
+
+                <!-- Time slots -->
+                <div class="relative">
+                  <!-- 09:00 AM -->
+                  <div class="grid grid-cols-8 calendar-time-slot">
+                    <div class="text-slate-400 text-xs font-medium pl-1">09:00 AM</div>
+                    <div class="calendar-cell relative" data-date="2024-05-26" data-time="09:30">
+                      <div class="cal-event-card bg-sky-50 border border-sky-100 text-sky-900" title="Morning Motivation">
+                        <span class="text-[10px] font-semibold text-sky-600">09:30 AM</span>
+                        <span class="text-[11px] font-bold text-slate-800 line-clamp-1 leading-tight">Morning Motivation</span>
+                        <div class="flex items-center justify-between mt-1">
+                          <img src="https://images.unsplash.com/photo-1470240731273-7821a6eeb6bd?w=100&auto=format&fit=crop&q=80" class="w-4 h-4 rounded-md object-cover">
+                          <div class="w-3.5 h-3.5 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-[8px] font-bold">f</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="calendar-cell" data-date="2024-05-27" data-time="09:00"></div>
+                    <div class="calendar-cell relative" data-date="2024-05-28" data-time="09:15">
+                      <div class="cal-event-card bg-indigo-50 border border-indigo-100 text-indigo-900" title="New Blog Post">
+                        <span class="text-[10px] font-semibold text-indigo-600">09:15 AM</span>
+                        <span class="text-[11px] font-bold text-slate-800 line-clamp-1 leading-tight">New Blog Post</span>
+                        <div class="flex items-center justify-between mt-1">
+                          <img src="https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=100&auto=format&fit=crop&q=80" class="w-4 h-4 rounded-md object-cover">
+                          <div class="w-3.5 h-3.5 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-[8px] font-bold">f</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="calendar-cell" data-date="2024-05-29" data-time="09:00"></div>
+                    <div class="calendar-cell" data-date="2024-05-30" data-time="09:00"></div>
+                    <div class="calendar-cell" data-date="2024-05-31" data-time="09:00"></div>
+                    <div class="calendar-cell" data-date="2024-06-01" data-time="09:00"></div>
+                  </div>
+
+                  <!-- 12:00 PM -->
+                  <div class="grid grid-cols-8 calendar-time-slot">
+                    <div class="text-slate-400 text-xs font-medium pl-1">12:00 PM</div>
+                    <div class="calendar-cell" data-date="2024-05-26" data-time="12:00"></div>
+                    <div class="calendar-cell relative" data-date="2024-05-27" data-time="12:00">
+                      <div class="cal-event-card bg-emerald-50 border border-emerald-100 text-emerald-900" title="Tips & Tricks">
+                        <span class="text-[10px] font-semibold text-emerald-600">12:00 PM</span>
+                        <span class="text-[11px] font-bold text-slate-800 line-clamp-1 leading-tight">Tips & Tricks</span>
+                        <div class="flex items-center justify-between mt-1">
+                          <img src="https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=100&auto=format&fit=crop&q=80" class="w-4 h-4 rounded-md object-cover">
+                          <div class="w-3.5 h-3.5 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-[8px] font-bold">f</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="calendar-cell" data-date="2024-05-28" data-time="12:00"></div>
+                    <div class="calendar-cell" data-date="2024-05-29" data-time="12:00"></div>
+                    <div class="calendar-cell" data-date="2024-05-30" data-time="12:00"></div>
+                    <div class="calendar-cell relative" data-date="2024-05-31" data-time="12:30">
+                      <div class="cal-event-card bg-rose-50 border border-rose-100 text-rose-900" title="Weekend Offer">
+                        <span class="text-[10px] font-semibold text-rose-600">12:30 PM</span>
+                        <span class="text-[11px] font-bold text-slate-800 line-clamp-1 leading-tight">Weekend Offer</span>
+                        <div class="flex items-center justify-between mt-1">
+                          <img src="https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=100&auto=format&fit=crop&q=80" class="w-4 h-4 rounded-md object-cover">
+                          <div class="w-3.5 h-3.5 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-[8px] font-bold">f</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="calendar-cell" data-date="2024-06-01" data-time="12:00"></div>
+                  </div>
+
+                  <!-- 03:00 PM -->
+                  <div class="grid grid-cols-8 calendar-time-slot">
+                    <div class="text-slate-400 text-xs font-medium pl-1">03:00 PM</div>
+                    <div class="calendar-cell" data-date="2024-05-26" data-time="15:00"></div>
+                    <div class="calendar-cell" data-date="2024-05-27" data-time="15:00"></div>
+                    <div class="calendar-cell" data-date="2024-05-28" data-time="15:00"></div>
+                    <div class="calendar-cell relative" data-date="2024-05-29" data-time="15:00">
+                      <div class="cal-event-card bg-amber-50 border border-amber-100 text-amber-900" title="Product Update">
+                        <span class="text-[10px] font-semibold text-amber-600">03:00 PM</span>
+                        <span class="text-[11px] font-bold text-slate-800 line-clamp-1 leading-tight">Product Update</span>
+                        <div class="flex items-center justify-between mt-1">
+                          <img src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=100&auto=format&fit=crop&q=80" class="w-4 h-4 rounded-md object-cover">
+                          <div class="w-3.5 h-3.5 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-[8px] font-bold">f</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="calendar-cell" data-date="2024-05-30" data-time="15:00"></div>
+                    <div class="calendar-cell" data-date="2024-05-31" data-time="15:00"></div>
+                    <div class="calendar-cell" data-date="2024-06-01" data-time="15:00"></div>
+                  </div>
+
+                  <!-- 06:00 PM -->
+                  <div class="grid grid-cols-8 calendar-time-slot">
+                    <div class="text-slate-400 text-xs font-medium pl-1">06:00 PM</div>
+                    <div class="calendar-cell" data-date="2024-05-26" data-time="18:00"></div>
+                    <div class="calendar-cell" data-date="2024-05-27" data-time="18:00"></div>
+                    <div class="calendar-cell" data-date="2024-05-28" data-time="18:00"></div>
+                    <div class="calendar-cell" data-date="2024-05-29" data-time="18:00"></div>
+                    <div class="calendar-cell relative" data-date="2024-05-30" data-time="18:00">
+                      <div class="cal-event-card bg-sky-50 border border-sky-100 text-sky-900" title="Customer Story">
+                        <span class="text-[10px] font-semibold text-sky-600">06:00 PM</span>
+                        <span class="text-[11px] font-bold text-slate-800 line-clamp-1 leading-tight">Customer Story</span>
+                        <div class="flex items-center justify-between mt-1">
+                          <img src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=100&auto=format&fit=crop&q=80" class="w-4 h-4 rounded-md object-cover">
+                          <div class="w-3.5 h-3.5 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-[8px] font-bold">f</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="calendar-cell" data-date="2024-05-31" data-time="18:00"></div>
+                    <div class="calendar-cell" data-date="2024-06-01" data-time="18:00"></div>
+                  </div>
+
+                  <!-- 09:00 PM -->
+                  <div class="grid grid-cols-8 calendar-time-slot">
+                    <div class="text-slate-400 text-xs font-medium pl-1">09:00 PM</div>
+                    <div class="calendar-cell" data-date="2024-05-26" data-time="21:00"></div>
+                    <div class="calendar-cell" data-date="2024-05-27" data-time="21:00"></div>
+                    <div class="calendar-cell" data-date="2024-05-28" data-time="21:00"></div>
+                    <div class="calendar-cell" data-date="2024-05-29" data-time="21:00"></div>
+                    <div class="calendar-cell" data-date="2024-05-30" data-time="21:00"></div>
+                    <div class="calendar-cell" data-date="2024-05-31" data-time="21:00"></div>
+                    <div class="calendar-cell" data-date="2024-06-01" data-time="21:00"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Month Calendar View (Hidden by default) -->
+              <div id="dashboardMonthContainer" class="hidden">
+                <div class="grid grid-cols-7 text-center text-xs font-semibold text-slate-500 pb-2 border-b border-slate-100">
+                  <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+                </div>
+                <div id="monthGridCells" class="grid grid-cols-7 gap-px bg-slate-100 border border-slate-100 rounded-xl overflow-hidden mt-2">
+                  <!-- Generated by JS -->
+                </div>
+              </div>
+
+            </div>
+
+            <!-- CARD 2: UPCOMING POST QUEUE -->
+            <div class="saas-card p-6">
+              <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2.5">
+                  <i data-lucide="calendar" class="w-5 h-5 text-indigo-600"></i>
+                  <h3 class="text-base font-bold text-slate-900">Upcoming Post Queue</h3>
+                </div>
+                <button id="refreshQueueBtn" class="text-xs text-slate-400 hover:text-slate-700 flex items-center gap-1 font-medium transition">
+                  <i data-lucide="rotate-cw" class="w-3.5 h-3.5"></i>
+                  <span>Refresh</span>
+                </button>
+              </div>
+
+              <div id="queueListContainer" class="divide-y divide-slate-100">
+                <!-- Dynamically rendered or curated items -->
+              </div>
+
+              <div class="pt-4 text-center border-t border-slate-100 mt-2">
+                <button id="viewAllQueueBtn" class="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center justify-center gap-1.5 mx-auto transition">
+                  <span>View All Queue</span>
+                  <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- RIGHT COLUMN (~32% width) -->
+          <div class="lg:col-span-4 space-y-6">
+
+            <!-- POST SCHEDULER & BEST TIME -->
+            <div class="saas-card p-6">
+              <div class="flex items-center gap-2.5 mb-5">
+                <i data-lucide="clock" class="w-5 h-5 text-indigo-600"></i>
+                <h3 class="text-base font-bold text-slate-900">Post Scheduler</h3>
+              </div>
+
+              <div class="mb-5">
+                <div class="text-xs font-medium text-slate-500">Best time to post</div>
+                <div class="text-2xl font-bold text-slate-900 mt-1">09:00 AM</div>
+                <div class="text-xs font-medium text-slate-400 mt-0.5">Wednesday</div>
+              </div>
+
+              <!-- Bar Chart with Tooltips -->
+              <div class="flex items-end justify-between h-24 pt-4 pb-2 border-b border-slate-100 mb-5 px-1">
+                <div class="flex flex-col items-center gap-2 group relative cursor-pointer" title="6 AM: 20% engagement">
+                  <div class="w-2.5 bg-indigo-200 rounded-full h-4 chart-bar"></div>
+                  <span class="text-[10px] text-slate-400 font-medium">6AM</span>
+                </div>
+                <div class="flex flex-col items-center gap-2 group relative cursor-pointer" title="6 AM: 45% engagement">
+                  <div class="w-2.5 bg-indigo-300 rounded-full h-10 chart-bar"></div>
+                  <span class="text-[10px] text-slate-400 font-medium">6AM</span>
+                </div>
+                <div class="flex flex-col items-center gap-2 group relative cursor-pointer" title="9 AM (Peak!): 90% engagement">
+                  <div class="w-2.5 bg-indigo-600 rounded-full h-20 chart-bar"></div>
+                  <span class="text-[10px] text-slate-700 font-bold">9AM</span>
+                </div>
+                <div class="flex flex-col items-center gap-2 group relative cursor-pointer" title="12 PM: 65% engagement">
+                  <div class="w-2.5 bg-indigo-300 rounded-full h-14 chart-bar"></div>
+                  <span class="text-[10px] text-slate-400 font-medium">12PM</span>
+                </div>
+                <div class="flex flex-col items-center gap-2 group relative cursor-pointer" title="3 PM: 85% engagement">
+                  <div class="w-2.5 bg-indigo-400 rounded-full h-18 chart-bar"></div>
+                  <span class="text-[10px] text-slate-400 font-medium">3PM</span>
+                </div>
+                <div class="flex flex-col items-center gap-2 group relative cursor-pointer" title="6 PM: 70% engagement">
+                  <div class="w-2.5 bg-indigo-300 rounded-full h-15 chart-bar"></div>
+                  <span class="text-[10px] text-slate-400 font-medium">6PM</span>
+                </div>
+                <div class="flex flex-col items-center gap-2 group relative cursor-pointer" title="9 PM: 95% engagement">
+                  <div class="w-2.5 bg-indigo-500 rounded-full h-22 chart-bar"></div>
+                  <span class="text-[10px] text-slate-400 font-medium">9PM</span>
+                </div>
+              </div>
+
+              <!-- Quick Schedule Form -->
+              <div>
+                <h4 class="text-xs font-bold text-slate-900 mb-3">Quick Schedule</h4>
+                <div class="space-y-3">
+                  <div class="relative">
+                    <div class="flex items-center justify-between px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-700 shadow-sm cursor-pointer hover:border-slate-300">
+                      <div class="flex items-center gap-2.5">
+                        <i data-lucide="calendar" class="w-4 h-4 text-slate-400"></i>
+                        <span id="quickScheduleDateLabel">28 May 2024</span>
+                      </div>
+                      <i data-lucide="chevron-down" class="w-4 h-4 text-slate-400"></i>
+                    </div>
+                    <input type="date" id="quickScheduleDateInput" class="opacity-0 absolute inset-0 w-full h-full cursor-pointer">
+                  </div>
+
+                  <div class="relative">
+                    <div class="flex items-center justify-between px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-700 shadow-sm cursor-pointer hover:border-slate-300">
+                      <div class="flex items-center gap-2.5">
+                        <i data-lucide="clock" class="w-4 h-4 text-slate-400"></i>
+                        <span id="quickScheduleTimeLabel">09:00 AM</span>
+                      </div>
+                      <i data-lucide="chevron-down" class="w-4 h-4 text-slate-400"></i>
+                    </div>
+                    <input type="time" id="quickScheduleTimeInput" value="09:00" class="opacity-0 absolute inset-0 w-full h-full cursor-pointer">
+                  </div>
+
+                  <button id="quickScheduleBtn" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold text-sm rounded-xl shadow-sm transition">
+                    Schedule Post
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- ANALYTICS OVERVIEW -->
+            <div class="saas-card p-6">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-base font-bold text-slate-900">Analytics Overview</h3>
+                <div class="relative">
+                  <select id="analyticsPeriodSelect" class="text-xs text-slate-600 font-medium px-2.5 py-1 rounded-lg border border-slate-200 bg-white outline-none cursor-pointer">
+                    <option value="month">This Month</option>
+                    <option value="week">This Week</option>
+                    <option value="today">Today</option>
+                    <option value="all">All Time</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="space-y-4">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                      <i data-lucide="activity" class="w-4 h-4"></i>
+                    </div>
+                    <span class="text-xs font-medium text-slate-600">Engagement Rate</span>
+                  </div>
+                  <div class="flex items-center gap-2.5">
+                    <span id="metricEngageVal" class="text-xs font-bold text-slate-900">6.2%</span>
+                    <span id="metricEngageBadge" class="text-[11px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">+18%</span>
+                  </div>
+                </div>
+
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center">
+                      <i data-lucide="mouse-pointer" class="w-4 h-4"></i>
+                    </div>
+                    <span class="text-xs font-medium text-slate-600">Clicks</span>
+                  </div>
+                  <div class="flex items-center gap-2.5">
+                    <span id="metricClicksVal" class="text-xs font-bold text-slate-900">1,245</span>
+                    <span id="metricClicksBadge" class="text-[11px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">+25%</span>
+                  </div>
+                </div>
+
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-rose-50 text-rose-500 flex items-center justify-center">
+                      <i data-lucide="heart" class="w-4 h-4"></i>
+                    </div>
+                    <span class="text-xs font-medium text-slate-600">Reactions</span>
+                  </div>
+                  <div class="flex items-center gap-2.5">
+                    <span id="metricReactVal" class="text-xs font-bold text-slate-900">8,732</span>
+                    <span id="metricReactBadge" class="text-[11px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">+15%</span>
+                  </div>
+                </div>
+
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                      <i data-lucide="share-2" class="w-4 h-4"></i>
+                    </div>
+                    <span class="text-xs font-medium text-slate-600">Shares</span>
+                  </div>
+                  <div class="flex items-center gap-2.5">
+                    <span id="metricSharesVal" class="text-xs font-bold text-slate-900">1,234</span>
+                    <span id="metricSharesBadge" class="text-[11px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">+30%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- AUTOMATION STATUS -->
+            <div class="saas-card p-6 relative overflow-hidden">
+              <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2.5">
+                  <i data-lucide="clock" class="w-5 h-5 text-indigo-600"></i>
+                  <h3 class="text-base font-bold text-slate-900">Automation Status</h3>
+                </div>
+
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="automationToggleSwitch" class="sr-only peer" checked>
+                  <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                </label>
+              </div>
+
+              <div class="flex items-center justify-between gap-3">
+                <div class="max-w-[190px]">
+                  <h4 id="automationStatusHeading" class="text-sm font-bold text-emerald-600">Automation is Active</h4>
+                  <p class="text-xs text-slate-500 mt-1 leading-relaxed">
+                    Your posts are being published automatically as scheduled.
+                  </p>
+                  <div id="schedulerCountdownPill" class="mt-2 text-[11px] text-indigo-600 font-semibold flex items-center gap-1">
+                    <i data-lucide="sparkles" class="w-3 h-3"></i>
+                    <span id="schedulerCountdownText">Active & Running</span>
+                  </div>
+                </div>
+
+                <div class="w-24 h-24 shrink-0 relative flex items-center justify-center">
+                  <img src="/robot.svg" alt="Automation Robot" class="w-full h-full object-contain filter drop-shadow-md">
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- ================= VIEW: CREATE POST (DEDICATED FULL-PAGE STUDIO) ================= -->
+      <div id="view-create-post" class="app-view space-y-6 hidden">
+        
+        <!-- Two Column Studio Layout: 7 cols Editor, 5 cols Live Facebook Mockup -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+          <!-- Left Column: Studio Composer -->
+          <div class="lg:col-span-7 space-y-6">
+
+            <!-- Card 1: AI Magic Post Generator -->
+            <div class="saas-card p-6 border-indigo-100 bg-gradient-to-br from-white via-indigo-50/20 to-purple-50/20 relative overflow-hidden">
+              <div class="flex items-center justify-between pb-3 border-b border-indigo-100/60 mb-4">
+                <div class="flex items-center gap-2.5">
+                  <div class="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shadow-sm">
+                    <i data-lucide="sparkles" class="w-4 h-4 text-indigo-600"></i>
+                  </div>
+                  <div>
+                    <h4 class="text-sm font-bold text-slate-900">AI Smart Post Generator (Gemini)</h4>
+                    <p class="text-[11px] text-slate-500">Enter any custom topic or prompt to generate viral captions & matching cards</p>
+                  </div>
+                </div>
+                <span class="text-[11px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full">Gemini 3.1 Flash AI</span>
+              </div>
+
+              <!-- Active Template Reference Banner -->
+              <div id="activeTemplateBanner" class="hidden flex items-center justify-between p-2.5 mb-3 rounded-xl bg-indigo-50/90 border border-indigo-200 text-xs">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <img id="activeTemplateThumb" src="" class="w-10 h-10 rounded-lg object-cover ring-1 ring-indigo-400 shrink-0">
+                  <div class="truncate">
+                    <div class="flex items-center gap-1.5">
+                      <span class="font-bold text-indigo-950 truncate" id="activeTemplateName">Using Template Style</span>
+                      <span class="bg-indigo-200 text-indigo-800 text-[9px] font-bold px-1.5 py-0.5 rounded">Style Attached</span>
+                    </div>
+                    <span class="text-[10px] text-indigo-600 font-medium block truncate">AI will generate the 1080x1080 card using this template background</span>
+                  </div>
+                </div>
+                <button id="clearActiveTemplateBtn" type="button" class="text-indigo-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-white transition shrink-0" title="Remove Template Style">
+                  <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+              </div>
+
+              <div class="flex gap-2.5">
+                <input type="text" id="aiCustomTopic" placeholder="Write any topic (e.g. আজকের ব্রেকিং নিউজ, চন্দ্রযান, AI Revolution, মোটিভেশন, অফার)..." class="flex-1 text-xs px-3.5 py-2.5 bg-white border border-indigo-200 rounded-xl outline-none focus:border-indigo-500 font-medium shadow-sm">
+                <button id="generateAiPostBtn" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center gap-2 shadow-sm transition shrink-0">
+                  <i data-lucide="wand-2" class="w-3.5 h-3.5"></i>
+                  <span id="generateAiBtnText">Generate Post</span>
+                </button>
+              </div>
+
+              <!-- Multi-Style Writing & Card Layout Selectors -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
+                <div>
+                  <label class="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                    <i data-lucide="feather" class="w-3.5 h-3.5 text-indigo-500"></i>
+                    <span>✍️ লেখার ধরণ (Writing Style)</span>
+                  </label>
+                  <select id="aiPostStyleSelect" class="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-medium text-slate-700 shadow-sm cursor-pointer hover:border-indigo-300 transition">
+                    <option value="auto">🌟 স্মার্ট অটো (Smart Adaptive)</option>
+                    <option value="story">📖 গল্পের ছলে (Storytelling - নো বুলেট)</option>
+                    <option value="news">⚡ সংবাদ বুলেটিন (Breaking News)</option>
+                    <option value="debate">🗣️ প্রশ্ন ও বিতর্ক (Question & Debate)</option>
+                    <option value="tips">💡 পরামর্শ ও উক্তি (Tips, Wisdom & Quotes)</option>
+                    <option value="facts">📊 ইনফোগ্রাফিক তথ্য (Facts Breakdown)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                    <i data-lucide="layout" class="w-3.5 h-3.5 text-indigo-500"></i>
+                    <span>🎨 কার্ড ডিজাইন স্টাইল (Card Layout)</span>
+                  </label>
+                  <select id="aiCardLayoutSelect" class="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-medium text-slate-700 shadow-sm cursor-pointer hover:border-indigo-300 transition">
+                    <option value="auto">✨ স্মার্ট অটো ম্যাচ (Auto Match)</option>
+                    <option value="infographic">📌 ক্লাসিক ইনফোগ্রাফিক (2-Line Headline)</option>
+                    <option value="minimal">🖼️ ক্লিন ফটো মিনিমাল (Clean Photo Glass)</option>
+                    <option value="quote">💬 বড় কোটেশন কার্ড (Centered Quote Card)</option>
+                    <option value="news_strip">📺 টিভি নিউজ স্ট্রিপ (TV Lower-Third Strip)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- Card 2: Post Caption & Editor -->
+            <div class="saas-card p-6 space-y-4">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <i data-lucide="edit-3" class="w-4 h-4 text-indigo-600"></i>
+                  <h4 class="text-sm font-bold text-slate-900">Post Caption & Content</h4>
+                </div>
+                <div class="flex items-center gap-3">
+                  <button id="regenerateCaptionBtn" type="button" class="text-xs font-semibold text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 px-2.5 py-1 rounded-lg transition flex items-center gap-1.5 shadow-sm" title="লেখা বা ক্যাপশন পছন্দ না হলে পুনরায় AI দিয়ে নতুন ক্যাপশন লিখুন">
+                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                    <span>🔄 নতুন ক্যাপশন লিখুন</span>
+                  </button>
+                  <span id="charCount" class="text-xs font-mono font-medium text-slate-400">0 characters</span>
+                </div>
+              </div>
+
+              <!-- Quick Emoji Bar -->
+              <div class="flex items-center gap-1 overflow-x-auto pb-1 text-sm border-b border-slate-100">
+                <span class="text-[11px] font-bold text-slate-400 mr-1 shrink-0">Insert:</span>
+                <button type="button" class="quick-emoji-btn hover:scale-125 transition px-1.5 py-0.5 rounded hover:bg-slate-100">✨</button>
+                <button type="button" class="quick-emoji-btn hover:scale-125 transition px-1.5 py-0.5 rounded hover:bg-slate-100">📢</button>
+                <button type="button" class="quick-emoji-btn hover:scale-125 transition px-1.5 py-0.5 rounded hover:bg-slate-100">🚀</button>
+                <button type="button" class="quick-emoji-btn hover:scale-125 transition px-1.5 py-0.5 rounded hover:bg-slate-100">💡</button>
+                <button type="button" class="quick-emoji-btn hover:scale-125 transition px-1.5 py-0.5 rounded hover:bg-slate-100">📚</button>
+                <button type="button" class="quick-emoji-btn hover:scale-125 transition px-1.5 py-0.5 rounded hover:bg-slate-100">🔥</button>
+                <button type="button" class="quick-emoji-btn hover:scale-125 transition px-1.5 py-0.5 rounded hover:bg-slate-100">❤️</button>
+                <button type="button" class="quick-emoji-btn hover:scale-125 transition px-1.5 py-0.5 rounded hover:bg-slate-100">🌸</button>
+                <button type="button" class="quick-emoji-btn hover:scale-125 transition px-1.5 py-0.5 rounded hover:bg-slate-100">🧠</button>
+                <button type="button" class="quick-emoji-btn hover:scale-125 transition px-1.5 py-0.5 rounded hover:bg-slate-100">🏛️</button>
+                <button type="button" class="quick-emoji-btn hover:scale-125 transition px-1.5 py-0.5 rounded hover:bg-slate-100">🇮🇳</button>
+                <button type="button" class="quick-emoji-btn hover:scale-125 transition px-1.5 py-0.5 rounded hover:bg-slate-100">👇</button>
+              </div>
+
+              <!-- Main Textarea -->
+              <textarea id="postMessage" rows="7" placeholder="What would you like to share on Facebook today? Use emojis, hashtags, or let AI generate for you..." class="w-full p-4 text-xs bg-white border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition text-slate-800 leading-relaxed font-sans"></textarea>
+            </div>
+
+            <!-- Card 3: Photo / Thumbnail Attachment -->
+            <div class="saas-card p-6 space-y-3">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <i data-lucide="image" class="w-4 h-4 text-indigo-600"></i>
+                  <h4 class="text-sm font-bold text-slate-900">Photo / Thumbnail Attachment</h4>
+                </div>
+                <div class="flex items-center gap-3">
+                  <button id="regenerateCardImageBtn" type="button" class="text-xs font-semibold text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 px-2.5 py-1 rounded-lg transition flex items-center gap-1.5 shadow-sm" title="ছবি বা কার্ড ডিজাইন পছন্দ না হলে পুনরায় নতুন কার্ড ছবি তৈরি করুন">
+                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                    <span>🔄 নতুন ছবি তৈরি করুন</span>
+                  </button>
+                  <span class="text-[11px] text-slate-400">PNG, JPG, WebP up to 15MB</span>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-4">
+                <label class="cursor-pointer border-2 border-dashed border-slate-200 hover:border-indigo-400 rounded-2xl p-5 flex flex-col items-center justify-center gap-1.5 flex-1 bg-slate-50/50 hover:bg-slate-50 transition">
+                  <i data-lucide="image-plus" class="w-6 h-6 text-slate-400"></i>
+                  <span class="text-xs font-semibold text-slate-700">Click to Upload Image or Drag & Drop</span>
+                  <span class="text-[10px] text-slate-400">Or use generated AI card from above</span>
+                  <input type="file" id="postImageFile" accept="image/*" class="hidden">
+                </label>
+
+                <!-- Thumbnail Preview Box -->
+                <div id="imagePreviewBox" class="hidden flex flex-col items-center gap-1.5 shrink-0">
+                  <div class="relative w-24 h-24 rounded-2xl border border-slate-200 overflow-hidden group shadow-sm">
+                    <img id="previewImgElement" src="" alt="preview" class="w-full h-full object-cover">
+                    <button id="removeImageBtn" class="absolute top-1.5 right-1.5 bg-rose-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition shadow">
+                      <i data-lucide="x" class="w-3 h-3"></i>
+                    </button>
+                  </div>
+                  <button id="useUploadedAsTemplateBtn" type="button" class="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded-md transition" title="Use this image as AI card template">
+                    <i data-lucide="sparkles" class="w-3 h-3 text-indigo-600"></i>
+                    <span>Set as Template</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Card 4: Schedule Settings & Action Buttons -->
+            <div class="saas-card p-6 space-y-4">
+              <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                <div class="flex items-center gap-2.5">
+                  <input type="checkbox" id="enableScheduleCheck" class="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer">
+                  <label for="enableScheduleCheck" class="text-xs font-bold text-slate-800 cursor-pointer">Schedule this post for later</label>
+                </div>
+                <div id="scheduleTimePickers" class="hidden flex items-center gap-2">
+                  <input type="datetime-local" id="composerScheduleDateTime" class="text-xs border border-slate-200 rounded-xl px-3 py-1.5 bg-white text-slate-700 outline-none font-medium shadow-sm">
+                </div>
+              </div>
+
+              <!-- Action Bar -->
+              <div class="flex flex-wrap items-center justify-between gap-3 pt-1">
+                <button id="clearDraftBtn" class="text-xs font-semibold text-slate-400 hover:text-slate-700 transition">
+                  Clear Draft
+                </button>
+
+                <div class="flex items-center gap-3">
+                  <button id="saveToQueueBtn" class="px-5 py-2.5 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-semibold transition flex items-center gap-2 shadow-sm">
+                    <i data-lucide="layers" class="w-4 h-4 text-slate-500"></i>
+                    <span>Add to Queue</span>
+                  </button>
+                  <button id="publishNowBtn" class="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-xl text-xs font-semibold shadow-sm transition flex items-center gap-2">
+                    <i data-lucide="send" class="w-4 h-4"></i>
+                    <span>Publish Now</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Right Column: Live Facebook Feed Mockup Preview -->
+          <div class="lg:col-span-5 space-y-6">
+            <div class="sticky top-6 space-y-4">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <i data-lucide="eye" class="w-4 h-4 text-indigo-600"></i>
+                  <h4 class="text-xs font-bold uppercase tracking-wider text-slate-400">Live Facebook Feed Preview</h4>
+                </div>
+                <span class="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">Feed Active</span>
+              </div>
+
+              <!-- Realistic Facebook Post Card -->
+              <div class="bg-white rounded-2xl shadow-lg border border-slate-200/80 overflow-hidden font-sans">
+                <!-- Page Info Header -->
+                <div class="p-4 flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <img src="/pariksha_notes_logo.jpg" class="w-10 h-10 rounded-full object-cover ring-1 ring-slate-200">
+                    <div>
+                      <div class="flex items-center gap-1.5">
+                        <h5 id="fbPreviewPageName" class="text-sm font-bold text-slate-900 leading-none">Facebook Page</h5>
+                        <div class="w-4 h-4 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-[9px] font-bold">✓</div>
+                      </div>
+                      <p class="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
+                        <span id="fbPreviewDate">Just now</span> · <span>🌐</span>
+                      </p>
+                    </div>
+                  </div>
+                  <div class="text-slate-400 font-bold text-sm">•••</div>
+                </div>
+
+                <!-- Live Caption Body -->
+                <div class="px-4 pb-3 text-xs text-slate-800 whitespace-pre-line leading-relaxed" id="fbPreviewCaption">What would you like to share on Facebook today? Your post caption will update here in real-time as you type or generate with AI...</div>
+
+                <!-- Attached Image Container (Full HD Uncropped Feed Card) -->
+                <div id="fbPreviewImageWrapper" class="hidden bg-slate-950 border-t border-b border-slate-100 relative overflow-hidden group">
+                  <div class="relative w-full aspect-square flex items-center justify-center bg-slate-950">
+                    <img id="fbPreviewImage" src="" alt="Facebook Post Image" class="w-full h-full object-contain transition-all duration-300">
+                    
+                    <!-- HD Overlay Badge on Hover -->
+                    <div class="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5 z-10">
+                      <a id="fbPreviewImgLink" href="#" target="_blank" class="bg-black/75 hover:bg-black text-white text-[10px] font-semibold px-2.5 py-1 rounded-full backdrop-blur-md flex items-center gap-1 shadow">
+                        <i data-lucide="external-link" class="w-3 h-3"></i>
+                        <span>View Full HD</span>
+                      </a>
+                    </div>
+
+                    <!-- 1080x1080 Resolution Indicator -->
+                    <div class="absolute bottom-3 left-3 bg-black/60 backdrop-blur-md text-white/90 text-[10px] font-medium px-2 py-0.5 rounded-md flex items-center gap-1.5 pointer-events-none">
+                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                      <span>1080 × 1080 HD Graphic Card</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Generating Image Skeleton Shimmer -->
+                <div id="fbPreviewGenerating" class="hidden border-t border-b border-slate-100 bg-slate-950 p-12 flex flex-col items-center justify-center text-center space-y-3">
+                  <div class="w-12 h-12 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                    <i data-lucide="sparkles" class="w-6 h-6 animate-spin text-indigo-400"></i>
+                  </div>
+                  <div>
+                    <h6 class="text-xs font-bold text-white tracking-wide">Generating HD Thumbnail Card...</h6>
+                    <p class="text-[11px] text-slate-400 mt-1">Composing Bengali typography & high-res visuals</p>
+                  </div>
+                </div>
+
+                <!-- Reactions Counter Bar -->
+                <div class="px-4 py-2 flex items-center justify-between text-[11px] text-slate-500 border-b border-slate-100">
+                  <div class="flex items-center gap-1.5">
+                    <span class="flex -space-x-1">
+                      <span class="w-4 h-4 rounded-full bg-[#1877F2] text-white text-[9px] flex items-center justify-center">👍</span>
+                      <span class="w-4 h-4 rounded-full bg-rose-500 text-white text-[9px] flex items-center justify-center">❤️</span>
+                    </span>
+                    <span class="font-medium">128</span>
+                  </div>
+                  <span>18 comments · 4 shares</span>
+                </div>
+
+                <!-- Facebook Action Buttons -->
+                <div class="px-2 py-1.5 grid grid-cols-3 text-center text-xs font-semibold text-slate-600">
+                  <button class="py-1.5 rounded-lg hover:bg-slate-100 flex items-center justify-center gap-1.5 transition">
+                    <i data-lucide="thumbs-up" class="w-4 h-4 text-slate-500"></i>
+                    <span>Like</span>
+                  </button>
+                  <button class="py-1.5 rounded-lg hover:bg-slate-100 flex items-center justify-center gap-1.5 transition">
+                    <i data-lucide="message-circle" class="w-4 h-4 text-slate-500"></i>
+                    <span>Comment</span>
+                  </button>
+                  <button class="py-1.5 rounded-lg hover:bg-slate-100 flex items-center justify-center gap-1.5 transition">
+                    <i data-lucide="share-2" class="w-4 h-4 text-slate-500"></i>
+                    <span>Share</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Quick Regenerate Options Bar (Instant Feedback) -->
+              <div class="p-3.5 bg-white rounded-2xl shadow-sm border border-slate-200/80 flex flex-wrap items-center justify-between gap-2.5">
+                <div class="flex items-center gap-2">
+                  <div class="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                    <i data-lucide="sparkles" class="w-3.5 h-3.5 text-indigo-600"></i>
+                  </div>
+                  <span class="text-xs font-bold text-slate-800">পছন্দ না হলে পরিবর্তন করুন:</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button id="fbPreviewRegenTextBtn" type="button" class="text-xs font-semibold text-slate-700 hover:text-indigo-600 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 shadow-sm" title="লেখা বা ক্যাপশন পছন্দ না হলে নতুন ক্যাপশন লিখুন">
+                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5 text-indigo-600"></i>
+                    <span>🔄 শুধু ক্যাপশন</span>
+                  </button>
+                  <button id="fbPreviewRegenImgBtn" type="button" class="text-xs font-semibold text-slate-700 hover:text-indigo-600 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 shadow-sm" title="ছবি বা থাম্বনেইল কার্ড পছন্দ না হলে নতুন ছবি তৈরি করুন">
+                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5 text-indigo-600"></i>
+                    <span>🔄 শুধু ছবি</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Recommendation Card -->
+              <div class="p-4 bg-indigo-50/60 border border-indigo-100 rounded-2xl text-xs text-indigo-900 flex items-start gap-3">
+                <i data-lucide="sparkles" class="w-4 h-4 text-indigo-600 shrink-0 mt-0.5"></i>
+                <div>
+                  <p class="font-bold">Peak Engagement Advice</p>
+                  <p class="text-[11px] text-indigo-700/80 mt-0.5 leading-relaxed">
+                    Posts published around <strong>09:00 AM</strong> & <strong>09:00 PM</strong> get up to 3.5x higher reach and comments on your page.
+                  </p>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- ================= 2. VIEW: POST QUEUE ================= -->
+      <div id="view-queue" class="app-view space-y-6 hidden">
+        <div class="saas-card p-6">
+          <div class="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-100">
+            <div>
+              <h3 class="text-lg font-bold text-slate-900">Scheduled Post Queue</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Manage upcoming automated and queued Facebook posts</p>
+            </div>
+            <div class="flex items-center gap-3">
+              <div class="flex items-center bg-slate-100 p-1 rounded-xl text-xs">
+                <button class="queue-filter-btn px-3 py-1 font-semibold rounded-lg bg-white shadow-sm text-indigo-600" data-filter="all">All</button>
+                <button class="queue-filter-btn px-3 py-1 font-medium rounded-lg text-slate-600 hover:text-slate-900" data-filter="pending">Pending</button>
+                <button class="queue-filter-btn px-3 py-1 font-medium rounded-lg text-slate-600 hover:text-slate-900" data-filter="completed">Completed</button>
+              </div>
+              <button class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-sm" onclick="document.getElementById('openComposerBtn').click()">
+                <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                <span>Add Post</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="fullQueueListContainer" class="divide-y divide-slate-100 mt-4">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= 3. VIEW: CALENDAR ================= -->
+      <div id="view-calendar" class="app-view space-y-6 hidden">
+        <div class="saas-card p-6">
+          <div class="flex items-center justify-between mb-6">
+            <div class="flex items-center gap-3">
+              <i data-lucide="calendar" class="w-6 h-6 text-indigo-600"></i>
+              <div>
+                <h3 class="text-lg font-bold text-slate-900">Content Schedule Calendar</h3>
+                <p class="text-xs text-slate-500">Click any day or time slot to schedule a new Facebook post</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <span id="calendarCurrentMonthLabel" class="text-sm font-bold text-slate-800">May 2024</span>
+              <div class="flex items-center gap-1">
+                <button class="cal-nav-prev w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-50"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+                <button class="cal-nav-next w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-50"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Full Monthly Grid -->
+          <div class="grid grid-cols-7 text-center text-xs font-semibold text-slate-500 pb-2 border-b border-slate-100">
+            <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+          </div>
+          <div id="fullMonthGrid" class="grid grid-cols-7 gap-px bg-slate-100 border border-slate-100 rounded-xl overflow-hidden mt-2">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= 4. VIEW: AUTOMATION (COMMENT & CHAT ROBOT) ================= -->
+      <div id="view-automation" class="app-view space-y-6 hidden">
+        
+        <!-- Automation Sub-Navigation Tabs Bar -->
+        <div class="flex flex-wrap items-center justify-between gap-3 p-1.5 bg-white border border-slate-200/80 rounded-2xl shadow-sm">
+          <div class="flex items-center gap-1.5 overflow-x-auto text-xs font-semibold">
+            <button class="auto-tab-btn px-4 py-2.5 rounded-xl bg-indigo-600 text-white shadow-sm flex items-center gap-2 transition" data-autotab="comment">
+              <i data-lucide="message-square" class="w-4 h-4"></i>
+              <span>Comment Auto-Responder</span>
+            </button>
+            <button class="auto-tab-btn px-4 py-2.5 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-50 flex items-center gap-2 transition" data-autotab="chat">
+              <i data-lucide="bot" class="w-4 h-4"></i>
+              <span>Messenger AI Chatbot</span>
+            </button>
+            <button class="auto-tab-btn px-4 py-2.5 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-50 flex items-center gap-2 transition" data-autotab="schedule">
+              <i data-lucide="calendar" class="w-4 h-4"></i>
+              <span>Auto-Post Scheduler</span>
+            </button>
+            <button class="auto-tab-btn px-4 py-2.5 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-50 flex items-center gap-2 transition" data-autotab="logs">
+              <i data-lucide="activity" class="w-4 h-4"></i>
+              <span>Live Automation Logs</span>
+            </button>
+          </div>
+
+          <!-- Webhook Status Pill -->
+          <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold border border-emerald-200/60">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span>Meta Webhooks Active</span>
+          </div>
+        </div>
+
+        <!-- ────────────── SUB-TAB 1: COMMENT AUTO-RESPONDER ────────────── -->
+        <div id="auto-subview-comment" class="auto-subview space-y-6">
+          
+          <!-- Master Control Header -->
+          <div class="saas-card p-6 flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center gap-3.5">
+              <div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                <i data-lucide="message-square" class="w-6 h-6"></i>
+              </div>
+              <div>
+                <h3 class="text-base font-bold text-slate-900">Facebook Comment Automation</h3>
+                <p class="text-xs text-slate-500 mt-0.5">Auto-reply publicly, send private DMs to commenter's inbox, and auto-like</p>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-4">
+              <div class="text-right">
+                <div id="commentAutoStatusLabel" class="text-xs font-bold text-emerald-600">Active & Responding</div>
+                <div class="text-[11px] text-slate-400">Listening to post comments</div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="toggleCommentAutoMaster" class="sr-only peer" checked>
+                <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+              </label>
+            </div>
+          </div>
+
+          <!-- Two Column Layout: Rules on Left, Live Simulator on Right -->
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            <!-- Left Column: Rules & AI -->
+            <div class="lg:col-span-7 space-y-6">
+              
+              <!-- Keyword Rules Card -->
+              <div class="saas-card p-6 space-y-4">
+                <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div class="flex items-center gap-2">
+                    <i data-lucide="zap" class="w-4 h-4 text-indigo-600"></i>
+                    <h4 class="text-sm font-bold text-slate-900">Keyword Trigger Rules</h4>
+                  </div>
+                  <button id="openAddRuleModalBtn" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-sm transition">
+                    <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                    <span>Add New Rule</span>
+                  </button>
+                </div>
+
+                <div id="commentRulesList" class="space-y-3.5">
+                  <!-- Dynamically rendered -->
+                </div>
+              </div>
+
+              <!-- AI Smart Comment Responder -->
+              <div class="saas-card p-6">
+                <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+                  <div class="flex items-center gap-2">
+                    <i data-lucide="sparkles" class="w-4 h-4 text-indigo-600"></i>
+                    <h4 class="text-sm font-bold text-slate-900">Gemini AI Smart Responder</h4>
+                  </div>
+                  <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="toggleAiCommentFallback" class="sr-only peer" checked>
+                    <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                  </label>
+                </div>
+
+                <p class="text-xs text-slate-500 leading-relaxed mb-3">
+                  When a follower comments something without matching any specific keyword, <strong>Gemini AI</strong> will understand the comment context and formulate a warm, polite, and encouraging reply in natural Bengali automatically.
+                </p>
+                <div class="p-3 bg-indigo-50/60 border border-indigo-100 rounded-xl text-xs text-indigo-800 flex items-center gap-2">
+                  <i data-lucide="check-circle" class="w-4 h-4 text-indigo-600 shrink-0"></i>
+                  <span>Zero missed comments. Every follower gets instant polite interaction!</span>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Right Column: Live Comment Simulator -->
+            <div class="lg:col-span-5 space-y-6">
+              <div class="saas-card p-6">
+                <div class="flex items-center gap-2 pb-3 border-b border-slate-100 mb-4">
+                  <i data-lucide="play" class="w-4 h-4 text-emerald-600"></i>
+                  <h4 class="text-sm font-bold text-slate-900">Live Comment Simulator</h4>
+                </div>
+
+                <p class="text-xs text-slate-500 mb-4">
+                  Test your comment automation in real-time. Enter a simulated follower comment and see the exact public reply, private DM, and like actions:
+                </p>
+
+                <div class="space-y-3 text-xs">
+                  <div>
+                    <label class="block font-bold text-slate-700 mb-1">Follower Name</label>
+                    <input type="text" id="simCommenterName" value="অনন্যা ব্যানার্জী" class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:bg-white text-slate-800">
+                  </div>
+
+                  <div>
+                    <label class="block font-bold text-slate-700 mb-1">Comment Text</label>
+                    <textarea id="simCommentText" rows="3" placeholder="e.g. Dada ei notes er price koto? kivabe pabo?" class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:bg-white text-slate-800 leading-relaxed">দাদা এই নোটসগুলোর প্রাইস কত? বিস্তারিত কীভাবে পাব?</textarea>
+                  </div>
+
+                  <button id="runCommentSimBtn" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-2">
+                    <i data-lucide="send" class="w-3.5 h-3.5"></i>
+                    <span>Simulate & Test Comment Bot</span>
+                  </button>
+                </div>
+
+                <!-- Simulation Output Card -->
+                <div id="commentSimResultBox" class="mt-5 hidden p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2.5 text-xs">
+                  <div class="flex items-center justify-between pb-2 border-b border-slate-200/60">
+                    <span class="font-bold text-slate-800 flex items-center gap-1.5">
+                      <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                      Bot Output
+                    </span>
+                    <span id="simResultRuleBadge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">Keyword Rule</span>
+                  </div>
+
+                  <div>
+                    <span class="text-[11px] font-bold text-slate-500">💬 Public Reply to Comment:</span>
+                    <p id="simResultPublicReply" class="text-slate-800 font-medium mt-0.5 p-2 bg-white rounded-lg border border-slate-100"></p>
+                  </div>
+
+                  <div id="simResultDmContainer">
+                    <span class="text-[11px] font-bold text-indigo-600">📩 Private DM Sent to Inbox:</span>
+                    <p id="simResultPrivateDm" class="text-slate-800 font-medium mt-0.5 p-2 bg-indigo-50/50 rounded-lg border border-indigo-100"></p>
+                  </div>
+
+                  <div class="flex items-center gap-3 pt-2 text-[11px] text-slate-500 border-t border-slate-200/60">
+                    <span id="simResultLiked" class="flex items-center gap-1 text-emerald-600 font-semibold"><i data-lucide="thumbs-up" class="w-3.5 h-3.5"></i> Auto-Liked</span>
+                    <span id="simResultTime" class="ml-auto text-slate-400">Just now</span>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+        <!-- ────────────── SUB-TAB 2: MESSENGER AI CHATBOT ────────────── -->
+        <div id="auto-subview-chat" class="auto-subview space-y-6 hidden">
+          
+          <div class="saas-card p-6 flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center gap-3.5">
+              <div class="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
+                <i data-lucide="bot" class="w-6 h-6"></i>
+              </div>
+              <div>
+                <h3 class="text-base font-bold text-slate-900">Facebook Messenger AI Chatbot</h3>
+                <p class="text-xs text-slate-500 mt-0.5">24/7 intelligent customer support & student guidance powered by Gemini AI</p>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-4">
+              <div class="text-right">
+                <div id="chatAutoStatusLabel" class="text-xs font-bold text-purple-600">AI Bot Active</div>
+                <div class="text-[11px] text-slate-400">Ready to chat</div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="toggleChatAutoMaster" class="sr-only peer" checked>
+                <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+              </label>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            <!-- Left: Settings & Knowledge Prompt -->
+            <div class="lg:col-span-6 space-y-6">
+              <div class="saas-card p-6 space-y-4">
+                <h4 class="text-sm font-bold text-slate-900">Bot Personality & Knowledge Base</h4>
+                <p class="text-xs text-slate-500">Provide instructions about your business, courses, and exam details for the AI:</p>
+
+                <textarea id="chatPersonaPrompt" rows="8" class="w-full p-3 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:bg-white text-slate-800 leading-relaxed font-sans"></textarea>
+
+                <div>
+                  <label class="block font-bold text-xs text-slate-700 mb-1">Welcome Greeting Message</label>
+                  <input type="text" id="chatWelcomeMessage" class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:bg-white text-xs text-slate-800">
+                </div>
+
+                <div class="flex items-center justify-between pt-3 border-t border-slate-100">
+                  <span id="chatSaveStatus" class="text-xs text-emerald-600 font-semibold hidden">✅ Saved!</span>
+                  <button id="saveChatSettingsBtn" class="ml-auto px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-semibold shadow-sm transition">
+                    Save Bot Settings
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right: Interactive Messenger Chat Mockup -->
+            <div class="lg:col-span-6 space-y-6">
+              <div class="saas-card overflow-hidden flex flex-col h-[520px]">
+                
+                <!-- Messenger Header -->
+                <div class="px-5 py-3.5 bg-slate-50 border-b border-slate-200/80 flex items-center justify-between shrink-0">
+                  <div class="flex items-center gap-3">
+                    <img src="/pariksha_notes_logo.jpg" class="w-9 h-9 rounded-full object-cover ring-2 ring-purple-500/20">
+                    <div>
+                      <h5 class="text-xs font-bold text-slate-900 leading-tight">Page AI Support</h5>
+                      <span class="text-[10px] font-semibold text-emerald-600 flex items-center gap-1">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Online
+                      </span>
+                    </div>
+                  </div>
+                  <button id="resetChatSimBtn" class="text-xs text-slate-400 hover:text-slate-700" title="Clear Chat">
+                    <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+                  </button>
+                </div>
+
+                <!-- Chat Messages Body -->
+                <div id="chatMessagesContainer" class="flex-1 p-4 overflow-y-auto space-y-3 bg-[#F8FAFC]">
+                  <!-- Initial Bot Welcome -->
+                  <div class="flex items-start gap-2.5">
+                    <img src="/pariksha_notes_logo.jpg" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5">
+                    <div class="p-3 rounded-2xl bg-white border border-slate-200/80 text-xs text-slate-800 shadow-sm max-w-[85%] leading-relaxed">
+                      স্বাগতম আমাদের পেজে! 👋 আমরা আপনাকে কীভাবে সাহায্য করতে পারি? আপনার যেকোনো প্রশ্ন লিখুন।
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Chat Input Bar -->
+                <div class="p-3 bg-white border-t border-slate-200/80 flex items-center gap-2 shrink-0">
+                  <input type="text" id="chatSimInput" placeholder="Type a message (e.g. WBP syllabus ki?)..." class="flex-1 text-xs px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-purple-500 focus:bg-white text-slate-800">
+                  <button id="chatSimSendBtn" class="p-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl shadow-sm transition shrink-0">
+                    <i data-lucide="send" class="w-4 h-4"></i>
+                  </button>
+                </div>
+
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+        <!-- ────────────── SUB-TAB 3: AUTO-POST SCHEDULER ────────────── -->
+        <div id="auto-subview-schedule" class="auto-subview space-y-6 hidden">
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            <div class="lg:col-span-7 space-y-6">
+              <div class="saas-card p-6">
+                <div class="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
+                  <div>
+                    <h3 class="text-base font-bold text-slate-900">Background Post Scheduler Engine</h3>
+                    <p class="text-xs text-slate-500 mt-0.5">Automated cron publishing with Google Gemini & Sharp image cards</p>
+                  </div>
+                  <button id="triggerAutoPilotNowBtn" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-sm transition">
+                    <i data-lucide="zap" class="w-3.5 h-3.5"></i>
+                    <span>Trigger Post Now</span>
+                  </button>
+                </div>
+
+                <div class="space-y-4 text-xs">
+                  <div>
+                    <label class="block font-bold text-slate-700 mb-1.5">Publish Frequency / Schedule</label>
+                    <select id="autoPilotIntervalSelect" class="w-full p-2.5 bg-white border border-slate-200 rounded-xl outline-none font-medium">
+                      <option value="15">Every 15 Minutes (Testing)</option>
+                      <option value="30">Every 30 Minutes</option>
+                      <option value="60">Every 1 Hour</option>
+                      <option value="120">Every 2 Hours</option>
+                      <option value="cron_3times" selected>Daily 3 Times (9:00 AM, 2:00 PM, 8:00 PM)</option>
+                    </select>
+                  </div>
+
+                  <div class="pt-3 border-t border-slate-100">
+                    <label class="block font-bold text-slate-700 mb-2">Automated Topic Categories</label>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                      <label class="flex items-center gap-2 p-2.5 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-50">
+                        <input type="checkbox" checked class="text-indigo-600 rounded">
+                        <span>📰 Trending & Breaking News</span>
+                      </label>
+                      <label class="flex items-center gap-2 p-2.5 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-50">
+                        <input type="checkbox" checked class="text-indigo-600 rounded">
+                        <span>🔬 Science & Nature Wonders</span>
+                      </label>
+                      <label class="flex items-center gap-2 p-2.5 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-50">
+                        <input type="checkbox" checked class="text-indigo-600 rounded">
+                        <span>🏛️ History & World Heritage</span>
+                      </label>
+                      <label class="flex items-center gap-2 p-2.5 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-50">
+                        <input type="checkbox" checked class="text-indigo-600 rounded">
+                        <span>🧠 Mind & Human Psychology</span>
+                      </label>
+                      <label class="flex items-center gap-2 p-2.5 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-50">
+                        <input type="checkbox" checked class="text-indigo-600 rounded">
+                        <span>💡 Future Tech & AI Inventions</span>
+                      </label>
+                      <label class="flex items-center gap-2 p-2.5 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-50">
+                        <input type="checkbox" checked class="text-indigo-600 rounded">
+                        <span>✨ Life Philosophy & Wisdom</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="lg:col-span-5 space-y-6">
+              <div class="saas-card p-6">
+                <h3 class="text-base font-bold text-slate-900 mb-2">Custom AI Post Persona</h3>
+                <p class="text-xs text-slate-500 mb-4">Instructions followed by Gemini when generating automated posts</p>
+                
+                <textarea id="customPromptTextarea" rows="9" class="w-full p-3 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:bg-white text-slate-800 leading-relaxed"></textarea>
+                
+                <div class="flex items-center justify-between mt-3">
+                  <button id="resetPromptBtn" class="text-xs text-slate-500 hover:text-slate-800 font-medium">Reset Default</button>
+                  <button id="savePromptBtn" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm">Save Prompt</button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ────────────── SUB-TAB 4: LIVE AUTOMATION LOGS ────────────── -->
+        <div id="auto-subview-logs" class="auto-subview space-y-6 hidden">
+          <div class="saas-card p-6">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div>
+                <h3 class="text-base font-bold text-slate-900">Realtime Automation Events Stream</h3>
+                <p class="text-xs text-slate-500">Live trace of automated comment replies, DMs, and Messenger conversations</p>
+              </div>
+              <button id="clearAutoLogsBtn" class="text-xs text-rose-600 hover:underline font-semibold">Clear Logs</button>
+            </div>
+
+            <div id="autoEventLogsList" class="space-y-3 max-h-[500px] overflow-y-auto">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ================= ADD COMMENT RULE MODAL ================= -->
+      <div id="addRuleModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop hidden">
+        <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-100 modal-content overflow-hidden flex flex-col">
+          <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+            <div class="flex items-center gap-2">
+              <i data-lucide="plus-circle" class="w-4 h-4 text-indigo-600"></i>
+              <h3 class="text-sm font-bold text-slate-900">Create Comment Automation Rule</h3>
+            </div>
+            <button id="closeAddRuleModalBtn" class="text-slate-400 hover:text-slate-700 p-1 rounded-lg">
+              <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+          </div>
+
+          <div class="p-6 space-y-4 text-xs">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Rule Name</label>
+              <input type="text" id="newRuleName" placeholder="e.g. Admission / Price Inquiry" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500">
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Trigger Keywords (Comma separated)</label>
+              <input type="text" id="newRuleKeywords" placeholder="e.g. price, admission, details, koto, kivabe pabo" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500">
+              <span class="text-[10px] text-slate-400 mt-1 block">Rule will trigger if comment contains ANY of these keywords</span>
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Public Reply on Comment</label>
+              <textarea id="newRulePublicReply" rows="2" placeholder="e.g. হ্যালো {name}! বিস্তারিত ইনবক্সে পাঠানো হয়েছে।" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 leading-relaxed"></textarea>
+              <span class="text-[10px] text-slate-400 mt-0.5 block">Use {name} to automatically insert commenter's name</span>
+            </div>
+
+            <div class="p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-2.5">
+              <label class="flex items-center gap-2 font-bold text-slate-700 cursor-pointer">
+                <input type="checkbox" id="newRuleSendDm" class="rounded text-indigo-600 w-4 h-4">
+                <span>Send Private Messenger DM to Commenter's Inbox</span>
+              </label>
+              <div id="newRuleDmBox" class="hidden">
+                <textarea id="newRulePrivateDm" rows="2" placeholder="e.g. হ্যালো {name}! আমাদের স্পেশাল অফার লিংক: https://..." class="w-full p-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-indigo-500 text-xs leading-relaxed"></textarea>
+              </div>
+            </div>
+
+            <label class="flex items-center gap-2 font-bold text-slate-700 cursor-pointer">
+              <input type="checkbox" id="newRuleAutoLike" checked class="rounded text-indigo-600 w-4 h-4">
+              <span>Auto-Like Comment to boost Facebook algorithm</span>
+            </label>
+          </div>
+
+          <div class="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-2.5 bg-slate-50/50">
+            <button id="cancelAddRuleModalBtn" class="text-xs font-semibold text-slate-500 hover:text-slate-800 px-4 py-2">Cancel</button>
+            <button id="saveNewRuleBtn" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition">
+              Save Rule
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= CONNECT NEW FACEBOOK PAGE MODAL ================= -->
+      <div id="addPageModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop hidden">
+        <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-100 modal-content overflow-hidden flex flex-col">
+          <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+            <div class="flex items-center gap-2">
+              <i data-lucide="plus-circle" class="w-4 h-4 text-indigo-600"></i>
+              <h3 class="text-sm font-bold text-slate-900">Connect Facebook Page</h3>
+            </div>
+            <button id="closeAddPageModalBtn" class="text-slate-400 hover:text-slate-700 p-1 rounded-lg">
+              <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+          </div>
+
+          <div class="p-6 space-y-4 text-xs">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Facebook Page ID <span class="text-rose-500">*</span></label>
+              <input type="text" id="newPageIdInput" placeholder="e.g. 1000123456789 or Page Username" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-mono">
+              <span class="text-[10px] text-slate-400 mt-1 block">Find in Page Settings &gt; Page Transparency / About</span>
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Page Access Token <span class="text-rose-500">*</span></label>
+              <textarea id="newPageTokenInput" rows="3" placeholder="Paste your Facebook Page Access Token (EAAB...)" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-mono text-[11px] leading-relaxed"></textarea>
+              <span class="text-[10px] text-slate-400 mt-0.5 block">Requires: pages_manage_posts, pages_read_engagement, pages_messaging</span>
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Custom Display Name (Optional)</label>
+              <input type="text" id="newPageNameInput" placeholder="Auto-detected from Facebook if left blank" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500">
+            </div>
+
+            <label class="flex items-center gap-2 font-bold text-slate-700 cursor-pointer pt-1">
+              <input type="checkbox" id="newPageSetActiveCheck" checked class="rounded text-indigo-600 w-4 h-4">
+              <span>Set as Active Page immediately upon connecting</span>
+            </label>
+          </div>
+
+          <div class="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-2.5 bg-slate-50/50">
+            <button id="cancelAddPageModalBtn" class="text-xs font-semibold text-slate-500 hover:text-slate-800 px-4 py-2">Cancel</button>
+            <button id="submitAddPageBtn" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition flex items-center gap-1.5">
+              <i data-lucide="check" class="w-3.5 h-3.5"></i>
+              <span>Verify & Connect Page</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= CREATE NEW TEMPLATE MODAL ================= -->
+      <div id="addTemplateModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop hidden">
+        <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-100 modal-content overflow-hidden flex flex-col max-h-[90vh]">
+          <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+            <div class="flex items-center gap-2">
+              <i data-lucide="plus-circle" class="w-4 h-4 text-indigo-600"></i>
+              <h3 class="text-sm font-bold text-slate-900">Add New Post Template</h3>
+            </div>
+            <button id="closeAddTemplateModalBtn" class="text-slate-400 hover:text-slate-700 p-1 rounded-lg">
+              <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+          </div>
+
+          <div class="p-6 space-y-4 text-xs overflow-y-auto">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Template Title <span class="text-rose-500">*</span></label>
+              <input type="text" id="newTemplateTitleInput" placeholder="e.g. মহাকাশ বিজ্ঞান ও ব্ল্যাক হোল রহস্য" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500">
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block font-bold text-slate-700 mb-1">Badge Tag</label>
+                <input type="text" id="newTemplateBadgeInput" placeholder="e.g. 🔭 মহাকাশ বিজ্ঞান" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500">
+              </div>
+              <div>
+                <label class="block font-bold text-slate-700 mb-1">Category</label>
+                <select id="newTemplateCategorySelect" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 bg-white">
+                  <option value="trending_news">📰 সাম্প্রতিক খবর</option>
+                  <option value="science_nature">🔬 বিজ্ঞান ও প্রকৃতি</option>
+                  <option value="history_civilization">🏛️ ইতিহাস ও সভ্যতা</option>
+                  <option value="psychology_mind">🧠 মানব মস্তিষ্ক</option>
+                  <option value="tech_inventions">💡 প্রযুক্তি ও আবিষ্কার</option>
+                  <option value="philosophy_wisdom">✨ জীবন ভাবনা</option>
+                  <option value="custom">📌 অন্যান্য / কাস্টম</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Template Reference Image / Background</label>
+              <div class="space-y-2">
+                <input type="text" id="newTemplateImageUrlInput" placeholder="Image URL (https://...) or upload below" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-mono text-[11px]">
+                <div class="flex items-center gap-2">
+                  <label class="cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition">
+                    <i data-lucide="upload" class="w-3.5 h-3.5 text-indigo-600"></i>
+                    <span>Upload Image File</span>
+                    <input type="file" id="newTemplateImageFileInput" class="hidden" accept="image/*">
+                  </label>
+                  <span id="newTemplateFileName" class="text-[11px] text-slate-400 truncate max-w-[220px]">No file chosen</span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Description</label>
+              <input type="text" id="newTemplateDescInput" placeholder="e.g. আকর্ষণীয় মহাকাশ ও গ্যালাক্সি সংক্রান্ত পোস্ট টেমপ্লেট" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500">
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Sample Post Caption / Template Format</label>
+              <textarea id="newTemplateSampleInput" rows="4" placeholder="পোস্টের নমুনা বা ফরম্যাট লিখুন (ইমোজি ও পয়েন্ট সহ)..." class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-mono text-[11px] leading-relaxed"></textarea>
+            </div>
+          </div>
+
+          <div class="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-2.5 bg-slate-50/50">
+            <button id="cancelAddTemplateModalBtn" class="text-xs font-semibold text-slate-500 hover:text-slate-800 px-4 py-2">Cancel</button>
+            <button id="submitAddTemplateBtn" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition flex items-center gap-1.5">
+              <i data-lucide="check" class="w-3.5 h-3.5"></i>
+              <span>Save Template</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= 5. VIEW: TEMPLATES ================= -->
+      <div id="view-templates" class="app-view space-y-6 hidden">
+        <div class="saas-card p-6">
+          <div class="flex flex-wrap items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-100">
+            <div>
+              <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shadow-sm">
+                  <i data-lucide="layout-template" class="w-4 h-4 text-indigo-600"></i>
+                </div>
+                <div>
+                  <h3 class="text-base font-bold text-slate-900">Viral Post Templates</h3>
+                  <p class="text-xs text-slate-500 mt-0.5">Customize, add new templates, or delete unused ones. Click "Use Template Style" to guide AI post creation.</p>
+                </div>
+              </div>
+            </div>
+            <button id="openAddTemplateModalBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-sm transition flex items-center gap-2">
+              <i data-lucide="plus" class="w-4 h-4"></i>
+              <span>+ Add New Template</span>
+            </button>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5" id="templatesGrid">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= 6. VIEW: MEDIA LIBRARY ================= -->
+      <div id="view-media" class="app-view space-y-6 hidden">
+        <div class="saas-card p-6">
+          <div class="flex items-center justify-between mb-6 pb-4 border-b border-slate-100">
+            <div>
+              <h3 class="text-lg font-bold text-slate-900">Media Library</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Browse all generated AI cards and uploaded photo assets</p>
+            </div>
+            <label class="cursor-pointer bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-xl shadow-sm flex items-center gap-1.5 transition">
+              <i data-lucide="upload" class="w-3.5 h-3.5"></i>
+              <span>Upload Media</span>
+              <input type="file" id="mediaLibraryUploadInput" class="hidden" accept="image/*">
+            </label>
+          </div>
+
+          <div id="mediaGridContainer" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= 7. VIEW: ACCOUNTS (MULTI-PAGE MANAGEMENT) ================= -->
+      <div id="view-accounts" class="app-view space-y-6 hidden">
+        <div class="saas-card p-6">
+          <div class="flex flex-wrap items-center justify-between gap-4 pb-5 border-b border-slate-100">
+            <div>
+              <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shadow-sm">
+                  <i data-lucide="layers" class="w-4 h-4 text-indigo-600"></i>
+                </div>
+                <div>
+                  <h3 class="text-base font-bold text-slate-900">Connected Facebook Pages</h3>
+                  <p class="text-xs text-slate-500">Connect multiple Facebook Pages and switch active account anytime with 1-click</p>
+                </div>
+              </div>
+            </div>
+            <button id="openAddPageModalBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-sm transition flex items-center gap-2">
+              <i data-lucide="plus" class="w-4 h-4"></i>
+              <span>Connect New Facebook Page</span>
+            </button>
+          </div>
+
+          <!-- Connected Pages Grid -->
+          <div id="accountsPageGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mt-6">
+            <!-- Dynamically populated page cards -->
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= 8. VIEW: SETTINGS ================= -->
+      <div id="view-settings" class="app-view space-y-6 hidden">
+        <div class="saas-card p-6 max-w-xl">
+          <h3 class="text-lg font-bold text-slate-900 mb-1">Facebook & AI Settings</h3>
+          <p class="text-xs text-slate-500 mb-6">Manage API tokens, credentials, and simulation modes</p>
+
+          <div class="space-y-4 text-xs">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Facebook Page ID</label>
+              <input type="text" id="pageSettingsPageId" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-mono">
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Facebook Page Access Token</label>
+              <div class="relative">
+                <input type="password" id="pageSettingsAccessToken" class="w-full p-2.5 pr-10 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-mono">
+                <button id="togglePageSettingsToken" class="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600">
+                  <i data-lucide="eye" class="w-4 h-4"></i>
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Google Gemini API Key</label>
+              <input type="password" id="pageSettingsGeminiKey" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-mono">
+            </div>
+
+            <div class="pt-3 flex items-center justify-between border-t border-slate-100">
+              <div>
+                <div class="font-bold text-slate-800">Demo Mode (Simulation)</div>
+                <div class="text-[11px] text-slate-400">Preview without calling live Facebook Graph API</div>
+              </div>
+              <input type="checkbox" id="pageSettingsDemoMode" class="w-4 h-4 text-indigo-600 rounded">
+            </div>
+
+            <div id="pageSettingsStatusMsg" class="hidden p-2.5 rounded-xl text-xs font-medium"></div>
+
+            <div class="pt-4 flex items-center justify-between border-t border-slate-100">
+              <button id="testPageSettingsConnection" class="text-xs font-semibold text-slate-600 hover:text-slate-900 border border-slate-200 px-4 py-2 rounded-xl bg-white shadow-sm transition">
+                Test FB Connection
+              </button>
+              <button id="savePageSettingsBtn" class="text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 px-5 py-2 rounded-xl shadow-sm transition">
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= 9. VIEW: INTEGRATIONS ================= -->
+      <div id="view-integrations" class="app-view space-y-6 hidden">
+        <div class="saas-card p-6">
+          <div class="mb-6">
+            <h3 class="text-lg font-bold text-slate-900">API & Service Integrations</h3>
+            <p class="text-xs text-slate-500 mt-0.5">Real-time health status of connected APIs and services</p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-5" id="integrationsGrid">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= 10. VIEW: ACTIVITY LOG ================= -->
+      <div id="view-activity" class="app-view space-y-6 hidden">
+        <div class="saas-card p-6">
+          <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+            <div>
+              <h3 class="text-lg font-bold text-slate-900">Live Activity & Execution Log</h3>
+              <p class="text-xs text-slate-500">Real-time trace of scheduled runs, posts, and API events</p>
+            </div>
+            <button id="clearActivityHistoryBtn" class="text-xs text-rose-600 hover:underline font-semibold">Clear History</button>
+          </div>
+
+          <div id="activityLogsList" class="space-y-3 max-h-[600px] overflow-y-auto">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- Load Main Application Logic -->
+  <script src="app.js"></script>
+</body>
+</html>

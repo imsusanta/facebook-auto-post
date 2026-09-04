@@ -1,0 +1,26 @@
+{
+  "pageId": "",
+  "accessToken": "",
+  "pageName": "My Facebook Page",
+  "pictureUrl": "",
+  "isDemoMode": false,
+  "autoPostEnabled": false,
+  "intervalMinutes": 15,
+  "autoPilotEnabled": false,
+  "cronSchedule": "0 9,14,20 * * *",
+  "cronLabel": "প্রতিদিন ৩ বার (সকাল ৯টা, দুপুর ২টা, রাত ৮টা)",
+  "selectedCategories": [
+    "trending_news",
+    "science_nature",
+    "history_civilization",
+    "psychology_mind",
+    "world_geography",
+    "tech_inventions",
+    "philosophy_wisdom"
+  ],
+  "includeAiImage": true,
+  "geminiApiKey": "",
+  "customSystemPrompt": "ব্যবহারকারীর দেওয়া টপিক ও নির্দেশনা অনুযায়ী আকর্ষণীয়, তথ্যবহুল এবং সম্পূর্ণ মৌলিক ফেসবুক পোস্ট তৈরি করো। বিষয়বস্তুর সাথে মানানসই সুন্দর বাংলা ভাষা, প্রাসঙ্গিক ইমোজি এবং উপযুক্ত ট্রেন্ডিং হ্যাশট্যাগ ব্যবহার করবে।",
+  "pages": [],
+  "activePageId": ""
+}
