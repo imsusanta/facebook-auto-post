@@ -5,6 +5,7 @@ const router = express.Router();
 const workspaceRepository = require('../../repositories/workspace-repository');
 const membershipRepository = require('../../repositories/membership-repository');
 const invitationRepository = require('../../repositories/invitation-repository');
+const auditLogRepository = require('../../repositories/audit-log-repository');
 const { resolveWorkspaceContext, requireWorkspacePermission, generateRequestId } = require('../../middleware/workspace-context');
 
 // --- Global Workspace Endpoints (Authenticated User Scope) ---
@@ -428,6 +429,42 @@ router.delete(
         error: 'ResourceNotFound',
         message: 'Invitation not found or already inactive.',
         code: 'RESOURCE_NOT_FOUND',
+        requestId: req.requestId
+      });
+    }
+  }
+);
+
+// --- Workspace Audit Logs Endpoint ---
+
+router.get(
+  '/:workspaceId/audit-logs',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('audit:read'),
+  async (req, res) => {
+    const { workspaceId } = req.params;
+    const { limit, offset, resourceType, action } = req.query || {};
+
+    try {
+      const auditLogs = await auditLogRepository.listByWorkspace({
+        workspaceId,
+        limit,
+        offset,
+        resourceType,
+        action
+      });
+
+      return res.status(200).json({
+        success: true,
+        auditLogs,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      console.error(`[AuditLogsAPI] Error retrieving audit logs (req ${req.requestId}):`, err.message);
+      return res.status(503).json({
+        error: 'DatabaseUnavailable',
+        message: 'Failed to retrieve audit logs.',
+        code: 'DATABASE_UNAVAILABLE',
         requestId: req.requestId
       });
     }
