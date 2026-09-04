@@ -612,16 +612,138 @@ class AIService {
   }
 
   /**
-   * Generate Structured Infographic Post & Card Data
+   * Multimodal AI Template Analyzer:
+   * Extracts visual layout, color palette, headline structure, and writing voice from an uploaded reference template
    */
-  async generateStructuredPost(topic = '', categoryId = '', postStyle = 'auto', cardLayout = 'auto') {
+  async analyzeTemplate(imageBufferOrUrl, sampleText = '') {
+    const settings = storage.getSettings();
+    const geminiApiKey = settings.geminiApiKey ? settings.geminiApiKey.trim() : '';
+
+    let extracted = {
+      visualStructure: 'Classic Infographic with 2-line bold headline and high-contrast badge',
+      primaryColor: '#EF4444',
+      headlineFormat: '2 punchy lines with key subject highlighted in red/accent and punchline in bright yellow',
+      writingVoice: 'Engaging, direct, informative Bengali social media voice with natural flow and 2-3 tasteful emojis',
+      summary: 'Clean, high-converting Facebook post template'
+    };
+
+    if (!geminiApiKey) {
+      if (sampleText) {
+        extracted.writingVoice = `Voice modeled after sample text: ${sampleText.slice(0, 120)}...`;
+      }
+      return extracted;
+    }
+
+    const candidateModels = ['gemini-2.5-flash', 'gemini-3.1-flash-lite'];
+    for (const model of candidateModels) {
+      try {
+        const parts = [];
+        let base64Image = null;
+        let mimeType = 'image/jpeg';
+
+        if (imageBufferOrUrl) {
+          if (Buffer.isBuffer(imageBufferOrUrl)) {
+            base64Image = imageBufferOrUrl.toString('base64');
+          } else if (typeof imageBufferOrUrl === 'string') {
+            if (imageBufferOrUrl.startsWith('data:image')) {
+              const matches = imageBufferOrUrl.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+              if (matches) {
+                mimeType = matches[1];
+                base64Image = matches[2];
+              }
+            } else if (imageBufferOrUrl.startsWith('http://') || imageBufferOrUrl.startsWith('https://')) {
+              const imgRes = await axios.get(imageBufferOrUrl, { responseType: 'arraybuffer', timeout: 10000 });
+              base64Image = Buffer.from(imgRes.data).toString('base64');
+            } else {
+              let localPath = imageBufferOrUrl;
+              if (imageBufferOrUrl.startsWith('/uploads/')) {
+                localPath = path.join(__dirname, '..', imageBufferOrUrl);
+              }
+              if (fs.existsSync(localPath)) {
+                base64Image = fs.readFileSync(localPath).toString('base64');
+              }
+            }
+          }
+        }
+
+        if (base64Image) {
+          parts.push({
+            inlineData: {
+              mimeType: mimeType || 'image/jpeg',
+              data: base64Image
+            }
+          });
+        }
+
+        const promptText = `You are an expert social media design and copy analyst.
+Analyze this reference Facebook post thumbnail image and/or sample caption text:
+${sampleText ? `Reference Caption Text:\n"""${sampleText}"""\n` : ''}
+
+Your goal is to extract the EXACT stylistic rules so our AI generator can faithfully recreate posts in this template style.
+Respond ONLY with a valid JSON object matching this schema:
+{
+  "visualStructure": "Detailed description of the card layout (e.g. 2-line bottom banner, top category pill, minimal photo card, quote vignette, etc.)",
+  "primaryColor": "Dominant accent color hex code (e.g. #EF4444, #FBBF24, #3B82F6)",
+  "headlineFormat": "How the headline is styled, broken into lines, and highlighted",
+  "writingVoice": "Tone of voice (e.g. dramatic storytelling, direct news bulletin, thoughtful debate, educational tips, promotional), sentence cadence, opening hook, and emoji style",
+  "summary": "1 concise sentence summarizing what makes this template distinct"
+}`;
+        parts.push({ text: promptText });
+
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
+        const res = await axios.post(url, {
+          contents: [{ parts }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0.2
+          }
+        }, { timeout: 15000 });
+
+        const raw = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (raw) {
+          const parsed = extractJson(raw);
+          if (parsed && (parsed.visualStructure || parsed.writingVoice)) {
+            extracted = { ...extracted, ...parsed };
+            console.log(`[AI Service] Successfully analyzed template via ${model}:`, extracted.summary);
+            break;
+          }
+        }
+      } catch (err) {
+        console.log(`[AI Service] analyzeTemplate error with ${model}:`, err.message);
+      }
+    }
+
+    return extracted;
+  }
+
+  /**
+   * Generate Structured Infographic Post & Card Data
+   * Driven by Selected Page's System Prompt & Reference Template Few-Shot Learning
+   */
+  async generateStructuredPost(optionsOrTopic = '', categoryId = '', pageId = '', templateId = '', templateObj = null) {
+    let topic = '';
+    let category = categoryId;
+    let targetPageId = pageId;
+    let targetTemplateId = templateId;
+    let template = templateObj;
+
+    if (typeof optionsOrTopic === 'object' && optionsOrTopic !== null) {
+      topic = optionsOrTopic.topic || '';
+      category = optionsOrTopic.categoryId || optionsOrTopic.category || '';
+      targetPageId = optionsOrTopic.pageId || '';
+      targetTemplateId = optionsOrTopic.templateId || '';
+      template = optionsOrTopic.template || optionsOrTopic.templateObj || null;
+    } else {
+      topic = optionsOrTopic || '';
+    }
+
     const settings = storage.getSettings();
     const geminiApiKey = settings.geminiApiKey ? settings.geminiApiKey.trim() : '';
     const categories = storage.getCategories();
 
     let activeCategory = null;
-    if (categoryId) {
-      activeCategory = categories.find(c => c.id === categoryId);
+    if (category) {
+      activeCategory = categories.find(c => c.id === category);
     }
 
     // Dynamic Non-Repeating Topic Selection if user did not provide a specific topic
@@ -636,42 +758,56 @@ class AIService {
       defaultBadge = activeCategory?.badge || dynamicTopicObj.badge;
     }
 
-    const activePage = storage.getActivePage();
-    const pageName = activePage?.name || settings.pageName || 'Facebook Page';
+    // 1. Identify Target Page & its dedicated System Prompt
+    const targetPage = targetPageId ? (storage.getPageById(targetPageId) || storage.getActivePage()) : storage.getActivePage();
+    const pageName = targetPage?.name || settings.pageName || 'Facebook Page';
+    const pageSystemPrompt = storage.getPageSystemPrompt(targetPage?.id);
 
-    console.log(`[AI Service] Generating post for page "${pageName}", Topic: "${effectiveTopic}", Style: "${postStyle}", Layout: "${cardLayout}"`);
+    // 2. Identify Reference Template & its Learned Profile
+    if (!template && targetTemplateId) {
+      template = storage.getTemplateById(targetTemplateId);
+    }
 
-    const customPromptGuidelines = settings.customSystemPrompt
-      ? `\n\nUSER'S INSTRUCTIONS & GUIDELINES:\n${settings.customSystemPrompt}`
-      : '';
+    let templateGuidelines = '';
+    if (template) {
+      const learned = template.learnedStyle;
+      templateGuidelines = `\n\nREFERENCE TEMPLATE LEARNING ("${template.title || 'Selected Template'}"):
+The user has attached this reference template. You MUST strictly follow its layout, format, and tone:
+${learned?.writingVoice ? `- Learned Writing Voice: ${learned.writingVoice}` : ''}
+${learned?.visualStructure ? `- Learned Card Layout: ${learned.visualStructure}` : ''}
+${template.sample ? `- Reference Caption Structure Example:\n"""\n${template.sample}\n"""` : ''}
+Make sure the post caption and card headline mimic this exact structure and formatting!`;
+    }
+
+    console.log(`[AI Service] Generating post for page "${pageName}" (Template: "${template?.title || 'None'}"), Topic: "${effectiveTopic}"`);
 
     const isCustomRequest = !isAutoTopic;
     const customIntentRule = isCustomRequest
-      ? `\nUSER INTENT FIDELITY RULE:
+      ? `\nUSER TOPIC / INSTRUCTION:
 The user provided a specific topic / instruction: "${effectiveTopic}".
-HONOR THE USER'S EXACT INTENT, TOPIC, AND DESIRED TONE (whether it is a product promotion, sale, discount, holiday/festival greeting, personal thought, debate, or announcement). Do NOT convert an offer, sale, or greeting into an unrelated science/GK fact template!`
+HONOR THE USER'S EXACT INTENT, TOPIC, AND DESIRED TONE (whether it is an educational post, story, breaking news, product promotion, sale/discount, holiday greeting, or opinion). Do NOT distort the user's intent into an unrelated subject!`
       : '';
 
-    const styleGuide = STYLE_GUIDES[postStyle] || STYLE_GUIDES.auto;
+    const systemPrompt = `You are the lead content creator and social media manager for the Facebook page "${pageName}".
+Your task is to write an engaging, high-converting, viral Facebook post in natural Bengali based on the user's topic and instruction, AND formulate the matching 2-line headline card for the image thumbnail.
 
-    const systemPrompt = `You are a social media manager and content creator for the Facebook page "${pageName}".
-Your task is to write an engaging, high-quality Facebook post in natural Bengali based on the user's topic and instruction, AND formulate the matching 2-line headline card for the image thumbnail.
-${customPromptGuidelines}
+PAGE-SPECIFIC INSTRUCTIONS & CONTENT GUIDELINES (MANDATORY):
+"${pageSystemPrompt}"
+Strictly adhere to this page's niche, brand tone, audience profile, and content requirements!
+${templateGuidelines}
 ${customIntentRule}
 
-${styleGuide}
-
 CRITICAL RULES:
-1. Follow the user's topic and prompt instruction faithfully, accurately, and engagingly.
+1. Follow the page's guidelines and the user's topic faithfully, accurately, and engagingly.
 2. Tone: Natural, engaging, authentic, and suitable for Facebook audiences.
 3. The thumbnail headline card MUST have EXACTLY 2 short, punchy lines with key subject words highlighted:
-   - "line1_red": The main subject or keyword in Bengali (rendered in Bold Red #EF4444 or vibrant color).
+   - "line1_red": The main subject or keyword in Bengali (rendered in Bold Accent Color #EF4444).
    - "line1_white": The remaining words of Line 1 in Bengali (White text).
    - "line2_white": The opening words of Line 2 in Bengali (White text).
    - "line2_yellow": The punchline, climax, or main takeaway in Bengali (rendered in Bright Yellow #FBBF24).
 4. "search_term": Precise English search query to find or generate the matching high-res photo.
 5. "badge": 2-3 words category badge in Bengali (e.g. "${defaultBadge}").
-6. "post_caption": The complete Facebook post text in natural Bengali matching the required WRITING STYLE, with emojis and suitable hashtags for "${pageName}" (do NOT use #ParikshaNotes).
+6. "post_caption": The complete Facebook post text in natural Bengali matching the page guidelines and reference template, with emojis and suitable hashtags for "${pageName}" (do NOT use #ParikshaNotes).
 7. ANTI-AI SLOP & NATURAL HUMAN VOICE RULES:
    - NO THROAT-CLEARING: NEVER use introductory filler like "চলুন জেনে নিই...", "আজকে আমরা কথা বলব...", "জানুন কিছু অজানা তথ্য:", "এখানে জরুরি কিছু তথ্য দেওয়া হলো: 👇". Start immediately with the core event, fact, or story.
    - NO FORMATTING SLOP: Do NOT spam emojis on every single line or bullet. Use only 2-3 tasteful emojis across the entire post. Never use bold bullet headers like "**ভারতের প্রথম সৌর মিশন:**" on every point.
@@ -693,12 +829,10 @@ Output MUST be a single valid JSON object with keys:
     const uniqueSeed = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
     const userPrompt = isCustomRequest
       ? `Generate an authentic, engaging Facebook post for: "${effectiveTopic}".
-Writing Style: ${postStyle}.
 Category: ${activeCategory?.title || defaultBadge}.
 Seed: ${uniqueSeed}.
 Respond ONLY with the JSON object.`
       : `Generate a completely UNIQUE, FASCINATING, and BRAND NEW viral post for: "${effectiveTopic}".
-Writing Style: ${postStyle}.
 Category: ${activeCategory?.title || defaultBadge}.
 Random Seed: ${uniqueSeed}. Make sure this is completely different and fresh.
 Respond ONLY with the JSON object.`;
@@ -1005,25 +1139,42 @@ Respond ONLY with the JSON object.`;
    * Main Generator Entry: Generates Full Bundle (Viral Post + Reference-Style Thumbnail Card)
    */
   async generateFullPostBundle(options = {}) {
-    const { topic = '', categoryId = '', postStyle = 'auto', cardLayout = 'auto', includeImage = true, templateImage = null } = options;
+    const { topic = '', categoryId = '', pageId = '', templateId = '', templateImage = null, includeImage = true, templateObj = null } = options;
     const categories = storage.getCategories();
     const category = categoryId ? categories.find(c => c.id === categoryId) : null;
 
-    console.log(`[AI Service] Generating full post bundle (Category: ${category?.title || 'Auto'}, Style: ${postStyle}, Layout: ${cardLayout}, Template: ${!!templateImage})...`);
+    let targetTemplate = templateObj;
+    if (!targetTemplate && templateId) {
+      targetTemplate = storage.getTemplateById(templateId);
+    }
+    const effectiveTemplateImage = templateImage || targetTemplate?.imageUrl || null;
 
-    // Generate structured data
-    const structuredData = await this.generateStructuredPost(topic, categoryId, postStyle, cardLayout);
+    console.log(`[AI Service] Generating full post bundle (PageId: "${pageId || 'active'}", Category: ${category?.title || 'Auto'}, Template: "${targetTemplate?.title || 'None'}")...`);
+
+    // Generate structured data using Page System Prompt and Template Learning
+    const structuredData = await this.generateStructuredPost({
+      topic,
+      categoryId,
+      pageId,
+      templateId,
+      templateObj: targetTemplate
+    });
 
     let imageResult = null;
     if (includeImage) {
-      imageResult = await this.generateThumbnailCardFromData(structuredData, topic, 0, 'auto', '', templateImage, cardLayout, postStyle);
+      imageResult = await this.generateThumbnailCardFromData(
+        structuredData,
+        topic,
+        0,
+        'auto',
+        '',
+        effectiveTemplateImage
+      );
     }
 
     return {
       message: structuredData.post_caption,
       category: category ? { id: category.id, title: category.title } : null,
-      postStyle,
-      cardLayout: imageResult?.layout || cardLayout,
       cardData: {
         badge: structuredData.badge,
         line1_red: structuredData.line1_red,
@@ -1046,11 +1197,17 @@ Respond ONLY with the JSON object.`;
    * Does NOT touch or regenerate the post message / caption
    */
   async regenerateThumbnailOnly(options = {}) {
-    const { topic = '', cardData = null, customPrompt = '', styleMode = 'auto', cardLayout = 'auto', postStyle = 'auto', variation = 1, templateImage = null } = options;
+    const { topic = '', cardData = null, customPrompt = '', styleMode = 'auto', pageId = '', templateId = '', variation = 1, templateImage = null } = options;
     
+    let targetTemplate = null;
+    if (templateId) {
+      targetTemplate = storage.getTemplateById(templateId);
+    }
+    const effectiveTemplateImage = templateImage || targetTemplate?.imageUrl || null;
+
     let activeCardData = cardData;
     if (!activeCardData || !activeCardData.line1_red) {
-      const generated = await this.generateStructuredPost(topic, '', postStyle, cardLayout);
+      const generated = await this.generateStructuredPost({ topic, pageId, templateId });
       activeCardData = {
         badge: generated.badge,
         line1_red: generated.line1_red,
@@ -1063,12 +1220,12 @@ Respond ONLY with the JSON object.`;
       activeCardData.search_term = customPrompt;
     }
 
-    console.log(`[AI Service] Regenerating thumbnail only (Var #${variation}, Layout: ${cardLayout}, Style: ${postStyle}, Mode: ${styleMode})...`);
-    const imageResult = await this.generateThumbnailCardFromData(activeCardData, topic, variation, styleMode, customPrompt, templateImage, cardLayout, postStyle);
+    console.log(`[AI Service] Regenerating thumbnail only (Var #${variation}, Page: ${pageId || 'active'}, Template: ${targetTemplate?.title || 'None'})...`);
+    const imageResult = await this.generateThumbnailCardFromData(activeCardData, topic, variation, styleMode, customPrompt, effectiveTemplateImage);
     return {
       cardData: activeCardData,
       image: imageResult,
-      cardLayout: imageResult?.layout || cardLayout
+      cardLayout: imageResult?.layout || 'infographic'
     };
   }
 
@@ -1077,33 +1234,39 @@ Respond ONLY with the JSON object.`;
    * Does NOT regenerate or change the image
    */
   async regenerateCaptionOnly(options = {}) {
-    const { topic = '', currentMessage = '', postStyle = 'auto', variation = 1 } = options;
+    const { topic = '', currentMessage = '', pageId = '', templateId = '', variation = 1 } = options;
     const settings = storage.getSettings();
-    const activePage = storage.getActivePage();
-    const pageName = activePage?.name || settings.pageName || 'Facebook Page';
+    const targetPage = pageId ? (storage.getPageById(pageId) || storage.getActivePage()) : storage.getActivePage();
+    const pageName = targetPage?.name || settings.pageName || 'Facebook Page';
+    const pageSystemPrompt = storage.getPageSystemPrompt(targetPage?.id);
     const geminiApiKey = settings.geminiApiKey ? settings.geminiApiKey.trim() : '';
 
-    const customPromptGuidelines = settings.customSystemPrompt
-      ? `\n\nUSER'S INSTRUCTIONS:\n${settings.customSystemPrompt}`
-      : '';
+    let templateGuidelines = '';
+    if (templateId) {
+      const template = storage.getTemplateById(templateId);
+      if (template) {
+        templateGuidelines = `\n\nREFERENCE TEMPLATE: "${template.title}".
+Adopt this template's writing voice: ${template.learnedStyle?.writingVoice || ''}
+${template.sample ? `Reference sample:\n"""${template.sample}"""` : ''}`;
+      }
+    }
 
-    const styleGuide = STYLE_GUIDES[postStyle] || STYLE_GUIDES.auto;
+    const systemPrompt = `You are a social media copywriter and content manager for the Facebook page "${pageName}".
+Your task is to write a fresh, creative, engaging Facebook post in natural Bengali.
 
-    const systemPrompt = `You are a social media copywriter for the Facebook page "${pageName}".
-Your task is to write a fresh, creative, and engaging Facebook post in natural Bengali.
-${customPromptGuidelines}
-
-${styleGuide}
+PAGE-SPECIFIC STRATEGY & INSTRUCTIONS (MANDATORY):
+"${pageSystemPrompt}"
+Strictly adhere to this page's niche, tone, topics, and rules!
+${templateGuidelines}
 
 CRITICAL RULES:
 1. Provide a completely new, engaging angle/hook different from the previous version.
-2. Adhere strictly to the required WRITING STYLE (e.g. if Storytelling, write paragraphs with NO bullet points; if Breaking News, write as a journalistic bulletin; if Debate, ask open questions).
+2. Follow the page's guidelines and any reference template style faithfully.
 3. ANTI-AI SLOP & NATURAL HUMAN VOICE: No throat-clearing openers ("চলুন জেনে নিই..."), no emoji spam on every line (2-3 max for entire post), no fake engagement bait questions ("নিচে কমেন্টে জানান 👇"), and no dramatic clichés ("মুকুটে জুড়ল নতুন পালক"). Write in grounded, authentic human Bengali.
 4. Include clean formatting and suitable hashtags for "${pageName}" (do NOT use #ParikshaNotes).
 5. Respond ONLY with the ready-to-post Bengali Facebook post text. Do not output markdown code blocks or JSON.`;
 
     const userPrompt = `Topic or context: "${topic || (currentMessage ? currentMessage.slice(0, 150) : 'আজকের আলোচিত খবর ও তথ্য')}".
-Writing Style: ${postStyle}.
 Variation seed: ${Date.now()}_${variation * 101}.
 Write a completely fresh, brand new engaging post in natural Bengali.`;
 

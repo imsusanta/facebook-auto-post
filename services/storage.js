@@ -235,12 +235,23 @@ const storage = {
         pictureUrl: s.pictureUrl || '',
         accessToken: s.accessToken || '',
         category: 'General',
+        systemPrompt: s.customSystemPrompt || DEFAULT_SYSTEM_PROMPT,
         connectedAt: s.updatedAt || new Date().toISOString(),
         isActive: true
       };
       s.pages = [initialPage];
       s.activePageId = initialPage.id;
       writeJsonFile(SETTINGS_FILE, s);
+    } else {
+      // Ensure all existing pages have systemPrompt field
+      let changed = false;
+      s.pages.forEach(p => {
+        if (!p.systemPrompt) {
+          p.systemPrompt = s.customSystemPrompt || DEFAULT_SYSTEM_PROMPT;
+          changed = true;
+        }
+      });
+      if (changed) writeJsonFile(SETTINGS_FILE, s);
     }
     return s.pages;
   },
@@ -250,6 +261,26 @@ const storage = {
     const s = this.getSettings();
     const active = pages.find(p => p.id === s.activePageId) || pages.find(p => p.isActive) || pages[0] || null;
     return active;
+  },
+
+  getPageById(pageId) {
+    const pages = this.getConnectedPages();
+    return pages.find(p => p.id === pageId) || null;
+  },
+
+  getPageSystemPrompt(pageId) {
+    if (pageId) {
+      const page = this.getPageById(pageId);
+      if (page && page.systemPrompt && page.systemPrompt.trim()) {
+        return page.systemPrompt.trim();
+      }
+    }
+    const active = this.getActivePage();
+    if (active && active.systemPrompt && active.systemPrompt.trim()) {
+      return active.systemPrompt.trim();
+    }
+    const s = this.getSettings();
+    return s.customSystemPrompt || DEFAULT_SYSTEM_PROMPT;
   },
 
   addConnectedPage(pageData) {
@@ -263,6 +294,7 @@ const storage = {
       pictureUrl: pageData.pictureUrl || '/pariksha_notes_logo.jpg',
       accessToken: pageData.accessToken,
       category: pageData.category || 'General',
+      systemPrompt: pageData.systemPrompt || s.customSystemPrompt || DEFAULT_SYSTEM_PROMPT,
       connectedAt: new Date().toISOString(),
       isActive: pages.length === 0 || !!pageData.setAsActive
     };
@@ -280,11 +312,40 @@ const storage = {
       s.pageName = newPage.name;
       s.accessToken = newPage.accessToken;
       s.pictureUrl = newPage.pictureUrl;
+      s.customSystemPrompt = newPage.systemPrompt;
     }
 
     s.pages = pages;
     writeJsonFile(SETTINGS_FILE, s);
     return newPage;
+  },
+
+  updateConnectedPage(pageId, updates = {}) {
+    const s = this.getSettings();
+    const pages = this.getConnectedPages();
+    const index = pages.findIndex(p => p.id === pageId);
+    if (index === -1) return null;
+
+    const current = pages[index];
+    const updated = {
+      ...current,
+      ...updates,
+      id: current.id, // Cannot mutate immutable ID
+      updatedAt: new Date().toISOString()
+    };
+    pages[index] = updated;
+
+    // If active page, synchronize top-level settings fields
+    if (s.activePageId === pageId || updated.isActive) {
+      if (updates.name) s.pageName = updates.name;
+      if (updates.accessToken) s.accessToken = updates.accessToken;
+      if (updates.pictureUrl) s.pictureUrl = updates.pictureUrl;
+      if (updates.systemPrompt) s.customSystemPrompt = updates.systemPrompt;
+    }
+
+    s.pages = pages;
+    writeJsonFile(SETTINGS_FILE, s);
+    return updated;
   },
 
   setActivePage(pageId) {
@@ -303,6 +364,9 @@ const storage = {
     s.pageName = target.name;
     s.accessToken = target.accessToken;
     s.pictureUrl = target.pictureUrl;
+    if (target.systemPrompt) {
+      s.customSystemPrompt = target.systemPrompt;
+    }
 
     writeJsonFile(SETTINGS_FILE, s);
     return target;
@@ -531,6 +595,11 @@ const storage = {
     return templates;
   },
 
+  getTemplateById(id) {
+    const templates = this.getTemplates();
+    return templates.find(t => t.id === id) || null;
+  },
+
   addTemplate(templateData) {
     const templates = this.getTemplates();
     const newTemplate = {
@@ -541,6 +610,7 @@ const storage = {
       imageUrl: templateData.imageUrl || 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=1080&h=1080&q=85',
       desc: templateData.desc || 'Custom post template style for Facebook.',
       sample: templateData.sample || '📢 নতুন কাস্টম পোস্ট টেমপ্লেট!\n\nএখানে আপনার পোস্টের মূল বিষয়বস্তু লিখুন...\n\n#Trending #ViralPost #Template',
+      learnedStyle: templateData.learnedStyle || null,
       createdAt: new Date().toISOString()
     };
     templates.unshift(newTemplate);

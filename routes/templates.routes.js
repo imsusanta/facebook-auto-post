@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const storage = require('../services/storage');
 
+const ai = require('../services/ai');
+
 // GET /api/templates - List all templates
 router.get('/', (req, res) => {
   try {
@@ -12,12 +14,22 @@ router.get('/', (req, res) => {
   }
 });
 
-// POST /api/templates - Add a new template
-router.post('/', (req, res) => {
+// POST /api/templates - Add a new template with optional AI learning
+router.post('/', async (req, res) => {
   try {
-    const { title, badge, category, imageUrl, desc, sample } = req.body;
+    const { title, badge, category, imageUrl, desc, sample, learnedStyle } = req.body;
     if (!title || !title.trim()) {
       return res.status(400).json({ success: false, error: 'Template title is required.' });
+    }
+
+    let activeLearnedStyle = learnedStyle || null;
+    // Auto-analyze template style if not explicitly supplied
+    if (!activeLearnedStyle && (imageUrl || sample)) {
+      try {
+        activeLearnedStyle = await ai.analyzeTemplate(imageUrl, sample);
+      } catch (err) {
+        console.log('[Template Route] Notice auto-analyzing style:', err.message);
+      }
     }
 
     const newTemplate = storage.addTemplate({
@@ -26,7 +38,8 @@ router.post('/', (req, res) => {
       category: category ? category.trim() : undefined,
       imageUrl: imageUrl ? imageUrl.trim() : undefined,
       desc: desc ? desc.trim() : undefined,
-      sample: sample ? sample.trim() : undefined
+      sample: sample ? sample.trim() : undefined,
+      learnedStyle: activeLearnedStyle
     });
 
     res.status(201).json({ success: true, template: newTemplate });

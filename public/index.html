@@ -673,73 +673,97 @@
           <div class="lg:col-span-7 space-y-6">
 
             <!-- Card 1: AI Magic Post Generator -->
-            <div class="saas-card p-6 border-indigo-100 bg-gradient-to-br from-white via-indigo-50/20 to-purple-50/20 relative overflow-hidden">
-              <div class="flex items-center justify-between pb-3 border-b border-indigo-100/60 mb-4">
+            <div class="saas-card p-6 border-indigo-100 bg-gradient-to-br from-white via-indigo-50/20 to-purple-50/20 relative overflow-hidden space-y-4">
+              <div class="flex items-center justify-between pb-3 border-b border-indigo-100/60">
                 <div class="flex items-center gap-2.5">
                   <div class="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shadow-sm">
                     <i data-lucide="sparkles" class="w-4 h-4 text-indigo-600"></i>
                   </div>
                   <div>
-                    <h4 class="text-sm font-bold text-slate-900">AI Smart Post Generator (Gemini)</h4>
-                    <p class="text-[11px] text-slate-500">Enter any custom topic or prompt to generate viral captions & matching cards</p>
+                    <h4 class="text-sm font-bold text-slate-900">Facebook Post Studio (Gemini AI)</h4>
+                    <p class="text-[11px] text-slate-500">Auto-creates viral Bengali posts & high-res cards adhering to your page guidelines and reference templates</p>
                   </div>
                 </div>
                 <span class="text-[11px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full">Gemini 3.1 Flash AI</span>
               </div>
 
-              <!-- Active Template Reference Banner -->
-              <div id="activeTemplateBanner" class="hidden flex items-center justify-between p-2.5 mb-3 rounded-xl bg-indigo-50/90 border border-indigo-200 text-xs">
-                <div class="flex items-center gap-2.5 min-w-0">
-                  <img id="activeTemplateThumb" src="" class="w-10 h-10 rounded-lg object-cover ring-1 ring-indigo-400 shrink-0">
-                  <div class="truncate">
-                    <div class="flex items-center gap-1.5">
-                      <span class="font-bold text-indigo-950 truncate" id="activeTemplateName">Using Template Style</span>
-                      <span class="bg-indigo-200 text-indigo-800 text-[9px] font-bold px-1.5 py-0.5 rounded">Style Attached</span>
+              <!-- Selected Facebook Page & Content Strategy Guidelines -->
+              <div class="p-3.5 bg-white/90 rounded-xl border border-indigo-100 shadow-xs space-y-2">
+                <div class="flex items-center justify-between flex-wrap gap-2">
+                  <div class="flex items-center gap-2.5">
+                    <img id="studioPageLogo" src="/pariksha_notes_logo.jpg" class="w-7 h-7 rounded-full object-cover ring-2 ring-indigo-500/30">
+                    <div>
+                      <div class="flex items-center gap-1.5">
+                        <span class="text-xs font-bold text-slate-900" id="studioPageName">Connected Page</span>
+                        <span class="text-[9px] text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full font-bold">Active</span>
+                      </div>
+                      <span id="studioPageCategory" class="text-[10px] text-slate-400 font-medium block">General</span>
                     </div>
-                    <span class="text-[10px] text-indigo-600 font-medium block truncate">AI will generate the 1080x1080 card using this template background</span>
+                  </div>
+                  <button id="studioEditPagePromptBtn" type="button" class="text-[11px] font-semibold text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg border border-indigo-200/80 transition flex items-center gap-1 shadow-xs">
+                    <i data-lucide="edit-3" class="w-3 h-3"></i>
+                    <span>Edit Page Instructions</span>
+                  </button>
+                </div>
+                <div class="text-[11px] text-slate-600 bg-slate-50/90 p-2.5 rounded-lg border border-slate-100 flex items-start gap-2">
+                  <i data-lucide="shield-check" class="w-3.5 h-3.5 text-indigo-600 shrink-0 mt-0.5"></i>
+                  <div class="leading-relaxed min-w-0">
+                    <span class="font-bold text-slate-800">Saved Page Rules: </span>
+                    <span id="studioPagePromptSnippet" class="italic text-slate-600">Loading instructions...</span>
                   </div>
                 </div>
-                <button id="clearActiveTemplateBtn" type="button" class="text-indigo-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-white transition shrink-0" title="Remove Template Style">
-                  <i data-lucide="x" class="w-4 h-4"></i>
-                </button>
               </div>
 
-              <div class="flex gap-2.5">
-                <input type="text" id="aiCustomTopic" placeholder="Write any topic (e.g. আজকের ব্রেকিং নিউজ, চন্দ্রযান, AI Revolution, মোটিভেশন, অফার)..." class="flex-1 text-xs px-3.5 py-2.5 bg-white border border-indigo-200 rounded-xl outline-none focus:border-indigo-500 font-medium shadow-sm">
-                <button id="generateAiPostBtn" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center gap-2 shadow-sm transition shrink-0">
-                  <i data-lucide="wand-2" class="w-3.5 h-3.5"></i>
-                  <span id="generateAiBtnText">Generate Post</span>
-                </button>
-              </div>
-
-              <!-- Multi-Style Writing & Card Layout Selectors -->
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
-                <div>
-                  <label class="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-                    <i data-lucide="feather" class="w-3.5 h-3.5 text-indigo-500"></i>
-                    <span>✍️ লেখার ধরণ (Writing Style)</span>
-                  </label>
-                  <select id="aiPostStyleSelect" class="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-medium text-slate-700 shadow-sm cursor-pointer hover:border-indigo-300 transition">
-                    <option value="auto">🌟 স্মার্ট অটো (Smart Adaptive)</option>
-                    <option value="story">📖 গল্পের ছলে (Storytelling - নো বুলেট)</option>
-                    <option value="news">⚡ সংবাদ বুলেটিন (Breaking News)</option>
-                    <option value="debate">🗣️ প্রশ্ন ও বিতর্ক (Question & Debate)</option>
-                    <option value="tips">💡 পরামর্শ ও উক্তি (Tips, Wisdom & Quotes)</option>
-                    <option value="facts">📊 ইনফোগ্রাফিক তথ্য (Facts Breakdown)</option>
-                  </select>
+              <!-- Reference Template Section (AI Learns from Uploaded Template) -->
+              <div id="studioTemplateSection" class="p-3.5 bg-white/90 rounded-xl border border-slate-200/80 shadow-xs space-y-2.5">
+                <div class="flex items-center justify-between flex-wrap gap-2">
+                  <div class="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                    <i data-lucide="layout-template" class="w-3.5 h-3.5 text-indigo-600"></i>
+                    <span>Reference Template Style (AI Learning)</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <button id="studioOpenTemplatesBtn" type="button" class="text-[11px] font-semibold text-slate-600 hover:text-indigo-600 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg transition flex items-center gap-1">
+                      <i data-lucide="folder" class="w-3 h-3"></i>
+                      <span>Browse Templates</span>
+                    </button>
+                    <button id="studioUploadTemplateBtn" type="button" class="text-[11px] font-semibold text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg border border-indigo-200 transition flex items-center gap-1">
+                      <i data-lucide="upload" class="w-3 h-3"></i>
+                      <span>Upload & Learn Style</span>
+                    </button>
+                  </div>
                 </div>
-                <div>
-                  <label class="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-                    <i data-lucide="layout" class="w-3.5 h-3.5 text-indigo-500"></i>
-                    <span>🎨 কার্ড ডিজাইন স্টাইল (Card Layout)</span>
-                  </label>
-                  <select id="aiCardLayoutSelect" class="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-medium text-slate-700 shadow-sm cursor-pointer hover:border-indigo-300 transition">
-                    <option value="auto">✨ স্মার্ট অটো ম্যাচ (Auto Match)</option>
-                    <option value="infographic">📌 ক্লাসিক ইনফোগ্রাফিক (2-Line Headline)</option>
-                    <option value="minimal">🖼️ ক্লিন ফটো মিনিমাল (Clean Photo Glass)</option>
-                    <option value="quote">💬 বড় কোটেশন কার্ড (Centered Quote Card)</option>
-                    <option value="news_strip">📺 টিভি নিউজ স্ট্রিপ (TV Lower-Third Strip)</option>
-                  </select>
+
+                <!-- Active Template Preview Banner -->
+                <div id="activeTemplateBanner" class="hidden flex items-center justify-between p-2.5 rounded-xl bg-indigo-50/90 border border-indigo-200 text-xs">
+                  <div class="flex items-center gap-2.5 min-w-0">
+                    <img id="activeTemplateThumb" src="" class="w-10 h-10 rounded-lg object-cover ring-1 ring-indigo-400 shrink-0">
+                    <div class="truncate">
+                      <div class="flex items-center gap-1.5">
+                        <span class="font-bold text-indigo-950 truncate" id="activeTemplateName">Template Name</span>
+                        <span class="bg-indigo-200 text-indigo-800 text-[9px] font-bold px-1.5 py-0.5 rounded">Learned Style</span>
+                      </div>
+                      <span id="activeTemplateLearnedSummary" class="text-[10px] text-indigo-600 font-medium block truncate mt-0.5">AI mimics this card layout & writing tone</span>
+                    </div>
+                  </div>
+                  <button id="clearActiveTemplateBtn" type="button" class="text-indigo-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-white transition shrink-0" title="Remove Template">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                  </button>
+                </div>
+
+                <div id="studioNoTemplateHint" class="text-[11px] text-slate-400 italic">
+                  No reference template attached. Posts will follow your Page Guidelines, or click "Upload & Learn Style" above to mimic an exact post design.
+                </div>
+              </div>
+
+              <!-- Topic / Prompt Input & Generate Button -->
+              <div class="space-y-2 pt-1">
+                <label class="block text-[11px] font-bold text-slate-700">Topic, Headline or Custom Instructions</label>
+                <div class="flex gap-2.5">
+                  <input type="text" id="aiCustomTopic" placeholder="Write any topic (e.g. নতুন অফারের ৫০% ছাড়, আজকের ব্রেকিং নিউজ, চন্দ্রযান মিশন, আত্মবিশ্বাস বাড়ানোর ৩ উপায়)..." class="flex-1 text-xs px-3.5 py-2.5 bg-white border border-indigo-200 rounded-xl outline-none focus:border-indigo-500 font-medium shadow-sm">
+                  <button id="generateAiPostBtn" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center gap-2 shadow-sm transition shrink-0">
+                    <i data-lucide="wand-2" class="w-3.5 h-3.5"></i>
+                    <span id="generateAiBtnText">Generate Post</span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -1503,6 +1527,69 @@
             <button id="submitAddPageBtn" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition flex items-center gap-1.5">
               <i data-lucide="check" class="w-3.5 h-3.5"></i>
               <span>Verify & Connect Page</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= EDIT FACEBOOK PAGE & INSTRUCTIONS MODAL ================= -->
+      <div id="editPageModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop hidden">
+        <div class="bg-white w-full max-w-xl rounded-2xl shadow-2xl border border-slate-100 modal-content overflow-hidden flex flex-col max-h-[90vh]">
+          <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+            <div class="flex items-center gap-2">
+              <i data-lucide="edit-3" class="w-4 h-4 text-indigo-600"></i>
+              <h3 class="text-sm font-bold text-slate-900">Edit Page Settings & AI Content Guidelines</h3>
+            </div>
+            <button id="closeEditPageModalBtn" class="text-slate-400 hover:text-slate-700 p-1 rounded-lg">
+              <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+          </div>
+
+          <div class="p-6 space-y-4 text-xs overflow-y-auto">
+            <input type="hidden" id="editPageIdInput">
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block font-bold text-slate-700 mb-1">Page Name <span class="text-rose-500">*</span></label>
+                <input type="text" id="editPageNameInput" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-medium">
+              </div>
+              <div>
+                <label class="block font-bold text-slate-700 mb-1">Niche / Category</label>
+                <input type="text" id="editPageCategoryInput" placeholder="e.g. Education, News, Lifestyle" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500">
+              </div>
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Page Access Token (Optional Update)</label>
+              <textarea id="editPageTokenInput" rows="2" placeholder="Leave empty to keep existing access token..." class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-mono text-[11px] leading-relaxed"></textarea>
+              <span class="text-[10px] text-slate-400 mt-0.5 block">Only fill this if you need to refresh an expired Page Access Token.</span>
+            </div>
+
+            <!-- Page System Prompt Instructions -->
+            <div class="p-4 bg-gradient-to-br from-indigo-50/60 to-purple-50/40 rounded-2xl border border-indigo-100 space-y-2.5">
+              <div class="flex items-center justify-between">
+                <label class="block font-bold text-slate-900 flex items-center gap-1.5">
+                  <i data-lucide="sparkles" class="w-3.5 h-3.5 text-indigo-600"></i>
+                  <span>এই পেজের জন্য নির্দিষ্ট সিস্টেম প্রম্পট (Page System Prompt)</span>
+                </label>
+                <span class="text-[10px] text-indigo-700 font-bold bg-indigo-100 px-2 py-0.5 rounded-full">AI Follows Strictly</span>
+              </div>
+              <p class="text-[11px] text-slate-600 leading-normal">
+                এই ফেসবুক পেজের জন্য AI কী ধরনের পোস্ট তৈরি করবে, কোন টপিক/নিশ কভার করবে, লেখার টোন কেমন হবে, কী কী উপাদান বা হ্যাশট্যাগ থাকবে—তা বিস্তারিত লিখুন। যখনই এই পেজটি সিলেক্ট থাকবে, AI সর্বদা এই ইন্সট্রাকশন মেনে পোস্ট জেনারেট করবে।
+              </p>
+              <textarea id="editPagePromptInput" rows="7" placeholder="উদাহরণ:
+১. এই পেজটি সম্পূর্ণ সরকারি চাকরি প্রস্তুতি এবং শিক্ষামূলক স্টাডি নোটসের জন্য।
+২. ভাষা হবে সহজ, প্রাঞ্জল ও অনুপ্রেরণামূলক বাংলা। কোনো জটিল শব্দ বা অপ্রয়োজনীয় ভূমিকা ব্যবহার করবে না।
+৩. প্রতিটি পোস্টের শুরুতে আকর্ষণীয় হুক থাকবে।
+৪. পোস্টে ২-৩টি মানানসই ইমোজি এবং পরীক্ষার প্রাসঙ্গিক হ্যাশট্যাগ ব্যবহার করবে।" class="w-full p-3 bg-white border border-indigo-200 rounded-xl outline-none focus:border-indigo-500 text-slate-800 leading-relaxed font-sans text-xs shadow-xs"></textarea>
+            </div>
+          </div>
+
+          <div class="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-2.5 bg-slate-50/50">
+            <button id="cancelEditPageModalBtn" class="text-xs font-semibold text-slate-500 hover:text-slate-800 px-4 py-2">Cancel</button>
+            <button id="submitEditPageBtn" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition flex items-center gap-1.5">
+              <i data-lucide="check" class="w-3.5 h-3.5"></i>
+              <span>Save Page & Guidelines</span>
             </button>
           </div>
         </div>

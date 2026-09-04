@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
     calendarDate: new Date(2024, 4, 28), // May 28, 2024 default matching reference design
     pages: [],
     activePageId: null,
+    activeTemplate: null,
     activeTemplateImage: null,
     activeTemplateTitle: null,
     lastCardData: null,
@@ -156,6 +157,17 @@ document.addEventListener('DOMContentLoaded', () => {
   const newPageSetActiveCheck = document.getElementById('newPageSetActiveCheck');
   const accountsPageGrid = document.getElementById('accountsPageGrid');
 
+  // Edit Page & Strategy Guidelines Modal Elements
+  const editPageModal = document.getElementById('editPageModal');
+  const closeEditPageModalBtn = document.getElementById('closeEditPageModalBtn');
+  const cancelEditPageModalBtn = document.getElementById('cancelEditPageModalBtn');
+  const submitEditPageBtn = document.getElementById('submitEditPageBtn');
+  const editPageIdInput = document.getElementById('editPageIdInput');
+  const editPageNameInput = document.getElementById('editPageNameInput');
+  const editPageCategoryInput = document.getElementById('editPageCategoryInput');
+  const editPageTokenInput = document.getElementById('editPageTokenInput');
+  const editPagePromptInput = document.getElementById('editPagePromptInput');
+
   // Templates Management Modal Elements
   const openAddTemplateModalBtn = document.getElementById('openAddTemplateModalBtn');
   const addTemplateModal = document.getElementById('addTemplateModal');
@@ -235,7 +247,11 @@ document.addEventListener('DOMContentLoaded', () => {
     headerSubtitle.innerHTML = cfg.subtitle;
 
     // Trigger view-specific renderers
-    if (viewName === 'create-post') updateLivePreview();
+    if (viewName === 'create-post') {
+      updateLivePreview();
+      updateStudioPageBanner();
+      updateActiveTemplateUI();
+    }
     if (viewName === 'queue') renderFullQueueView();
     if (viewName === 'calendar') renderFullMonthCalendar();
     if (viewName === 'automation') fetchAutomationRules();
@@ -461,8 +477,6 @@ document.addEventListener('DOMContentLoaded', () => {
     generateAiPostBtn.addEventListener('click', async () => {
       const topic = aiCustomTopic ? aiCustomTopic.value.trim() : '';
       const category = composerCategorySelect ? composerCategorySelect.value : '';
-      const postStyle = aiPostStyleSelect ? aiPostStyleSelect.value : 'auto';
-      const cardLayout = aiCardLayoutSelect ? aiCardLayoutSelect.value : 'auto';
 
       generateAiPostBtn.disabled = true;
       generateAiBtnText.textContent = 'Generating with Gemini AI...';
@@ -482,10 +496,10 @@ document.addEventListener('DOMContentLoaded', () => {
             topic: topic || undefined,
             categoryId: category || undefined,
             category: category || undefined,
-            postStyle,
-            cardLayout,
-            includeImage: true,
-            templateImage: state.activeTemplateImage || undefined
+            pageId: state.activePageId || undefined,
+            templateId: state.activeTemplate?.id || undefined,
+            templateImage: state.activeTemplate?.imageUrl || state.activeTemplateImage || undefined,
+            includeImage: true
           })
         });
 
@@ -558,8 +572,6 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshIcons();
 
     state.imageVariation = (state.imageVariation || 1) + 1;
-    const cardLayout = aiCardLayoutSelect ? aiCardLayoutSelect.value : 'auto';
-    const postStyle = aiPostStyleSelect ? aiPostStyleSelect.value : 'auto';
 
     try {
       const res = await fetch('/api/ai/regenerate-image', {
@@ -568,10 +580,10 @@ document.addEventListener('DOMContentLoaded', () => {
         body: JSON.stringify({
           topic: topic || (postMessage ? postMessage.value.slice(0, 120) : ''),
           cardData: state.lastCardData || undefined,
-          cardLayout,
-          postStyle,
-          variation: state.imageVariation,
-          templateImage: state.activeTemplateImage || undefined
+          pageId: state.activePageId || undefined,
+          templateId: state.activeTemplate?.id || undefined,
+          templateImage: state.activeTemplate?.imageUrl || state.activeTemplateImage || undefined,
+          variation: state.imageVariation
         })
       });
 
@@ -587,7 +599,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         state.notifications.unshift({
           id: `notif_${Date.now()}`,
-          text: `নতুন ফটো ভ্যারিয়েশন #${state.imageVariation} (${data.cardLayout || cardLayout}) সফলভাবে তৈরি হয়েছে!`,
+          text: `নতুন ফটো ভ্যারিয়েশন #${state.imageVariation} সফলভাবে তৈরি হয়েছে!`,
           time: 'Just now',
           type: 'success'
         });
@@ -616,7 +628,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // 2. Regenerate Caption / Post Text Only (Attached image remains 100% intact)
   async function handleRegenerateTextOnly() {
     const topic = aiCustomTopic ? aiCustomTopic.value.trim() : '';
-    const postStyle = aiPostStyleSelect ? aiPostStyleSelect.value : 'auto';
     const origCaptionBtnText = regenerateCaptionBtn ? regenerateCaptionBtn.innerHTML : '';
     const origFbTextBtnText = fbPreviewRegenTextBtn ? fbPreviewRegenTextBtn.innerHTML : '';
 
@@ -639,7 +650,8 @@ document.addEventListener('DOMContentLoaded', () => {
         body: JSON.stringify({
           topic: topic || '',
           currentMessage: postMessage ? postMessage.value : '',
-          postStyle,
+          pageId: state.activePageId || undefined,
+          templateId: state.activeTemplate?.id || undefined,
           variation: state.textVariation
         })
       });
@@ -1148,14 +1160,31 @@ document.addEventListener('DOMContentLoaded', () => {
     const banner = document.getElementById('activeTemplateBanner');
     const thumb = document.getElementById('activeTemplateThumb');
     const name = document.getElementById('activeTemplateName');
+    const summary = document.getElementById('activeTemplateLearnedSummary');
+    const hint = document.getElementById('studioNoTemplateHint');
     if (!banner) return;
 
-    if (state.activeTemplateImage) {
+    const currentTmpl = state.activeTemplate;
+    const currentImg = currentTmpl?.imageUrl || state.activeTemplateImage;
+    const currentTitle = currentTmpl?.title || state.activeTemplateTitle;
+
+    if (currentImg) {
       banner.classList.remove('hidden');
-      if (thumb) thumb.src = state.activeTemplateImage;
-      if (name) name.textContent = state.activeTemplateTitle ? `Template: ${state.activeTemplateTitle}` : 'Custom Template Image Attached';
+      if (hint) hint.classList.add('hidden');
+      if (thumb) thumb.src = currentImg;
+      if (name) name.textContent = currentTitle ? `Template: ${currentTitle}` : 'Custom Reference Template';
+      if (summary) {
+        if (currentTmpl?.learnedStyle?.summary) {
+          summary.textContent = `Learned: ${currentTmpl.learnedStyle.summary}`;
+        } else if (currentTmpl?.desc) {
+          summary.textContent = currentTmpl.desc;
+        } else {
+          summary.textContent = 'AI mimics this card layout, colors & writing style';
+        }
+      }
     } else {
       banner.classList.add('hidden');
+      if (hint) hint.classList.remove('hidden');
     }
     refreshIcons();
   }
@@ -1163,9 +1192,32 @@ document.addEventListener('DOMContentLoaded', () => {
   const clearActiveTemplateBtn = document.getElementById('clearActiveTemplateBtn');
   if (clearActiveTemplateBtn) {
     clearActiveTemplateBtn.addEventListener('click', () => {
+      state.activeTemplate = null;
       state.activeTemplateImage = null;
       state.activeTemplateTitle = null;
       updateActiveTemplateUI();
+    });
+  }
+
+  const studioOpenTemplatesBtn = document.getElementById('studioOpenTemplatesBtn');
+  if (studioOpenTemplatesBtn) {
+    studioOpenTemplatesBtn.addEventListener('click', () => {
+      switchView('templates');
+    });
+  }
+
+  const studioUploadTemplateBtn = document.getElementById('studioUploadTemplateBtn');
+  if (studioUploadTemplateBtn) {
+    studioUploadTemplateBtn.addEventListener('click', () => {
+      if (addTemplateModal) addTemplateModal.classList.remove('hidden');
+      refreshIcons();
+    });
+  }
+
+  const studioEditPagePromptBtn = document.getElementById('studioEditPagePromptBtn');
+  if (studioEditPagePromptBtn) {
+    studioEditPagePromptBtn.addEventListener('click', () => {
+      openEditPageModal(state.activePageId);
     });
   }
 
@@ -1306,6 +1358,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const id = btn.getAttribute('data-id');
         const tmpl = (state.templates && state.templates.length > 0 ? state.templates : VIRAL_TEMPLATES).find(x => x.id === id);
         if (tmpl) {
+          state.activeTemplate = tmpl;
           state.activeTemplateImage = tmpl.imageUrl;
           state.activeTemplateTitle = tmpl.title;
           navigateToCreatePost(null, tmpl.sample);
@@ -1389,7 +1442,11 @@ document.addEventListener('DOMContentLoaded', () => {
             state.templates = [...VIRAL_TEMPLATES];
           }
           state.templates.unshift(data.template);
+          state.activeTemplate = data.template;
+          state.activeTemplateImage = data.template.imageUrl;
+          state.activeTemplateTitle = data.template.title;
           renderTemplatesView();
+          updateActiveTemplateUI();
 
           if (addTemplateModal) addTemplateModal.classList.add('hidden');
 
@@ -2259,12 +2316,38 @@ document.addEventListener('DOMContentLoaded', () => {
         state.pages = data.pages || [];
         state.activePageId = data.activePageId;
         renderHeaderPageSwitcher();
+        updateStudioPageBanner();
         if (state.currentView === 'accounts') {
           renderAccountsView();
         }
       }
     } catch (e) {
       console.warn('Failed to fetch pages:', e);
+    }
+  }
+
+  function updateStudioPageBanner() {
+    const pages = state.pages || [];
+    const active = pages.find(p => p.id === state.activePageId) || pages[0];
+    const studioLogo = document.getElementById('studioPageLogo');
+    const studioName = document.getElementById('studioPageName');
+    const studioCategory = document.getElementById('studioPageCategory');
+    const studioPromptSnippet = document.getElementById('studioPagePromptSnippet');
+
+    if (active) {
+      if (studioLogo) studioLogo.src = active.pictureUrl || '/pariksha_notes_logo.jpg';
+      if (studioName) studioName.textContent = active.name;
+      if (studioCategory) studioCategory.textContent = active.category || 'General';
+      if (studioPromptSnippet) {
+        if (active.systemPrompt && active.systemPrompt.trim()) {
+          const firstLine = active.systemPrompt.trim().split('\n')[0];
+          studioPromptSnippet.textContent = `"${firstLine.substring(0, 95)}${firstLine.length > 95 ? '...' : ''}"`;
+          studioPromptSnippet.title = active.systemPrompt;
+        } else {
+          studioPromptSnippet.textContent = 'Standard Bengali post guidelines. Click "Edit Page Instructions" to customize rules.';
+          studioPromptSnippet.title = '';
+        }
+      }
     }
   }
 
@@ -2306,6 +2389,8 @@ document.addEventListener('DOMContentLoaded', () => {
         headerPagesList.appendChild(row);
       });
     }
+
+    updateStudioPageBanner();
   }
 
   async function switchActivePage(pageId) {
@@ -2320,6 +2405,7 @@ document.addEventListener('DOMContentLoaded', () => {
         state.activePageId = pageId;
         state.pages = data.pages || state.pages;
         renderHeaderPageSwitcher();
+        updateStudioPageBanner();
         if (state.currentView === 'accounts') renderAccountsView();
         
         state.notifications.unshift({
@@ -2369,7 +2455,7 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
 
-        <div class="p-3 bg-slate-50/80 rounded-xl border border-slate-100 mb-4 text-[11px] text-slate-500 space-y-1">
+        <div class="p-3 bg-slate-50/80 rounded-xl border border-slate-100 mb-4 text-[11px] text-slate-500 space-y-2">
           <div class="flex justify-between">
             <span>Status:</span>
             <span class="font-semibold ${isActive ? 'text-indigo-600' : 'text-slate-600'}">${isActive ? 'Active for Auto-Post & Chat' : 'Standby / Connected'}</span>
@@ -2378,18 +2464,34 @@ document.addEventListener('DOMContentLoaded', () => {
             <span>Permissions:</span>
             <span class="text-emerald-600 font-semibold flex items-center gap-1">✓ Verified Meta Scopes</span>
           </div>
+          <div class="pt-2 border-t border-slate-200/60">
+            <div class="flex items-center justify-between mb-1">
+              <span class="font-bold text-slate-700 flex items-center gap-1">
+                <i data-lucide="sparkles" class="w-3 h-3 text-indigo-500"></i>
+                AI Instructions / Strategy
+              </span>
+              ${p.systemPrompt ? '<span class="text-[9px] text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">Custom Rules</span>' : '<span class="text-[9px] text-slate-400">Default Rules</span>'}
+            </div>
+            <p class="text-[10.5px] text-slate-600 line-clamp-2 italic leading-relaxed">
+              ${p.systemPrompt ? p.systemPrompt : 'No custom guidelines configured yet. AI uses default Bengali post rules.'}
+            </p>
+          </div>
         </div>
 
         <div class="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
           ${isActive ? `
-            <button disabled class="w-full py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-default">
-              <i data-lucide="check-circle" class="w-3.5 h-3.5"></i>
-              <span>Currently Active Page</span>
+            <button class="edit-page-btn flex-1 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-xl border border-indigo-200 transition flex items-center justify-center gap-1.5" data-id="${p.id}">
+              <i data-lucide="settings" class="w-3.5 h-3.5"></i>
+              <span>Edit Page & Guidelines</span>
             </button>
           ` : `
             <button class="switch-page-btn flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl shadow-sm transition flex items-center justify-center gap-1.5" data-id="${p.id}">
               <i data-lucide="arrow-right-left" class="w-3.5 h-3.5"></i>
-              <span>Switch to this Page</span>
+              <span>Switch</span>
+            </button>
+            <button class="edit-page-btn px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition flex items-center justify-center gap-1" data-id="${p.id}" title="Edit Guidelines">
+              <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+              <span>Edit</span>
             </button>
             <button class="delete-page-btn p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition" data-id="${p.id}" data-name="${p.name}" title="Disconnect Page">
               <i data-lucide="trash-2" class="w-4 h-4"></i>
@@ -2400,6 +2502,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
       card.querySelectorAll('.switch-page-btn').forEach(btn => {
         btn.addEventListener('click', () => switchActivePage(btn.getAttribute('data-id')));
+      });
+
+      card.querySelectorAll('.edit-page-btn').forEach(btn => {
+        btn.addEventListener('click', () => openEditPageModal(btn.getAttribute('data-id')));
       });
 
       card.querySelectorAll('.delete-page-btn').forEach(btn => {
@@ -2415,6 +2521,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.activePageId = data.activePage?.id;
                 renderAccountsView();
                 renderHeaderPageSwitcher();
+                updateStudioPageBanner();
                 fetchStatus();
                 alert(`Removed "${name}" from connected pages.`);
               } else {
@@ -2431,6 +2538,90 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     refreshIcons();
+  }
+
+  // ================= EDIT PAGE & GUIDELINES MODAL =================
+  function openEditPageModal(pageId) {
+    const page = (state.pages || []).find(p => p.id === pageId) || (state.pages || []).find(p => p.id === state.activePageId) || (state.pages || [])[0];
+    if (!page) {
+      alert('No page selected to edit.');
+      return;
+    }
+
+    if (editPageIdInput) editPageIdInput.value = page.id;
+    if (editPageNameInput) editPageNameInput.value = page.name || '';
+    if (editPageCategoryInput) editPageCategoryInput.value = page.category || '';
+    if (editPageTokenInput) editPageTokenInput.value = '';
+    if (editPagePromptInput) editPagePromptInput.value = page.systemPrompt || '';
+
+    if (editPageModal) editPageModal.classList.remove('hidden');
+    refreshIcons();
+  }
+
+  if (closeEditPageModalBtn) {
+    closeEditPageModalBtn.addEventListener('click', () => {
+      if (editPageModal) editPageModal.classList.add('hidden');
+    });
+  }
+
+  if (cancelEditPageModalBtn) {
+    cancelEditPageModalBtn.addEventListener('click', () => {
+      if (editPageModal) editPageModal.classList.add('hidden');
+    });
+  }
+
+  if (submitEditPageBtn) {
+    submitEditPageBtn.addEventListener('click', async () => {
+      const pageId = editPageIdInput ? editPageIdInput.value : '';
+      const name = editPageNameInput ? editPageNameInput.value.trim() : '';
+      const category = editPageCategoryInput ? editPageCategoryInput.value.trim() : '';
+      const accessToken = editPageTokenInput ? editPageTokenInput.value.trim() : '';
+      const systemPrompt = editPagePromptInput ? editPagePromptInput.value.trim() : '';
+
+      if (!pageId || !name) {
+        alert('Page Name is required.');
+        return;
+      }
+
+      submitEditPageBtn.disabled = true;
+      submitEditPageBtn.innerHTML = `<span class="animate-spin mr-1">⌛</span> Saving...`;
+
+      try {
+        const payload = { name, category, systemPrompt };
+        if (accessToken) payload.accessToken = accessToken;
+
+        const res = await fetch(`/api/facebook/pages/${pageId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (data.success) {
+          state.pages = data.pages || state.pages;
+          renderHeaderPageSwitcher();
+          updateStudioPageBanner();
+          if (state.currentView === 'accounts') renderAccountsView();
+          if (editPageModal) editPageModal.classList.add('hidden');
+
+          state.notifications.unshift({
+            id: `notif_${Date.now()}`,
+            text: `Page "${name}" settings and AI instructions updated!`,
+            time: 'Just now',
+            type: 'success'
+          });
+          if (bellBadgeDot) bellBadgeDot.classList.remove('hidden');
+        } else {
+          alert('Failed to update page: ' + (data.error || 'Server error'));
+        }
+      } catch (err) {
+        alert('Error updating page: ' + err.message);
+      } finally {
+        submitEditPageBtn.disabled = false;
+        submitEditPageBtn.innerHTML = `<i data-lucide="check" class="w-3.5 h-3.5"></i><span>Save Page & Guidelines</span>`;
+        refreshIcons();
+      }
+    });
   }
 
   // Toggle Header Page Dropdown
@@ -2638,6 +2829,19 @@ document.addEventListener('DOMContentLoaded', () => {
           state.activePageId = data.activePage.id;
           state.pages = data.pages || state.pages;
           renderHeaderPageSwitcher();
+          updateStudioPageBanner();
+          if (state.currentView === 'accounts') renderAccountsView();
+          fetchStatus();
+        }
+      });
+
+      eventSource.addEventListener('page_updated', (e) => {
+        const data = JSON.parse(e.data);
+        if (data.pages) {
+          state.pages = data.pages;
+          if (data.activePage) state.activePageId = data.activePage.id;
+          renderHeaderPageSwitcher();
+          updateStudioPageBanner();
           if (state.currentView === 'accounts') renderAccountsView();
           fetchStatus();
         }

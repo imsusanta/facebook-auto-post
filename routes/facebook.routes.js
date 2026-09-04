@@ -146,6 +146,45 @@ router.post('/pages/switch', (req, res) => {
   });
 });
 
+// GET /api/facebook/pages/:id - Get single page details including systemPrompt
+router.get('/pages/:id', (req, res) => {
+  const page = storage.getPageById(req.params.id);
+  if (!page) {
+    return res.status(404).json({ success: false, error: 'Page not found.' });
+  }
+  res.json({ success: true, page });
+});
+
+// PUT /api/facebook/pages/:id - Edit connected page info and custom system prompt
+router.put('/pages/:id', async (req, res, next) => {
+  const { name, category, accessToken, systemPrompt, pictureUrl } = req.body;
+  try {
+    const existing = storage.getPageById(req.params.id);
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'Page not found.' });
+    }
+
+    const updates = {};
+    if (typeof name === 'string' && name.trim()) updates.name = name.trim();
+    if (typeof category === 'string' && category.trim()) updates.category = category.trim();
+    if (typeof accessToken === 'string' && accessToken.trim()) updates.accessToken = accessToken.trim();
+    if (typeof systemPrompt === 'string') updates.systemPrompt = systemPrompt.trim();
+    if (typeof pictureUrl === 'string' && pictureUrl.trim()) updates.pictureUrl = pictureUrl.trim();
+
+    const updated = storage.updateConnectedPage(req.params.id, updates);
+    broadcastSSE('page_switched', { activePage: storage.getActivePage(), pages: storage.getConnectedPages() });
+
+    res.json({
+      success: true,
+      page: updated,
+      pages: storage.getConnectedPages(),
+      activePage: storage.getActivePage()
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // DELETE /api/facebook/pages/:id - Disconnect a Facebook Page
 router.delete('/pages/:id', (req, res) => {
   try {

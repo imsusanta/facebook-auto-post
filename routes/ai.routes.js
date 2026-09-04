@@ -20,16 +20,27 @@ router.post('/generate-topics', async (req, res, next) => {
   }
 });
 
+// POST /api/ai/analyze-template
+router.post('/analyze-template', async (req, res, next) => {
+  const { imageUrl, imageBase64, sampleText = '' } = req.body;
+  try {
+    const learnedStyle = await ai.analyzeTemplate(imageBase64 || imageUrl, sampleText);
+    res.json({ success: true, learnedStyle });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/ai/generate
 router.post('/generate', async (req, res, next) => {
   const topic = req.body.topic || '';
   const categoryId = req.body.categoryId || req.body.category || '';
-  const postStyle = req.body.postStyle || 'auto';
-  const cardLayout = req.body.cardLayout || 'auto';
-  const includeImage = req.body.includeImage !== false && req.body.generateImage !== false;
+  const pageId = req.body.pageId || '';
+  const templateId = req.body.templateId || '';
   const templateImage = req.body.templateImage || null;
+  const includeImage = req.body.includeImage !== false && req.body.generateImage !== false;
   try {
-    const bundle = await ai.generateFullPostBundle({ topic, categoryId, postStyle, cardLayout, includeImage, templateImage });
+    const bundle = await ai.generateFullPostBundle({ topic, categoryId, pageId, templateId, templateImage, includeImage });
     res.json({
       success: true,
       bundle,
@@ -55,9 +66,9 @@ router.post('/autopilot/trigger', async (req, res, next) => {
 
 // POST /api/ai/regenerate-image
 router.post('/regenerate-image', async (req, res, next) => {
-  const { topic = '', cardData = null, customPrompt = '', styleMode = 'auto', cardLayout = 'auto', postStyle = 'auto', variation = 1, templateImage = null } = req.body;
+  const { topic = '', cardData = null, customPrompt = '', styleMode = 'auto', pageId = '', templateId = '', templateImage = null, variation = 1 } = req.body;
   try {
-    const result = await ai.regenerateThumbnailOnly({ topic, cardData, customPrompt, styleMode, cardLayout, postStyle, variation, templateImage });
+    const result = await ai.regenerateThumbnailOnly({ topic, cardData, customPrompt, styleMode, pageId, templateId, templateImage, variation });
     res.json({ success: true, image: result.image, cardData: result.cardData, cardLayout: result.cardLayout });
   } catch (err) {
     next(err);
@@ -66,9 +77,9 @@ router.post('/regenerate-image', async (req, res, next) => {
 
 // POST /api/ai/regenerate-text
 router.post('/regenerate-text', async (req, res, next) => {
-  const { topic = '', currentMessage = '', postStyle = 'auto', variation = 1 } = req.body;
+  const { topic = '', currentMessage = '', pageId = '', templateId = '', variation = 1 } = req.body;
   try {
-    const result = await ai.regenerateCaptionOnly({ topic, currentMessage, postStyle, variation });
+    const result = await ai.regenerateCaptionOnly({ topic, currentMessage, pageId, templateId, variation });
     res.json(result);
   } catch (err) {
     next(err);
