@@ -6,14 +6,15 @@ const facebook = require('../services/facebook');
 const ai = require('../services/ai');
 const { broadcastSSE } = require('../middleware/sse');
 const { serializeSettings } = require('../utils/public-serializer');
+const { validateSettings } = require('../middleware/settings-validator');
 
 // GET /api/settings - Returns sanitized settings without exposing secrets
 router.get('/', (req, res) => {
   res.json(serializeSettings(storage.getSettings()));
 });
 
-// POST /api/settings - Update settings with credential protection
-router.post('/', (req, res, next) => {
+// POST /api/settings - Update settings with credential protection and validation
+router.post('/', validateSettings, (req, res, next) => {
   try {
     const payload = { ...req.body };
 
