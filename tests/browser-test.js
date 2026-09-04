@@ -397,6 +397,71 @@ async function runBrowserTests(options = {}) {
     const sseAvailable = await cdp.evaluate('typeof window.EventSource === "function"');
     assert('Browser supports Server-Sent Events (EventSource)', sseAvailable === true, 'EventSource API supported');
 
+    // Assertion 10b: Page DNA Modal Exists and Starts Hidden
+    const dnaModalInitial = await cdp.evaluate('(() => {' +
+      'const modal = document.getElementById("pageDnaModal");' +
+      'return !!modal && modal.classList.contains("hidden");' +
+    '})()');
+    assert('Page DNA modal is present in DOM and starts hidden', dnaModalInitial === true, 'pageDnaModal initial state');
+
+    // Assertion 10c: Open Page DNA Modal via studio button and wait for async fetch
+    const openDnaModal = await cdp.evaluate('new Promise((resolve) => {' +
+      'const btn = document.getElementById("studioOpenPageDnaBtn");' +
+      'if (!btn) return resolve({ success: false, reason: "studioOpenPageDnaBtn not found" });' +
+      'btn.click();' +
+      'const start = Date.now();' +
+      'const interval = setInterval(() => {' +
+        'const modal = document.getElementById("pageDnaModal");' +
+        'if (modal && !modal.classList.contains("hidden")) {' +
+          'clearInterval(interval);' +
+          'return resolve({ success: true });' +
+        '}' +
+        'if (Date.now() - start > 4000) {' +
+          'clearInterval(interval);' +
+          'return resolve({ success: false, reason: "Timeout waiting for modal open" });' +
+        '}' +
+      '}, 50);' +
+    '})');
+    assert('Opening Page DNA modal displays the 7-step wizard', openDnaModal.success === true, openDnaModal.reason);
+
+    // Assertion 10d: Page DNA Step Navigation (Step 1 -> Step 2 -> Step 7)
+    const stepNavResult = await cdp.evaluate('(() => {' +
+      'const tab2 = document.querySelector(".dna-step-tab[data-step=\\"2\\"]");' +
+      'if (!tab2) return { success: false, reason: "Step 2 tab missing" };' +
+      'tab2.click();' +
+      'const step2El = document.getElementById("dnaStepContainer2");' +
+      'const step1El = document.getElementById("dnaStepContainer1");' +
+      'const step2Active = step2El && !step2El.classList.contains("hidden") && step1El && step1El.classList.contains("hidden");' +
+      'const tab7 = document.querySelector(".dna-step-tab[data-step=\\"7\\"]");' +
+      'if (!tab7) return { success: false, reason: "Step 7 tab missing" };' +
+      'tab7.click();' +
+      'const step7El = document.getElementById("dnaStepContainer7");' +
+      'const step7Active = step7El && !step7El.classList.contains("hidden");' +
+      'return { success: step2Active && step7Active };' +
+    '})()');
+    assert('Page DNA step navigation activates target wizard steps', stepNavResult.success === true, stepNavResult.reason);
+
+    // Assertion 10e: Page DNA Presets apply correctly
+    const presetResult = await cdp.evaluate('(() => {' +
+      'const examPresetBtn = document.getElementById("dnaPresetExamBtn");' +
+      'if (!examPresetBtn) return { success: false, reason: "dnaPresetExamBtn not found" };' +
+      'examPresetBtn.click();' +
+      'const nicheInput = document.getElementById("dnaNicheInput");' +
+      'const val = nicheInput ? nicheInput.value : "";' +
+      'return { success: val.includes("Govt Exam") || val.includes("চাকরি প্রস্তুতি"), value: val };' +
+    '})()');
+    assert('Page DNA exam preset populates niche and audience fields', presetResult.success === true, `Preset niche: ${presetResult.value}`);
+
+    // Assertion 10f: Close Page DNA Modal
+    const closeDnaResult = await cdp.evaluate('(() => {' +
+      'const closeBtn = document.getElementById("closePageDnaModalBtn");' +
+      'if (!closeBtn) return { success: false, reason: "closePageDnaModalBtn not found" };' +
+      'closeBtn.click();' +
+      'const modal = document.getElementById("pageDnaModal");' +
+      'return { success: modal && modal.classList.contains("hidden") };' +
+    '})()');
+    assert('Closing Page DNA modal restores hidden state', closeDnaResult.success === true, closeDnaResult.reason);
+
     // Assertion 11: Zero secrets stored in client-side Web Storage or DOM
     const storageAudit = await cdp.evaluate('(() => {' +
       'const leaks = [];' +

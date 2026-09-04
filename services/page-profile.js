@@ -421,6 +421,16 @@ function validateContentProfile(input) {
       errors.push({ field: 'promotionalPostLimitPercent', code: 'OUT_OF_RANGE', message: 'Promotional post limit percent must be between 0 and 100.' });
     }
   }
+  if (typeof input.hashtagLimit !== 'undefined') {
+    if (typeof input.hashtagLimit !== 'number' || input.hashtagLimit < 0 || input.hashtagLimit > 15) {
+      errors.push({ field: 'hashtagLimit', code: 'OUT_OF_RANGE', message: 'Hashtag limit must be between 0 and 15.' });
+    }
+  }
+  if (typeof input.emojiLimit !== 'undefined') {
+    if (typeof input.emojiLimit !== 'number' || input.emojiLimit < 0 || input.emojiLimit > 10) {
+      errors.push({ field: 'emojiLimit', code: 'OUT_OF_RANGE', message: 'Emoji limit must be between 0 and 10.' });
+    }
+  }
 
   // 10. Content Mix
   if (typeof input.contentMix !== 'undefined') {
@@ -468,7 +478,7 @@ function validateContentProfile(input) {
         } else {
           const normTitle = p.title.trim().toLowerCase();
           if (seenTitles.has(normTitle)) {
-            errors.push({ field: `contentPillars[${idx}].title`, code: 'DUPLICATE', message: `Duplicate pillar title: "${p.title.trim()}".` });
+            errors.push({ field: `contentPillars[${idx}].title`, code: 'DUPLICATE_PILLAR', message: `Duplicate pillar title: "${p.title.trim()}".` });
           }
           seenTitles.add(normTitle);
         }

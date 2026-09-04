@@ -51,6 +51,8 @@ class SchedulerService extends EventEmitter {
       now: () => Date.now(),
       newDate: (...args) => (args.length ? new Date(...args) : new Date())
     };
+    this.isProcessing = false;
+    this.lastAutoPostTime = 0;
     this.processingItemIds.clear();
   }
 
@@ -170,6 +172,9 @@ class SchedulerService extends EventEmitter {
       this.cronTask = null;
     }
     this.isRunning = false;
+    this.isProcessing = false;
+    this.lastAutoPostTime = 0;
+    this.processingItemIds.clear();
     this.nextRunTimestamp = null;
     this.emit('status', this.getStatus());
     console.log('[Scheduler] Automation & Cron stopped.');
@@ -332,88 +337,83 @@ class SchedulerService extends EventEmitter {
     this.emit('status', this.getStatus());
     this.emit('autopilot_generating', { timestamp: currentClock.newDate().toISOString() });
 
-    const settings = currentStorage.getSettings();
-    const activePage = currentStorage.getActivePage();
-    const pageCategory = activePage?.category || '';
-    const contentProfile = activePage?.id ? currentStorage.getPageProfile(activePage.id) : null;
-    const isOnboarded = activePage && activePage.onboardingStatus && activePage.onboardingStatus !== 'not_started';
+    try {
+      const settings = currentStorage.getSettings();
+      const activePage = currentStorage.getActivePage();
+      const pageCategory = activePage?.category || '';
+      const contentProfile = activePage?.id ? currentStorage.getPageProfile(activePage.id) : null;
+      const isOnboarded = activePage && activePage.onboardingStatus && activePage.onboardingStatus !== 'not_started';
 
-    // 1. Enforce maxPostsPerDay if profile is onboarded
-    if (isOnboarded && contentProfile && typeof contentProfile.maxPostsPerDay === 'number' && contentProfile.maxPostsPerDay > 0) {
-      const now = currentClock.newDate();
-      const todayStr = getDayString(now, contentProfile.timezone);
-      const history = currentStorage.getHistory() || [];
-      const postsToday = history.filter(item => {
-        if (item.status !== 'published' || !item.publishedAt) return false;
-        if (item.pageId && activePage?.id && item.pageId !== activePage.id) return false;
-        const itemDate = new Date(item.publishedAt);
-        return getDayString(itemDate, contentProfile.timezone) === todayStr;
-      });
+      // 1. Enforce maxPostsPerDay if profile is onboarded
+      if (isOnboarded && contentProfile && typeof contentProfile.maxPostsPerDay === 'number' && contentProfile.maxPostsPerDay > 0) {
+        const now = currentClock.newDate();
+        const todayStr = getDayString(now, contentProfile.timezone);
+        const history = currentStorage.getHistory() || [];
+        const postsToday = history.filter(item => {
+          if (item.status !== 'published' || !item.publishedAt) return false;
+          const matchesPage = activePage?.id ? item.pageId === activePage.id : !item.pageId;
+          if (!matchesPage) return false;
+          const itemDate = new Date(item.publishedAt);
+          return getDayString(itemDate, contentProfile.timezone) === todayStr;
+        });
 
-      if (postsToday.length >= contentProfile.maxPostsPerDay) {
-        console.log(`[AI Auto-Pilot] Daily post limit (${postsToday.length}/${contentProfile.maxPostsPerDay}) reached for today. Skipping auto-pilot.`);
-        this.isProcessing = false;
-        this.emit('status', this.getStatus());
-        return {
-          success: false,
-          skipped: true,
-          reason: `DAILY_POST_LIMIT_REACHED: Daily limit of ${contentProfile.maxPostsPerDay} posts reached for today.`
-        };
-      }
-    }
-
-    // 2. Enforce minimumPostGapMinutes if profile is onboarded
-    if (isOnboarded && contentProfile && typeof contentProfile.minimumPostGapMinutes === 'number' && contentProfile.minimumPostGapMinutes > 0) {
-      const minGapMs = contentProfile.minimumPostGapMinutes * 60 * 1000;
-      const nowMs = currentClock.now();
-      if (this.lastAutoPostTime && (nowMs - this.lastAutoPostTime < minGapMs)) {
-        const remainingMins = Math.ceil((minGapMs - (nowMs - this.lastAutoPostTime)) / 60000);
-        console.log(`[AI Auto-Pilot] Minimum post gap active (${remainingMins}m remaining). Skipping.`);
-        this.isProcessing = false;
-        this.emit('status', this.getStatus());
-        return {
-          success: false,
-          skipped: true,
-          reason: `MINIMUM_POST_GAP_ACTIVE: Minimum gap is ${contentProfile.minimumPostGapMinutes} minutes (${remainingMins}m remaining).`
-        };
+        if (postsToday.length >= contentProfile.maxPostsPerDay) {
+          console.log(`[AI Auto-Pilot] Daily post limit (${postsToday.length}/${contentProfile.maxPostsPerDay}) reached for today. Skipping auto-pilot.`);
+          return {
+            success: false,
+            skipped: true,
+            reason: `DAILY_POST_LIMIT_REACHED: Daily limit of ${contentProfile.maxPostsPerDay} posts reached for today.`
+          };
+        }
       }
 
-      const history = currentStorage.getHistory() || [];
-      const recentPublished = history
-        .filter(h => h.status === 'published' && h.publishedAt && (!h.pageId || !activePage?.id || h.pageId === activePage.id))
-        .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())[0];
-
-      if (recentPublished) {
-        const lastPublishedMs = new Date(recentPublished.publishedAt).getTime();
-        if (!isNaN(lastPublishedMs) && (nowMs - lastPublishedMs) < minGapMs) {
-          const remainingMins = Math.ceil((minGapMs - (nowMs - lastPublishedMs)) / 60000);
-          console.log(`[AI Auto-Pilot] Minimum post gap active from last published post (${remainingMins}m remaining). Skipping.`);
-          this.isProcessing = false;
-          this.emit('status', this.getStatus());
+      // 2. Enforce minimumPostGapMinutes if profile is onboarded
+      if (isOnboarded && contentProfile && typeof contentProfile.minimumPostGapMinutes === 'number' && contentProfile.minimumPostGapMinutes > 0) {
+        const minGapMs = contentProfile.minimumPostGapMinutes * 60 * 1000;
+        const nowMs = currentClock.now();
+        if (this.lastAutoPostTime && (nowMs - this.lastAutoPostTime < minGapMs)) {
+          const remainingMins = Math.ceil((minGapMs - (nowMs - this.lastAutoPostTime)) / 60000);
+          console.log(`[AI Auto-Pilot] Minimum post gap active (${remainingMins}m remaining). Skipping.`);
           return {
             success: false,
             skipped: true,
             reason: `MINIMUM_POST_GAP_ACTIVE: Minimum gap is ${contentProfile.minimumPostGapMinutes} minutes (${remainingMins}m remaining).`
           };
         }
+
+        const history = currentStorage.getHistory() || [];
+        const recentPublished = history
+          .filter(h => h.status === 'published' && h.publishedAt && (activePage?.id ? h.pageId === activePage.id : !h.pageId))
+          .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())[0];
+
+        if (recentPublished) {
+          const lastPublishedMs = new Date(recentPublished.publishedAt).getTime();
+          if (!isNaN(lastPublishedMs) && (nowMs - lastPublishedMs) < minGapMs) {
+            const remainingMins = Math.ceil((minGapMs - (nowMs - lastPublishedMs)) / 60000);
+            console.log(`[AI Auto-Pilot] Minimum post gap active from last published post (${remainingMins}m remaining). Skipping.`);
+            return {
+              success: false,
+              skipped: true,
+              reason: `MINIMUM_POST_GAP_ACTIVE: Minimum gap is ${contentProfile.minimumPostGapMinutes} minutes (${remainingMins}m remaining).`
+            };
+          }
+        }
       }
-    }
 
-    // Select category: Rotate or randomly pick from user's active categories
-    const allCategories = settings.selectedCategories && settings.selectedCategories.length > 0
-      ? settings.selectedCategories
-      : ['trending_news', 'science_nature', 'history_civilization', 'psychology_mind', 'world_geography', 'tech_inventions', 'philosophy_wisdom', 'sports_records'];
-    
-    // In unattended AutoPilot, prioritize evergreen educational categories over unverified trending news
-    let eligibleCategories = allCategories;
-    if (!customTopic && eligibleCategories.length > 1) {
-      eligibleCategories = eligibleCategories.filter(c => c !== 'trending_news');
-      if (eligibleCategories.length === 0) eligibleCategories = allCategories;
-    }
+      // Select category: Rotate or randomly pick from user's active categories
+      const allCategories = settings.selectedCategories && settings.selectedCategories.length > 0
+        ? settings.selectedCategories
+        : ['trending_news', 'science_nature', 'history_civilization', 'psychology_mind', 'world_geography', 'tech_inventions', 'philosophy_wisdom', 'sports_records'];
 
-    const selectedCategoryId = eligibleCategories[Math.floor(Math.random() * eligibleCategories.length)];
+      // In unattended AutoPilot, prioritize evergreen educational categories over unverified trending news
+      let eligibleCategories = allCategories;
+      if (!customTopic && eligibleCategories.length > 1) {
+        eligibleCategories = eligibleCategories.filter(c => c !== 'trending_news');
+        if (eligibleCategories.length === 0) eligibleCategories = allCategories;
+      }
 
-    try {
+      const selectedCategoryId = eligibleCategories[Math.floor(Math.random() * eligibleCategories.length)];
+
       console.log(`[AI Auto-Pilot] Auto-generating post for category: ${selectedCategoryId} (Page: "${activePage?.name || 'Default'}", Niche: "${pageCategory}")...`);
       
       const bundle = await currentAi.generateFullPostBundle({

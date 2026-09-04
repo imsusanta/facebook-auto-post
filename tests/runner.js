@@ -136,6 +136,14 @@ const {
   isValidPublicUrl
 } = require('../services/content-safety');
 const {
+  createDefaultContentProfile,
+  validateContentProfile,
+  normalizeContentProfile,
+  calculateOnboardingStatus,
+  buildPublicContentProfile
+} = require('../services/page-profile');
+const { buildPageContext } = require('../services/ai/page-context');
+const {
   isSensitiveKey,
   serializePublic,
   serializeSettings,
@@ -1080,5 +1088,766 @@ describe('10. Base Commit AIService API Return Shapes', () => {
     assert.strictEqual(result.valid, true);
     assert.strictEqual(typeof result.model, 'string');
     assert.strictEqual(typeof result.message, 'string');
+  });
+});
+
+// Helper for authenticated API calls in subsequent suites
+async function getTestAuthContext() {
+  const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'susantalohr@gmail.com', password: 'admin@123' })
+  });
+  const data = await loginRes.json();
+  const cookie = loginRes.headers.get('set-cookie').split(';')[0];
+  return { cookie, csrfToken: data.csrfToken };
+}
+
+// =========================================================================
+// SUITE 11: PAGE DNA DATA MODEL, VALIDATION & NORMALIZATION
+// =========================================================================
+describe('11. Page DNA Data Model, Validation & Normalization', () => {
+  test('createDefaultContentProfile returns valid defaults with mix total 100 and manual approval', () => {
+    const profile = createDefaultContentProfile();
+    assert.strictEqual(profile.schemaVersion, 1);
+    assert.strictEqual(profile.primaryGoal, 'engagement');
+    assert.strictEqual(profile.approvalMode, 'manual');
+    const mixTotal = Object.values(profile.contentMix).reduce((a, b) => a + b, 0);
+    assert.strictEqual(mixTotal, 100);
+    assert.strictEqual(profile.maxPostsPerDay, 3);
+    assert.strictEqual(profile.minimumPostGapMinutes, 180);
+    assert.strictEqual(calculateOnboardingStatus(profile), 'not_started');
+  });
+
+  test('validateContentProfile rejects prototype pollution and forbidden keys', () => {
+    const malicious = JSON.parse('{"__proto__": {"polluted": true}, "niche": "Tech"}');
+    const res = validateContentProfile(malicious);
+    assert.strictEqual(res.valid, false);
+    assert.ok(res.errors.some(e => e.code === 'PROHIBITED_KEY'));
+
+    const constructorAttack = { constructor: { prototype: { admin: true } } };
+    const res2 = validateContentProfile(constructorAttack);
+    assert.strictEqual(res2.valid, false);
+    assert.ok(res2.errors.some(e => e.code === 'PROHIBITED_KEY'));
+  });
+
+  test('validateContentProfile rejects unknown fields', () => {
+    const res = validateContentProfile({ niche: 'Science', maliciousExtraField: 123 });
+    assert.strictEqual(res.valid, false);
+    assert.ok(res.errors.some(e => e.code === 'UNKNOWN_FIELD'));
+  });
+
+  test('validateContentProfile rejects invalid mix sums not equal to 100', () => {
+    const res = validateContentProfile({
+      niche: 'History',
+      contentMix: { educational: 60, community: 30, authority: 20, promotional: 10, timely: 10 }
+    });
+    assert.strictEqual(res.valid, false);
+    assert.ok(res.errors.some(e => e.code === 'SUM_NOT_100'));
+  });
+
+  test('validateContentProfile rejects inverted caption lengths (min > max)', () => {
+    const res = validateContentProfile({
+      niche: 'Cooking',
+      preferredCaptionLength: { min: 1000, max: 200 }
+    });
+    assert.strictEqual(res.valid, false);
+    assert.ok(res.errors.some(e => e.code === 'INVALID_RANGE'));
+  });
+
+  test('validateContentProfile rejects negative bounds for emojis and hashtags', () => {
+    const res = validateContentProfile({
+      niche: 'Education',
+      emojiLimit: -5,
+      hashtagLimit: -2
+    });
+    assert.strictEqual(res.valid, false);
+    assert.ok(res.errors.some(e => e.code === 'OUT_OF_RANGE'));
+  });
+
+  test('validateContentProfile rejects duplicate pillar titles (case-insensitive)', () => {
+    const res = validateContentProfile({
+      niche: 'Fitness',
+      contentPillars: [
+        { title: 'Workout Tips', weight: 30 },
+        { title: 'workout tips', weight: 30 }
+      ]
+    });
+    assert.strictEqual(res.valid, false);
+    assert.ok(res.errors.some(e => e.code === 'DUPLICATE_PILLAR'));
+  });
+
+  test('normalizeContentProfile clamps values, bounds strings, and cleans control chars', () => {
+    const raw = {
+      niche: '  Bengali Recipes\x00\x08  ',
+      emojiLimit: 999,
+      hashtagLimit: -5,
+      preferredCaptionLength: { min: 10, max: 99999 },
+      contentMix: { educational: 50, community: 50, authority: 50, promotional: 0, timely: 0 }
+    };
+    const norm = normalizeContentProfile(raw);
+    assert.strictEqual(norm.niche, 'Bengali Recipes');
+    assert.strictEqual(norm.emojiLimit, 10);
+    assert.strictEqual(norm.hashtagLimit, 0);
+    assert.strictEqual(norm.preferredCaptionLength.min, 100);
+    assert.strictEqual(norm.preferredCaptionLength.max, 6000);
+    const sum = Object.values(norm.contentMix).reduce((a, b) => a + b, 0);
+    assert.strictEqual(sum, 100);
+  });
+
+  test('calculateOnboardingStatus transitions through not_started, incomplete, and complete', () => {
+    assert.strictEqual(calculateOnboardingStatus(createDefaultContentProfile()), 'not_started');
+
+    const incomplete = { ...createDefaultContentProfile(), niche: 'Government Jobs' };
+    assert.strictEqual(calculateOnboardingStatus(incomplete), 'incomplete');
+
+    const complete = {
+      ...createDefaultContentProfile(),
+      niche: 'Government Jobs',
+      tone: ['helpful', 'credible'],
+      audience: { locations: ['Kolkata', 'Howrah'] },
+      contentPillars: [
+        { title: 'Mock Tests', weight: 30 },
+        { title: 'Previous Years Papers', weight: 30 },
+        { title: 'General Studies Notes', weight: 40 }
+      ]
+    };
+    assert.strictEqual(calculateOnboardingStatus(complete), 'complete');
+  });
+
+  test('buildPublicContentProfile defends against external input mutation', () => {
+    const input = {
+      niche: 'Travel Guide',
+      audience: { locations: ['Darjeeling', 'Digha'] },
+      contentPillars: [{ title: 'Budget Trips', weight: 50 }]
+    };
+    const publicProfile = buildPublicContentProfile(input);
+    input.audience.locations.push('Malda');
+    input.niche = 'Hacked Niche';
+    assert.strictEqual(publicProfile.niche, 'Travel Guide');
+    assert.deepStrictEqual(publicProfile.audience.locations, ['Darjeeling', 'Digha']);
+    assert.strictEqual(publicProfile.onboardingStatus, 'incomplete');
+  });
+});
+
+// =========================================================================
+// SUITE 12: PAGE DNA AUTHENTICATED REST API & CSRF DEFENSE
+// =========================================================================
+describe('12. Page DNA Authenticated REST API & CSRF Defense', () => {
+  let authCookie = '';
+  let validCsrf = '';
+  let testPageId = '';
+
+  before(async () => {
+    const auth = await getTestAuthContext();
+    authCookie = auth.cookie;
+    validCsrf = auth.csrfToken;
+
+    const pages = storage.getConnectedPages();
+    testPageId = pages[0]?.id || 'page_dna_test_101';
+    if (!pages.find(p => p.id === testPageId)) {
+      storage.addConnectedPage({
+        id: testPageId,
+        name: 'DNA Integration Test Page',
+        category: 'Education',
+        accessToken: 'EAADemoMockToken'
+      });
+    }
+  });
+
+  test('GET /api/facebook/pages/:id/content-profile returns 401 unauthenticated', async () => {
+    const res = await fetch(`${baseUrl}/api/facebook/pages/${testPageId}/content-profile`);
+    assert.strictEqual(res.status, 401);
+  });
+
+  test('GET /api/facebook/pages/:id/content-profile returns 404 for non-existent page', async () => {
+    const res = await fetch(`${baseUrl}/api/facebook/pages/non_existent_page_99999/content-profile`, {
+      headers: { Cookie: authCookie }
+    });
+    assert.strictEqual(res.status, 404);
+  });
+
+  test('GET /api/facebook/pages/:id/content-profile returns profile and status when authenticated', async () => {
+    const res = await fetch(`${baseUrl}/api/facebook/pages/${testPageId}/content-profile`, {
+      headers: { Cookie: authCookie }
+    });
+    assert.strictEqual(res.status, 200);
+    const data = await res.json();
+    assert.strictEqual(data.success, true);
+    assert.ok(data.contentProfile);
+    assert.ok(data.onboardingStatus);
+    assert.strictEqual(typeof data.contentProfile.schemaVersion, 'number');
+  });
+
+  test('PUT /api/facebook/pages/:id/content-profile fails with 403 when CSRF token is missing', async () => {
+    const res = await fetch(`${baseUrl}/api/facebook/pages/${testPageId}/content-profile`, {
+      method: 'PUT',
+      headers: { Cookie: authCookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ niche: 'Science & Cosmos' })
+    });
+    assert.strictEqual(res.status, 403);
+  });
+
+  test('PUT /api/facebook/pages/:id/content-profile rejects invalid profile with 400 and validation errors', async () => {
+    const res = await fetch(`${baseUrl}/api/facebook/pages/${testPageId}/content-profile`, {
+      method: 'PUT',
+      headers: {
+        Cookie: authCookie,
+        'X-CSRF-Token': validCsrf,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        niche: 'Physics Lab',
+        contentMix: { educational: 90, community: 90, authority: 0, promotional: 0, timely: 0 }
+      })
+    });
+    assert.strictEqual(res.status, 400);
+    const data = await res.json();
+    assert.strictEqual(data.success, false);
+    assert.ok(Array.isArray(data.errors));
+    assert.ok(data.errors.some(e => e.code === 'SUM_NOT_100'));
+  });
+
+  test('PUT /api/facebook/pages/:id/content-profile saves valid profile with valid cookie and CSRF token', async () => {
+    const updatePayload = {
+      niche: 'Bengali Literature & Culture',
+      nicheDescription: 'Exploring the rich heritage of Bengali poetry and prose',
+      primaryGoal: 'authority',
+      language: 'bn',
+      tone: ['inspiring', 'credible'],
+      audience: { locations: ['West Bengal'], knowledgeLevel: 'intermediate' },
+      contentPillars: [
+        { title: 'Rabindrasangeet Analysis', weight: 40 },
+        { title: 'Classic Novels Review', weight: 30 },
+        { title: 'Poetry Recitations', weight: 30 }
+      ],
+      contentMix: { educational: 50, community: 20, authority: 20, promotional: 5, timely: 5 },
+      approvalMode: 'manual',
+      maxPostsPerDay: 2,
+      minimumPostGapMinutes: 240
+    };
+
+    const res = await fetch(`${baseUrl}/api/facebook/pages/${testPageId}/content-profile`, {
+      method: 'PUT',
+      headers: {
+        Cookie: authCookie,
+        'X-CSRF-Token': validCsrf,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(updatePayload)
+    });
+    assert.strictEqual(res.status, 200);
+    const data = await res.json();
+    assert.strictEqual(data.success, true);
+    assert.strictEqual(data.contentProfile.niche, 'Bengali Literature & Culture');
+    assert.strictEqual(data.onboardingStatus, 'complete');
+
+    const profileInDb = storage.getPageProfile(testPageId);
+    assert.strictEqual(profileInDb.niche, 'Bengali Literature & Culture');
+    assert.strictEqual(profileInDb.approvalMode, 'manual');
+  });
+
+  test('POST /api/facebook/pages/:id/content-profile/validate dry-run returns validation without modifying database', async () => {
+    const res = await fetch(`${baseUrl}/api/facebook/pages/${testPageId}/content-profile/validate`, {
+      method: 'POST',
+      headers: {
+        Cookie: authCookie,
+        'X-CSRF-Token': validCsrf,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        niche: 'Astronomy & Astrophysics',
+        contentMix: { educational: 40, community: 20, authority: 20, promotional: 10, timely: 10 }
+      })
+    });
+    assert.strictEqual(res.status, 200);
+    const data = await res.json();
+    assert.strictEqual(data.success, true);
+    assert.strictEqual(data.valid, true);
+
+    const profileInDb = storage.getPageProfile(testPageId);
+    assert.strictEqual(profileInDb.niche, 'Bengali Literature & Culture');
+  });
+
+  test('POST /api/facebook/pages/:id/content-profile/reset requires { confirm: true } and resets profile', async () => {
+    const rejectRes = await fetch(`${baseUrl}/api/facebook/pages/${testPageId}/content-profile/reset`, {
+      method: 'POST',
+      headers: {
+        Cookie: authCookie,
+        'X-CSRF-Token': validCsrf,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({})
+    });
+    assert.strictEqual(rejectRes.status, 400);
+
+    const okRes = await fetch(`${baseUrl}/api/facebook/pages/${testPageId}/content-profile/reset`, {
+      method: 'POST',
+      headers: {
+        Cookie: authCookie,
+        'X-CSRF-Token': validCsrf,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ confirm: true })
+    });
+    assert.strictEqual(okRes.status, 200);
+    const okData = await okRes.json();
+    assert.strictEqual(okData.success, true);
+    assert.strictEqual(okData.onboardingStatus, 'not_started');
+
+    const resetProfile = storage.getPageProfile(testPageId);
+    assert.strictEqual(resetProfile.niche, 'Education');
+  });
+});
+
+// =========================================================================
+// SUITE 13: PAGE CONTEXT BUILDER & STRICT PROMPT HIERARCHY
+// =========================================================================
+describe('13. Page Context Builder & Strict Prompt Hierarchy', () => {
+  test('buildPageContext places safety directives and prohibited topics at top of system instructions', () => {
+    const profile = {
+      ...createDefaultContentProfile(),
+      niche: 'West Bengal Govt Job Prep',
+      blockedTopics: ['gambling', 'casino', 'betting'],
+      blockedClaims: ['100% selection guaranteed']
+    };
+
+    const ctx = buildPageContext({
+      page: { id: 'p1', name: 'WB Exam Guide' },
+      contentProfile: profile,
+      category: 'শিক্ষা ও চাকরি প্রস্তুতি',
+      objective: 'WBCS 2026 Notification update'
+    });
+
+    assert.ok(ctx.systemInstruction.indexOf('[SYSTEM SAFETY DIRECTIVE') !== -1);
+    assert.ok(ctx.systemInstruction.indexOf('gambling') !== -1);
+    assert.ok(ctx.systemInstruction.indexOf('100% selection guaranteed') !== -1);
+
+    const safetyIndex = ctx.systemInstruction.indexOf('[SYSTEM SAFETY DIRECTIVE');
+    const personaIndex = ctx.systemInstruction.indexOf('[PAGE DNA & BRAND PERSONA');
+    assert.ok(safetyIndex < personaIndex, 'Safety directives must strictly precede Page Persona');
+  });
+
+  test('buildPageContext places verified fact pack above operator instructions', () => {
+    const factPack = 'Fact 1: Exam date is 15th December 2026. Source: wbpsc.gov.in';
+    const ctx = buildPageContext({
+      page: { id: 'p1', name: 'WB Exam Guide', systemPrompt: 'Always end with Best Wishes' },
+      contentProfile: createDefaultContentProfile(),
+      category: 'শিক্ষা',
+      verifiedFactPack: factPack,
+      objective: 'পরীক্ষার নোটিশ'
+    });
+
+    const factIndex = ctx.systemInstruction.indexOf('[VERIFIED GROUND TRUTH');
+    const operatorIndex = ctx.systemInstruction.indexOf('[PAGE OWNER CUSTOM PREFERENCES');
+    assert.ok(factIndex !== -1, 'Verified ground truth section must exist');
+    assert.ok(operatorIndex !== -1, 'Operator section must exist');
+    assert.ok(factIndex < operatorIndex, 'Fact pack must precede operator instructions');
+  });
+
+  test('buildPageContext enforces 8000 character maximum budget on system instructions', () => {
+    const hugeNiche = 'A'.repeat(10000);
+    const ctx = buildPageContext({
+      page: { id: 'p1', name: 'WB Exam Guide' },
+      contentProfile: { ...createDefaultContentProfile(), niche: hugeNiche },
+      category: 'Science'
+    });
+
+    assert.ok(ctx.systemInstruction.length <= 8000, `Length ${ctx.systemInstruction.length} exceeded 8000 limit`);
+  });
+
+  test('buildPageContext sanitizes non-printable control characters from operator input', () => {
+    const dirtyObjective = 'Special Topic\x00\x08\x0B with malicious control chars\x1F';
+    const ctx = buildPageContext({
+      page: { id: 'p1', name: 'Test Page' },
+      contentProfile: createDefaultContentProfile(),
+      category: 'General',
+      objective: dirtyObjective
+    });
+
+    assert.strictEqual(ctx.systemInstruction.includes('\x00'), false);
+    assert.strictEqual(ctx.systemInstruction.includes('\x08'), false);
+    assert.strictEqual(ctx.userPromptContext.includes('\x00'), false);
+  });
+
+  test('buildPageContext selects pillar with rotation or weight distribution', () => {
+    const pillars = [
+      { id: 'p1', title: 'Mathematics Tricks', weight: 50 },
+      { id: 'p2', title: 'English Grammar', weight: 50 }
+    ];
+    const profile = { ...createDefaultContentProfile(), contentPillars: pillars };
+    const ctx = buildPageContext({
+      page: { id: 'page_1' },
+      contentProfile: profile,
+      recentHistory: [{ contentPillarId: 'p1' }]
+    });
+
+    assert.strictEqual(ctx.selectedPillar.id, 'p2');
+    assert.strictEqual(ctx.selectedPillar.title, 'English Grammar');
+  });
+
+  test('buildPageContext chooses content mix type matching profile distribution', () => {
+    const ctx = buildPageContext({
+      page: { id: 'page_1' },
+      contentProfile: createDefaultContentProfile()
+    });
+
+    const allowedTypes = ['educational', 'community', 'authority', 'promotional', 'timely'];
+    assert.ok(allowedTypes.includes(ctx.contentType));
+  });
+});
+
+// =========================================================================
+// SUITE 14: PROFILE PUBLISHING POLICIES & SCHEDULERS
+// =========================================================================
+describe('14. Profile Publishing Policies & Schedulers', () => {
+  test('validateContent flags content matching profile.blockedTopics with BLOCKED_TOPIC_VIOLATION', () => {
+    const profile = {
+      ...createDefaultContentProfile(),
+      blockedTopics: ['betting', 'online casino']
+    };
+
+    const res = validateContent(
+      { message: 'অনলাইন বেটিং বা betting সাইট থেকে কীভাবে দ্রুত টাকা আয় করবেন জানুন।' },
+      { contentProfile: profile }
+    );
+
+    assert.strictEqual(res.safe, false);
+    assert.ok(res.issueCodes.includes('BLOCKED_TOPIC_VIOLATION'));
+    assert.ok(res.reasons.some(r => r.includes('betting')));
+  });
+
+  test('validateContent flags content asserting profile.blockedClaims with BLOCKED_CLAIM_VIOLATION', () => {
+    const profile = {
+      ...createDefaultContentProfile(),
+      blockedClaims: ['100% চাকরি নিশ্চিত', '১০০% চাকরি নিশ্চিত', '১০০% গ্যারান্টি']
+    };
+
+    const res = validateContent(
+      { message: 'আমাদের এই কোর্সে ভর্তি হলেই ১০০% চাকরি নিশ্চিত এবং সরকারি নিয়োগ পাবেন।' },
+      { contentProfile: profile }
+    );
+
+    assert.strictEqual(res.safe, false);
+    assert.ok(res.issueCodes.includes('BLOCKED_CLAIM_VIOLATION'));
+    assert.ok(res.reasons.some(r => r.includes('১০০% চাকরি নিশ্চিত')));
+  });
+
+  test('validateContent flags announcement without official source under source policy with MISSING_OFFICIAL_SOURCE', () => {
+    const profile = {
+      ...createDefaultContentProfile(),
+      sourcePolicy: { requireOfficialSourceForAnnouncements: true }
+    };
+
+    const res = validateContent(
+      {
+        message: 'বিজ্ঞপ্তি: আগামী মাসের ১০ তারিখে পরীক্ষার তারিখ ঘোষণা করা হয়েছে। এডমিট কার্ড ডাউনলোড শুরু হয়েছে।'
+      },
+      { contentProfile: profile }
+    );
+
+    assert.strictEqual(res.safe, false);
+    assert.ok(res.issueCodes.includes('MISSING_OFFICIAL_SOURCE'));
+  });
+
+  test('validateContent allows announcement when official source is provided', () => {
+    const profile = {
+      ...createDefaultContentProfile(),
+      sourcePolicy: { requireOfficialSourceForAnnouncements: true }
+    };
+
+    const res = validateContent(
+      {
+        message: 'বিজ্ঞপ্তি: পরীক্ষার তারিখ এবং এডমিট কার্ড ডাউনলোড সংক্রান্ত অফিশিয়াল নির্দেশিকা প্রকাশিত হয়েছে। বিস্তারিত জানতে সঙ্গে থাকুন।',
+        sources: [{ url: 'https://wbpsc.gov.in/notice', publisher: 'WBPSC', isOfficial: true }]
+      },
+      { contentProfile: profile }
+    );
+
+    assert.strictEqual(res.safe, true);
+    assert.strictEqual(res.issueCodes.includes('MISSING_OFFICIAL_SOURCE'), false);
+  });
+
+  test('validateContent flags emoji limit violation against profile.emojiLimit', () => {
+    const profile = {
+      ...createDefaultContentProfile(),
+      emojiLimit: 3
+    };
+
+    const res = validateContent(
+      { message: 'সুন্দর সকালে পড়াশোনা শুরু করার চমৎকার উপায় 📚 💡 🎯 🚀 ✨ যা আপনার দক্ষতা বাড়াবে।' },
+      { contentProfile: profile }
+    );
+
+    assert.strictEqual(res.reviewRequired, true);
+    assert.ok(res.issueCodes.includes('EXCESSIVE_EMOJIS'));
+  });
+
+  test('validateContent flags hashtag limit violation against profile.hashtagLimit', () => {
+    const profile = {
+      ...createDefaultContentProfile(),
+      hashtagLimit: 2
+    };
+
+    const res = validateContent(
+      { message: 'প্রতিদিনের বিজ্ঞান ভাবনা নিয়ে পড়ুন আজকের পোস্ট। #Science #Astronomy #Physics #Cosmos' },
+      { contentProfile: profile }
+    );
+
+    assert.strictEqual(res.reviewRequired, true);
+    assert.ok(res.issueCodes.includes('EXCESSIVE_HASHTAGS'));
+  });
+
+  test('validateContent flags caption length outside profile preferred bounds', () => {
+    const profile = {
+      ...createDefaultContentProfile(),
+      preferredCaptionLength: { min: 200, max: 400 }
+    };
+
+    const shortRes = validateContent(
+      { message: 'মহাকাশ বিজ্ঞানের নতুন দিগন্ত: জেমস ওয়েব টেলিস্কোপ দূরবর্তী গ্যালাক্সির স্পষ্ট ছবি পাঠিয়েছে।' },
+      { contentProfile: profile }
+    );
+    assert.ok(shortRes.issueCodes.includes('CAPTION_LENGTH_BELOW_PREFERENCE'));
+
+    const longRes = validateContent(
+      { message: 'মহাকাশ বিজ্ঞান '.repeat(50) },
+      { contentProfile: profile }
+    );
+    assert.ok(longRes.issueCodes.includes('CAPTION_LENGTH_EXCEEDS_PREFERENCE'));
+    assert.strictEqual(longRes.reviewRequired, true);
+  });
+
+  test('scheduler.triggerAIAutoPilot holds post for review when approvalMode is manual', async () => {
+    let publishCalls = 0;
+    const testPageId = 'page_manual_mode_test';
+    const manualProfile = {
+      ...createDefaultContentProfile(),
+      niche: 'West Bengal Education',
+      tone: ['helpful', 'credible'],
+      audience: { locations: ['Kolkata'] },
+      contentPillars: [
+        { title: 'Math Tips', weight: 50 },
+        { title: 'History Notes', weight: 50 },
+        { title: 'General Knowledge', weight: 20 }
+      ],
+      approvalMode: 'manual'
+    };
+
+    storage.addConnectedPage({
+      id: testPageId,
+      name: 'Manual Approval Test Page',
+      category: 'Education',
+      contentProfile: manualProfile,
+      onboardingStatus: 'complete',
+      isActive: true
+    });
+    storage.saveSettings({ activePageId: testPageId, selectedCategories: ['science_nature'] });
+
+    scheduler.setDependencies({
+      ai: {
+        generateFullPostBundle: async () => ({
+          message: 'বিজ্ঞান ও মহাকাশ গবেষণার নতুন আবিষ্কার মানবজাতিকে নতুন আশার আলো দেখাচ্ছে।',
+          categoryId: 'science_nature',
+          isFallback: false,
+          generationSource: 'ai_generated',
+          verified: true,
+          riskLevel: 'low',
+          sources: [{ url: 'https://nasa.gov', publisher: 'NASA' }]
+        })
+      },
+      facebook: {
+        publishPost: async () => { publishCalls++; return { success: true }; }
+      }
+    });
+
+    const result = await scheduler.triggerAIAutoPilot('science_nature');
+    assert.strictEqual(publishCalls, 0, 'publishPost must NOT be called when approvalMode is manual');
+    assert.strictEqual(result.reviewRequired, true);
+    assert.ok(result.reason.includes('manual'));
+
+    const queue = storage.getQueue();
+    const queuedItem = queue[queue.length - 1];
+    assert.strictEqual(queuedItem.status, 'review_required');
+    assert.strictEqual(queuedItem.approvalMode, 'manual');
+  });
+
+  test('scheduler.triggerAIAutoPilot auto-publishes low-risk post when approvalMode is low_risk_auto', async () => {
+    let publishCalls = 0;
+    const testPageId = 'page_low_risk_mode_test';
+    const lowRiskProfile = {
+      ...createDefaultContentProfile(),
+      niche: 'General Knowledge Hub',
+      tone: ['helpful'],
+      audience: { locations: ['Bengal'] },
+      contentPillars: [
+        { title: 'GK Facts', weight: 50 },
+        { title: 'Quiz', weight: 30 },
+        { title: 'Current Updates', weight: 20 }
+      ],
+      approvalMode: 'low_risk_auto'
+    };
+
+    storage.addConnectedPage({
+      id: testPageId,
+      name: 'Low Risk Test Page',
+      category: 'Education',
+      contentProfile: lowRiskProfile,
+      onboardingStatus: 'complete',
+      isActive: true
+    });
+    storage.saveSettings({ activePageId: testPageId, selectedCategories: ['science_nature'] });
+
+    scheduler.setDependencies({
+      ai: {
+        generateFullPostBundle: async () => ({
+          message: 'বিজ্ঞান ও পরিবেশ সচেতনতা সংক্রান্ত আলোচনা মানুষের জীবনমান উন্নত করে।',
+          categoryId: 'science_nature',
+          isFallback: false,
+          generationSource: 'ai_generated',
+          verified: true,
+          riskLevel: 'low',
+          strategy: { pillar: 'GK Facts', pillarId: 'pillar_1', contentType: 'educational' },
+          sources: [{ url: 'https://nature.com', publisher: 'Nature' }]
+        })
+      },
+      facebook: {
+        publishPost: async () => { publishCalls++; return { success: true, postId: 'low_risk_published_1' }; }
+      }
+    });
+
+    const result = await scheduler.triggerAIAutoPilot('science_nature');
+    assert.strictEqual(publishCalls, 1, 'publishPost MUST be called for low-risk content under low_risk_auto');
+    assert.strictEqual(result.success, true);
+
+    const history = storage.getHistory();
+    const lastHistory = history.find(h => h.postId === 'low_risk_published_1');
+    assert.ok(lastHistory);
+    assert.strictEqual(lastHistory.riskLevel, 'low');
+    assert.strictEqual(lastHistory.contentPillar, 'GK Facts');
+  });
+
+  test('scheduler.triggerAIAutoPilot holds medium/high risk post when approvalMode is low_risk_auto', async () => {
+    let publishCalls = 0;
+    const testPageId = 'page_high_risk_test';
+    const lowRiskProfile = {
+      ...createDefaultContentProfile(),
+      niche: 'Current Affairs',
+      tone: ['credible'],
+      audience: { locations: ['Kolkata'] },
+      contentPillars: [{ title: 'P1', weight: 40 }, { title: 'P2', weight: 30 }, { title: 'P3', weight: 30 }],
+      approvalMode: 'low_risk_auto'
+    };
+
+    storage.addConnectedPage({
+      id: testPageId,
+      name: 'High Risk Test Page',
+      category: 'News',
+      contentProfile: lowRiskProfile,
+      onboardingStatus: 'complete',
+      isActive: true
+    });
+    storage.saveSettings({ activePageId: testPageId, selectedCategories: ['science_nature'] });
+
+    scheduler.setDependencies({
+      ai: {
+        generateFullPostBundle: async () => ({
+          message: 'বিজ্ঞানীদের নতুন বিতর্কিত গবেষণার ফলাফল নিয়ে নানা মহলে প্রশ্ন উঠছে।',
+          categoryId: 'science_nature',
+          isFallback: false,
+          generationSource: 'ai_generated',
+          verified: true,
+          riskLevel: 'medium',
+          sources: [{ url: 'https://science.org', publisher: 'Science' }]
+        })
+      },
+      facebook: {
+        publishPost: async () => { publishCalls++; return { success: true }; }
+      }
+    });
+
+    const result = await scheduler.triggerAIAutoPilot('science_nature');
+    assert.strictEqual(publishCalls, 0, 'publishPost must not be called for medium-risk under low_risk_auto');
+    assert.strictEqual(result.reviewRequired, true);
+    assert.ok(result.reason.includes('medium-risk'));
+  });
+
+  test('scheduler.triggerAIAutoPilot skips run when maxPostsPerDay is reached', async () => {
+    let publishCalls = 0;
+    const testPageId = 'page_max_posts_test';
+    const limitProfile = {
+      ...createDefaultContentProfile(),
+      niche: 'Daily Tech',
+      tone: ['helpful'],
+      audience: { locations: ['India'] },
+      contentPillars: [{ title: 'P1', weight: 40 }, { title: 'P2', weight: 30 }, { title: 'P3', weight: 30 }],
+      approvalMode: 'low_risk_auto',
+      maxPostsPerDay: 2,
+      timezone: 'Asia/Kolkata'
+    };
+
+    storage.addConnectedPage({
+      id: testPageId,
+      name: 'Max Posts Test Page',
+      category: 'Tech',
+      contentProfile: limitProfile,
+      onboardingStatus: 'complete',
+      isActive: true
+    });
+    storage.saveSettings({ activePageId: testPageId, selectedCategories: ['tech_inventions'] });
+
+    const nowIso = new Date().toISOString();
+    storage.addHistory({ status: 'published', postId: 'post_seed_1', pageId: testPageId, publishedAt: nowIso });
+    storage.addHistory({ status: 'published', postId: 'post_seed_2', pageId: testPageId, publishedAt: nowIso });
+
+    scheduler.setDependencies({
+      facebook: {
+        publishPost: async () => { publishCalls++; return { success: true }; }
+      }
+    });
+
+    const result = await scheduler.triggerAIAutoPilot('tech_inventions');
+    assert.strictEqual(publishCalls, 0, 'publishPost must not be called when daily post limit is reached');
+    assert.strictEqual(result.skipped, true);
+    assert.ok(result.reason.includes('DAILY_POST_LIMIT_REACHED'));
+  });
+
+  test('scheduler.triggerAIAutoPilot skips run when minimumPostGapMinutes cooldown is active', async () => {
+    let publishCalls = 0;
+    const testPageId = 'page_gap_test';
+    const gapProfile = {
+      ...createDefaultContentProfile(),
+      niche: 'Lifestyle Notes',
+      tone: ['friendly'],
+      audience: { locations: ['Bengal'] },
+      contentPillars: [{ title: 'P1', weight: 40 }, { title: 'P2', weight: 30 }, { title: 'P3', weight: 30 }],
+      approvalMode: 'low_risk_auto',
+      minimumPostGapMinutes: 120,
+      maxPostsPerDay: 10
+    };
+
+    storage.addConnectedPage({
+      id: testPageId,
+      name: 'Gap Test Page',
+      category: 'Lifestyle',
+      contentProfile: gapProfile,
+      onboardingStatus: 'complete',
+      isActive: true
+    });
+    storage.saveSettings({ activePageId: testPageId, selectedCategories: ['science_nature'] });
+
+    const recentTime = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    storage.addHistory({ status: 'published', postId: 'post_recent_1', pageId: testPageId, publishedAt: recentTime });
+
+    scheduler.setDependencies({
+      facebook: {
+        publishPost: async () => { publishCalls++; return { success: true }; }
+      }
+    });
+
+    const result = await scheduler.triggerAIAutoPilot('science_nature');
+    assert.strictEqual(publishCalls, 0, 'publishPost must not be called when post gap cooldown is active');
+    assert.strictEqual(result.skipped, true);
+    assert.ok(result.reason.includes('MINIMUM_POST_GAP_ACTIVE'));
   });
 });

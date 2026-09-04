@@ -207,9 +207,15 @@ function buildPageContext(options = {}) {
 
   // HIERARCHY LEVEL 2: Ground Truth & Facts
   let factPackDirectives = '';
-  if (verifiedFactPack && typeof verifiedFactPack === 'object') {
-    const factsList = Array.isArray(verifiedFactPack.facts) ? verifiedFactPack.facts.map(f => `  * ${f}`).join('\n') : '';
-    const sourcesList = Array.isArray(verifiedFactPack.sources) ? verifiedFactPack.sources.map(s => `  * ${s}`).join('\n') : '';
+  if (verifiedFactPack) {
+    let factsList = '';
+    let sourcesList = '';
+    if (typeof verifiedFactPack === 'string') {
+      factsList = `  * ${verifiedFactPack}`;
+    } else if (typeof verifiedFactPack === 'object') {
+      factsList = Array.isArray(verifiedFactPack.facts) ? verifiedFactPack.facts.map(f => `  * ${f}`).join('\n') : '';
+      sourcesList = Array.isArray(verifiedFactPack.sources) ? verifiedFactPack.sources.map(s => `  * ${s}`).join('\n') : '';
+    }
     factPackDirectives = `\n\n[VERIFIED GROUND TRUTH & SOURCE CITATIONS - PRIORITY 2]
 The following facts are verified. You MUST base news and factual statements ONLY on these verified data points:
 ${factsList || '  * (No individual fact bullet provided)'}
@@ -300,7 +306,7 @@ ${sanitizedOperatorPrompt}
 
   // Build User Prompt Context
   const effectiveCategory = category || selectedPillar?.title || profile.niche || 'General';
-  const effectiveTopic = objective ? objective.trim() : (selectedPillar?.title || 'Daily Educational Insight');
+  const effectiveTopic = objective ? sanitizeUntrustedPrompt(objective, 300) : (selectedPillar?.title || 'Daily Educational Insight');
   const seed = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
 
   let userPromptContext = `Topic: "${effectiveTopic}"

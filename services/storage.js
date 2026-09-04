@@ -706,14 +706,22 @@ const storage = {
     const history = this.getHistory();
     const item = {
       id: entry.id || 'hist_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-      timestamp: new Date().toISOString(),
+      timestamp: entry.timestamp || new Date().toISOString(),
+      publishedAt: entry.publishedAt || (entry.status === 'published' ? (entry.timestamp || new Date().toISOString()) : null),
       status: entry.status || 'success',
       message: entry.message || '',
       imageUrl: entry.imageUrl || null,
       postId: entry.postId || null,
       fbUrl: entry.postId ? `https://facebook.com/${entry.postId}` : null,
       error: entry.error || null,
-      source: entry.source || 'manual'
+      source: entry.source || 'manual',
+      pageId: entry.pageId || null,
+      contentPillar: entry.contentPillar || null,
+      contentPillarId: entry.contentPillarId || null,
+      contentType: entry.contentType || null,
+      riskLevel: entry.riskLevel || null,
+      approvalMode: entry.approvalMode || null,
+      profileVersion: entry.profileVersion || 1
     };
     history.unshift(item);
     if (history.length > 200) history.length = 200;
@@ -753,7 +761,14 @@ const storage = {
       status: item.status || 'pending',
       generationSource: item.generationSource || 'manual',
       verified: item.verified === true,
-      issues: Array.isArray(item.issues) ? item.issues : []
+      issues: Array.isArray(item.issues) ? item.issues : [],
+      pageId: item.pageId || null,
+      contentPillar: item.contentPillar || null,
+      contentPillarId: item.contentPillarId || null,
+      contentType: item.contentType || null,
+      riskLevel: item.riskLevel || null,
+      approvalMode: item.approvalMode || null,
+      profileVersion: item.profileVersion || 1
     };
     queue.push(queueItem);
     writeJsonFile(QUEUE_FILE, queue);
