@@ -710,10 +710,16 @@
                       <span id="studioPageCategory" class="text-[10px] text-slate-400 font-medium block">General</span>
                     </div>
                   </div>
-                  <button id="studioEditPagePromptBtn" type="button" class="text-[11px] font-semibold text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg border border-indigo-200/80 transition flex items-center gap-1 shadow-xs">
-                    <i data-lucide="edit-3" class="w-3 h-3"></i>
-                    <span>Edit Page Instructions</span>
-                  </button>
+                  <div class="flex items-center gap-2">
+                    <button id="studioOpenPageDnaBtn" type="button" class="text-[11px] font-semibold text-purple-700 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 px-2.5 py-1 rounded-lg border border-purple-200 transition flex items-center gap-1 shadow-xs">
+                      <i data-lucide="dna" class="w-3 h-3 text-purple-600"></i>
+                      <span id="studioPageDnaBadgeText">Page DNA (ডিএনএ)</span>
+                    </button>
+                    <button id="studioEditPagePromptBtn" type="button" class="text-[11px] font-semibold text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg border border-indigo-200/80 transition flex items-center gap-1 shadow-xs">
+                      <i data-lucide="edit-3" class="w-3 h-3"></i>
+                      <span>Edit Page Instructions</span>
+                    </button>
+                  </div>
                 </div>
                 <div class="text-[11px] text-slate-600 bg-slate-50/90 p-2.5 rounded-lg border border-slate-100 flex items-start gap-2">
                   <i data-lucide="shield-check" class="w-3.5 h-3.5 text-indigo-600 shrink-0 mt-0.5"></i>
@@ -1595,12 +1601,480 @@
             </div>
           </div>
 
-          <div class="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-2.5 bg-slate-50/50">
-            <button id="cancelEditPageModalBtn" class="text-xs font-semibold text-slate-500 hover:text-slate-800 px-4 py-2">Cancel</button>
-            <button id="submitEditPageBtn" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition flex items-center gap-1.5">
-              <i data-lucide="check" class="w-3.5 h-3.5"></i>
-              <span>Save Page & Guidelines</span>
+          <div class="px-6 py-4 border-t border-slate-100 flex items-center justify-between gap-2.5 bg-slate-50/50">
+            <button id="openPageDnaFromEditBtn" type="button" class="px-4 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-xl text-xs font-semibold border border-purple-200 transition flex items-center gap-1.5">
+              <i data-lucide="dna" class="w-3.5 h-3.5 text-purple-600"></i>
+              <span>Page DNA Wizard</span>
             </button>
+            <div class="flex items-center gap-2">
+              <button id="cancelEditPageModalBtn" class="text-xs font-semibold text-slate-500 hover:text-slate-800 px-4 py-2">Cancel</button>
+              <button id="submitEditPageBtn" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition flex items-center gap-1.5">
+                <i data-lucide="check" class="w-3.5 h-3.5"></i>
+                <span>Save Page & Guidelines</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= PAGE DNA ONBOARDING MODAL (7-STEP WIZARD) ================= -->
+      <div id="pageDnaModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop hidden">
+        <div class="bg-white w-full max-w-3xl rounded-2xl shadow-2xl border border-slate-100 modal-content overflow-hidden flex flex-col max-h-[92vh]">
+          <!-- Modal Header -->
+          <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center shadow-xs">
+                <i data-lucide="dna" class="w-5 h-5"></i>
+              </div>
+              <div>
+                <div class="flex items-center gap-2">
+                  <h3 class="text-sm font-bold text-slate-900">Page DNA & Content Strategy Onboarding</h3>
+                  <span id="dnaModalStatusBadge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Incomplete</span>
+                </div>
+                <p class="text-[11px] text-slate-500 font-medium mt-0.5">
+                  পেজ আইডেন্টিটি: <span id="dnaModalPageName" class="font-semibold text-purple-700">Loading...</span> (<span id="dnaModalPageId" class="font-mono text-[10px]">ID</span>)
+                </p>
+              </div>
+            </div>
+            <button id="closePageDnaModalBtn" type="button" class="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition">
+              <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+          </div>
+
+          <!-- 7-Step Navigation Bar -->
+          <div class="px-6 py-2.5 border-b border-slate-100 bg-slate-50/40 overflow-x-auto">
+            <div class="flex items-center gap-1.5 min-w-max text-[11px] font-medium text-slate-500">
+              <button type="button" class="dna-step-tab px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition bg-purple-600 text-white font-bold shadow-xs" data-step="1">
+                <span>1. Purpose (লক্ষ্য)</span>
+              </button>
+              <i data-lucide="chevron-right" class="w-3 h-3 text-slate-300 shrink-0"></i>
+              <button type="button" class="dna-step-tab px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition hover:bg-slate-200/60" data-step="2">
+                <span>2. Voice & Tone (কণ্ঠস্বর)</span>
+              </button>
+              <i data-lucide="chevron-right" class="w-3 h-3 text-slate-300 shrink-0"></i>
+              <button type="button" class="dna-step-tab px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition hover:bg-slate-200/60" data-step="3">
+                <span>3. Pillars (পিলার)</span>
+              </button>
+              <i data-lucide="chevron-right" class="w-3 h-3 text-slate-300 shrink-0"></i>
+              <button type="button" class="dna-step-tab px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition hover:bg-slate-200/60" data-step="4">
+                <span>4. Mix (বণ্টন)</span>
+              </button>
+              <i data-lucide="chevron-right" class="w-3 h-3 text-slate-300 shrink-0"></i>
+              <button type="button" class="dna-step-tab px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition hover:bg-slate-200/60" data-step="5">
+                <span>5. Safety (সুরক্ষা)</span>
+              </button>
+              <i data-lucide="chevron-right" class="w-3 h-3 text-slate-300 shrink-0"></i>
+              <button type="button" class="dna-step-tab px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition hover:bg-slate-200/60" data-step="6">
+                <span>6. Publishing (নীতি)</span>
+              </button>
+              <i data-lucide="chevron-right" class="w-3 h-3 text-slate-300 shrink-0"></i>
+              <button type="button" class="dna-step-tab px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition hover:bg-slate-200/60" data-step="7">
+                <span>7. Review (নিশ্চিতকরণ)</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Wizard Body: Step Containers -->
+          <div class="p-6 overflow-y-auto space-y-4 text-xs flex-1">
+            <input type="hidden" id="dnaCurrentPageId">
+
+            <!-- STEP 1: PURPOSE & IDENTITY -->
+            <div id="dnaStepContainer1" class="dna-step-panel space-y-4">
+              <div class="bg-purple-50/70 border border-purple-100 rounded-xl p-3.5 text-purple-900 flex items-start gap-2.5">
+                <i data-lucide="target" class="w-4 h-4 text-purple-600 shrink-0 mt-0.5"></i>
+                <div class="leading-relaxed">
+                  <p class="font-bold">ধাপ ১: পেজের মূল পরিচয় ও টার্গেট অডিয়েন্স (Purpose & Identity)</p>
+                  <p class="text-[11px] text-purple-700">এই পেজটি কোন সুনির্দিষ্ট ক্যাটাগরি এবং পাঠকদের জন্য তৈরি তা নির্ধারণ করুন। AI প্রতিটি পোস্ট এই নিশ মাথায় রেখে প্রস্তুত করবে।</p>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block font-bold text-slate-800 mb-1">Primary Niche / নিশ <span class="text-rose-500">*</span></label>
+                  <input type="text" id="dnaNicheInput" placeholder="e.g. সরকারি চাকরি প্রস্তুতি (Govt Exam Preparation)" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500 font-medium">
+                  <span class="text-[10px] text-slate-400 mt-0.5 block">উদাহরণ: WBCS Preparation, Bengali Recipes, Tech Tips, Fitness</span>
+                </div>
+                <div>
+                  <label class="block font-bold text-slate-800 mb-1">Primary Goal / মূল উদ্দেশ্য <span class="text-rose-500">*</span></label>
+                  <select id="dnaPrimaryGoalSelect" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500 font-medium bg-white">
+                    <option value="engagement">Engagement (লাইক, কমেন্ট ও মিথস্ক্রিয়া)</option>
+                    <option value="reach">Reach (সর্বোচ্চ মানুষের কাছে পৌঁছানো)</option>
+                    <option value="authority">Authority (বিশেষজ্ঞ ও নির্ভরযোগ্য ভাবমূর্তি)</option>
+                    <option value="community">Community (নিবেদিত অনুসারী তৈরি)</option>
+                    <option value="leads">Leads (শিক্ষার্থী বা গ্রাহক সংগ্রহ)</option>
+                    <option value="sales">Sales (কোর্স বা পণ্য বিক্রয়)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label class="block font-bold text-slate-800 mb-1">Niche Description / নিশের বিস্তারিত বিবরণ</label>
+                <textarea id="dnaNicheDescInput" rows="2" placeholder="এই পেজটি সম্পর্কে সংক্ষিপ্ত বিবরণ দিন... যেমন: পশ্চিমবঙ্গ ও ত্রিপুরার চাকরি প্রার্থীদের জন্য শিক্ষামূলক স্টাডি মেটেরিয়াল ও কুইজ।" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500"></textarea>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label class="block font-bold text-slate-800 mb-1">Locations / অঞ্চল (কমা দিয়ে লিখুন)</label>
+                  <input type="text" id="dnaAudienceLocationsInput" placeholder="West Bengal, Kolkata, Dhaka" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500">
+                </div>
+                <div>
+                  <label class="block font-bold text-slate-800 mb-1">Professions / পেশা বা গ্রুপ</label>
+                  <input type="text" id="dnaAudienceProfessionsInput" placeholder="Students, Aspirants, Job Seekers" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500">
+                </div>
+                <div>
+                  <label class="block font-bold text-slate-800 mb-1">Knowledge Level / জ্ঞানের মাত্রা</label>
+                  <select id="dnaKnowledgeLevelSelect" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500 bg-white">
+                    <option value="general">General (সাধারণ পাঠক)</option>
+                    <option value="beginner">Beginner (প্রাথমিক শিক্ষার্থী)</option>
+                    <option value="intermediate">Intermediate (মাঝারি পর্যায়ের)</option>
+                    <option value="advanced">Advanced (উন্নত/অভিজ্ঞ)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label class="block font-bold text-slate-800 mb-1">Audience Interests / আগ্রহের বিষয় (কমা দিয়ে লিখুন)</label>
+                <input type="text" id="dnaAudienceInterestsInput" placeholder="GK, History, Current Affairs, Bengali Grammar" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500">
+              </div>
+            </div>
+
+            <!-- STEP 2: VOICE & TONE -->
+            <div id="dnaStepContainer2" class="dna-step-panel space-y-4 hidden">
+              <div class="bg-indigo-50/70 border border-indigo-100 rounded-xl p-3.5 text-indigo-900 flex items-start gap-2.5">
+                <i data-lucide="message-square" class="w-4 h-4 text-indigo-600 shrink-0 mt-0.5"></i>
+                <div class="leading-relaxed">
+                  <p class="font-bold">ধাপ ২: কণ্ঠস্বর, ভাষা ও ভঙ্গি (Voice & Tone)</p>
+                  <p class="text-[11px] text-indigo-700">পেজের পোস্টে AI কোন ভাষায় এবং কেমন মেজাজে লিখবে তা ঠিক করুন। এটি পেজকে নিজস্ব ব্র্যান্ড স্বর দেয়।</p>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block font-bold text-slate-800 mb-1">Primary Language / ভাষা <span class="text-rose-500">*</span></label>
+                  <select id="dnaLanguageSelect" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500 bg-white font-medium">
+                    <option value="bn">Natural Bengali (বাংলা)</option>
+                    <option value="en">English (ইংরেজি)</option>
+                    <option value="bn_en">Bilingual / Bengali + English Terms (দ্বিভাষিক)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block font-bold text-slate-800 mb-1">Language Style / ভাষার শৈলী</label>
+                  <input type="text" id="dnaLanguageStyleInput" placeholder="e.g. সহজ ও আকর্ষণীয় চলিত বাংলা" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500">
+                </div>
+              </div>
+
+              <div>
+                <label class="block font-bold text-slate-800 mb-1.5">Tone Archetypes / লেখার টোন (অন্তত ১-২টি নির্বাচন করুন) <span class="text-rose-500">*</span></label>
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2" id="dnaToneGroup">
+                  <label class="flex items-center gap-1.5 p-2 rounded-xl border border-slate-200 hover:border-purple-300 cursor-pointer bg-white">
+                    <input type="checkbox" value="helpful" checked class="dna-tone-cb rounded text-purple-600">
+                    <span class="text-[11px] font-medium">Helpful (সহায়ক)</span>
+                  </label>
+                  <label class="flex items-center gap-1.5 p-2 rounded-xl border border-slate-200 hover:border-purple-300 cursor-pointer bg-white">
+                    <input type="checkbox" value="credible" checked class="dna-tone-cb rounded text-purple-600">
+                    <span class="text-[11px] font-medium">Credible (নির্ভরযোগ্য)</span>
+                  </label>
+                  <label class="flex items-center gap-1.5 p-2 rounded-xl border border-slate-200 hover:border-purple-300 cursor-pointer bg-white">
+                    <input type="checkbox" value="friendly" class="dna-tone-cb rounded text-purple-600">
+                    <span class="text-[11px] font-medium">Friendly (বন্ধুত্বপূর্ণ)</span>
+                  </label>
+                  <label class="flex items-center gap-1.5 p-2 rounded-xl border border-slate-200 hover:border-purple-300 cursor-pointer bg-white">
+                    <input type="checkbox" value="inspiring" class="dna-tone-cb rounded text-purple-600">
+                    <span class="text-[11px] font-medium">Inspiring (অনুপ্রেরণামূলক)</span>
+                  </label>
+                  <label class="flex items-center gap-1.5 p-2 rounded-xl border border-slate-200 hover:border-purple-300 cursor-pointer bg-white">
+                    <input type="checkbox" value="authoritative" class="dna-tone-cb rounded text-purple-600">
+                    <span class="text-[11px] font-medium">Authoritative (বিশেষজ্ঞ)</span>
+                  </label>
+                  <label class="flex items-center gap-1.5 p-2 rounded-xl border border-slate-200 hover:border-purple-300 cursor-pointer bg-white">
+                    <input type="checkbox" value="analytical" class="dna-tone-cb rounded text-purple-600">
+                    <span class="text-[11px] font-medium">Analytical (বিশ্লেষণী)</span>
+                  </label>
+                  <label class="flex items-center gap-1.5 p-2 rounded-xl border border-slate-200 hover:border-purple-300 cursor-pointer bg-white">
+                    <input type="checkbox" value="conversational" class="dna-tone-cb rounded text-purple-600">
+                    <span class="text-[11px] font-medium">Conversational (সহজ আলাপ)</span>
+                  </label>
+                  <label class="flex items-center gap-1.5 p-2 rounded-xl border border-slate-200 hover:border-purple-300 cursor-pointer bg-white">
+                    <input type="checkbox" value="empathetic" class="dna-tone-cb rounded text-purple-600">
+                    <span class="text-[11px] font-medium">Empathetic (সহমর্মী)</span>
+                  </label>
+                  <label class="flex items-center gap-1.5 p-2 rounded-xl border border-slate-200 hover:border-purple-300 cursor-pointer bg-white">
+                    <input type="checkbox" value="humorous" class="dna-tone-cb rounded text-purple-600">
+                    <span class="text-[11px] font-medium">Humorous (রসিকতাপূর্ণ)</span>
+                  </label>
+                  <label class="flex items-center gap-1.5 p-2 rounded-xl border border-slate-200 hover:border-purple-300 cursor-pointer bg-white">
+                    <input type="checkbox" value="formal" class="dna-tone-cb rounded text-purple-600">
+                    <span class="text-[11px] font-medium">Formal (আনুষ্ঠানিক)</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block font-bold text-slate-800 mb-1">Call to Action (CTA) Style / সমাপ্তি প্রশ্ন বা আহ্বান</label>
+                  <select id="dnaCtaStyleSelect" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500 bg-white">
+                    <option value="soft">Soft CTA (মৃদু অনুরোধ বা মন্তব্য আহ্বান)</option>
+                    <option value="question">Question (প্রশ্ন রেখে মতামত চাওয়া)</option>
+                    <option value="strong">Strong CTA (সরাসরি লিংক বা ফলো করতে বলা)</option>
+                    <option value="none">None (কোনো স্পষ্ট আহ্বান নেই)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block font-bold text-slate-800 mb-1">Preferred Formats / পছন্দের ফরম্যাট</label>
+                  <div class="flex flex-wrap gap-2 pt-1" id="dnaFormatGroup">
+                    <label class="flex items-center gap-1 text-[11px]"><input type="checkbox" value="infographic" checked class="dna-format-cb rounded text-purple-600"> Infographic</label>
+                    <label class="flex items-center gap-1 text-[11px]"><input type="checkbox" value="story" checked class="dna-format-cb rounded text-purple-600"> Story</label>
+                    <label class="flex items-center gap-1 text-[11px]"><input type="checkbox" value="tips" checked class="dna-format-cb rounded text-purple-600"> Tips & Lists</label>
+                    <label class="flex items-center gap-1 text-[11px]"><input type="checkbox" value="comparison" class="dna-format-cb rounded text-purple-600"> Comparison</label>
+                    <label class="flex items-center gap-1 text-[11px]"><input type="checkbox" value="quote" class="dna-format-cb rounded text-purple-600"> Quote Card</label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- STEP 3: PILLARS & TOPICS -->
+            <div id="dnaStepContainer3" class="dna-step-panel space-y-4 hidden">
+              <div class="bg-blue-50/70 border border-blue-100 rounded-xl p-3.5 text-blue-900 flex items-start gap-2.5">
+                <i data-lucide="columns" class="w-4 h-4 text-blue-600 shrink-0 mt-0.5"></i>
+                <div class="leading-relaxed">
+                  <p class="font-bold">ধাপ ৩: কন্টেন্ট পিলার ও টপিক (Content Pillars & Topics)</p>
+                  <p class="text-[11px] text-blue-700">অন্তত ৩টি প্রধান বিষয় নির্ধারণ করুন যেগুলোর ওপর ভিত্তি করে নিয়মিত পোস্ট তৈরি হবে। চাইলে তৈরি করা প্রিসেট লোড করতে পারেন।</p>
+                </div>
+              </div>
+
+              <!-- Quick Preset Buttons -->
+              <div class="flex items-center justify-between flex-wrap gap-2">
+                <span class="font-bold text-slate-700 text-[11px]">দ্রুত প্রিসেট লোড করুন:</span>
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <button type="button" id="dnaPresetExamBtn" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-semibold transition">📚 Exam Notes</button>
+                  <button type="button" id="dnaPresetFoodBtn" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-semibold transition">🍛 Food & Recipe</button>
+                  <button type="button" id="dnaPresetShopBtn" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-semibold transition">👗 Shop & Fashion</button>
+                  <button type="button" id="dnaPresetNewsBtn" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-semibold transition">📰 News & Facts</button>
+                </div>
+              </div>
+
+              <!-- Dynamic Pillars Container -->
+              <div class="space-y-2.5" id="dnaPillarsList">
+                <!-- Injected via JavaScript -->
+              </div>
+
+              <div class="flex items-center justify-between pt-1">
+                <button type="button" id="dnaAddPillarBtn" class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-semibold border border-indigo-200 flex items-center gap-1.5 transition">
+                  <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                  <span>+ নতুন পিলার যোগ করুন (Add Pillar)</span>
+                </button>
+                <span class="text-[11px] text-slate-400">সর্বোচ্চ ৮টি পিলার সমর্থিত (ন্যূনতম ৩টি প্রয়োজনীয়)</span>
+              </div>
+
+              <div class="pt-2 border-t border-slate-100">
+                <label class="block font-bold text-slate-800 mb-1">Allowed / Priority Topics (অগ্রাধিকারমূলক টপিক, কমা দিয়ে)</label>
+                <input type="text" id="dnaAllowedTopicsInput" placeholder="e.g. ভারতীয় সংবিধান, মধ্যযুগীয় ভারত, সাধারণ বিজ্ঞান, গণিত ট্রিকস" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500">
+              </div>
+            </div>
+
+            <!-- STEP 4: CONTENT MIX STRATEGY -->
+            <div id="dnaStepContainer4" class="dna-step-panel space-y-4 hidden">
+              <div class="bg-emerald-50/70 border border-emerald-100 rounded-xl p-3.5 text-emerald-900 flex items-start gap-2.5">
+                <i data-lucide="pie-chart" class="w-4 h-4 text-emerald-600 shrink-0 mt-0.5"></i>
+                <div class="leading-relaxed">
+                  <p class="font-bold">ধাপ ৪: কন্টেন্ট বণ্টন ও পোস্টের ভারসাম্য (Content Mix Strategy)</p>
+                  <p class="text-[11px] text-emerald-700">বিভিন্ন ধরনের কন্টেন্টের অনুপাত ঠিক করুন। পাঁচটি বিভাগের মোট যোগফল অবশ্যই ১০০% হতে হবে।</p>
+                </div>
+              </div>
+
+              <!-- Content Mix Sliders/Inputs -->
+              <div class="p-4 bg-slate-50/70 rounded-2xl border border-slate-200/80 space-y-3">
+                <div class="flex items-center justify-between">
+                  <span class="font-bold text-slate-800 text-xs">কন্টেন্ট বিভাগের অনুপাত (মোট ১০০% আবশ্যক)</span>
+                  <span id="dnaMixTotalBadge" class="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                    মোট: ১০০% ✓
+                  </span>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                  <div class="bg-white p-3 rounded-xl border border-slate-200 space-y-1">
+                    <label class="block font-semibold text-slate-700 text-[11px]">📖 Educational (শিক্ষামূলক)</label>
+                    <input type="number" id="dnaMixEduInput" min="0" max="100" value="40" class="dna-mix-input w-full p-1.5 border border-slate-200 rounded-lg text-center font-bold text-indigo-600">
+                  </div>
+                  <div class="bg-white p-3 rounded-xl border border-slate-200 space-y-1">
+                    <label class="block font-semibold text-slate-700 text-[11px]">🤝 Community (কমিউনিটি)</label>
+                    <input type="number" id="dnaMixComInput" min="0" max="100" value="20" class="dna-mix-input w-full p-1.5 border border-slate-200 rounded-lg text-center font-bold text-indigo-600">
+                  </div>
+                  <div class="bg-white p-3 rounded-xl border border-slate-200 space-y-1">
+                    <label class="block font-semibold text-slate-700 text-[11px]">🏆 Authority (বিশেষজ্ঞ)</label>
+                    <input type="number" id="dnaMixAuthInput" min="0" max="100" value="15" class="dna-mix-input w-full p-1.5 border border-slate-200 rounded-lg text-center font-bold text-indigo-600">
+                  </div>
+                  <div class="bg-white p-3 rounded-xl border border-slate-200 space-y-1">
+                    <label class="block font-semibold text-slate-700 text-[11px]">📢 Promo / CTA (প্রচার)</label>
+                    <input type="number" id="dnaMixPromoInput" min="0" max="100" value="15" class="dna-mix-input w-full p-1.5 border border-slate-200 rounded-lg text-center font-bold text-indigo-600">
+                  </div>
+                  <div class="bg-white p-3 rounded-xl border border-slate-200 space-y-1">
+                    <label class="block font-semibold text-slate-700 text-[11px]">⚡ Timely / News (চলতি)</label>
+                    <input type="number" id="dnaMixTimeInput" min="0" max="100" value="10" class="dna-mix-input w-full p-1.5 border border-slate-200 rounded-lg text-center font-bold text-indigo-600">
+                  </div>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                <div>
+                  <label class="block font-bold text-slate-800 mb-1">Max Promo Post Limit %</label>
+                  <input type="number" id="dnaPromoLimitInput" min="0" max="100" value="20" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500 font-medium">
+                  <span class="text-[10px] text-slate-400 mt-0.5 block">প্রচারমূলক পোস্টের সর্বোচ্চ সীমা</span>
+                </div>
+                <div>
+                  <label class="block font-bold text-slate-800 mb-1">Min Caption Chars</label>
+                  <input type="number" id="dnaCaptionMinInput" min="50" max="1000" value="250" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500 font-medium">
+                  <span class="text-[10px] text-slate-400 mt-0.5 block">ন্যূনতম অক্ষর সংখ্যা</span>
+                </div>
+                <div>
+                  <label class="block font-bold text-slate-800 mb-1">Max Caption Chars</label>
+                  <input type="number" id="dnaCaptionMaxInput" min="200" max="5000" value="800" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500 font-medium">
+                  <span class="text-[10px] text-slate-400 mt-0.5 block">সর্বোচ্চ অক্ষর সংখ্যা</span>
+                </div>
+                <div>
+                  <label class="block font-bold text-slate-800 mb-1">Max Emojis / Hashtags</label>
+                  <div class="grid grid-cols-2 gap-2">
+                    <input type="number" id="dnaEmojiLimitInput" min="0" max="15" value="3" placeholder="Emojis" class="p-2 border border-slate-200 rounded-xl text-center">
+                    <input type="number" id="dnaHashtagLimitInput" min="0" max="30" value="5" placeholder="Tags" class="p-2 border border-slate-200 rounded-xl text-center">
+                  </div>
+                  <span class="text-[10px] text-slate-400 mt-0.5 block">ইমোজি ও হ্যাশট্যাগ সীমা</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- STEP 5: SAFETY & BOUNDARIES -->
+            <div id="dnaStepContainer5" class="dna-step-panel space-y-4 hidden">
+              <div class="bg-amber-50/70 border border-amber-100 rounded-xl p-3.5 text-amber-900 flex items-start gap-2.5">
+                <i data-lucide="shield-check" class="w-4 h-4 text-amber-600 shrink-0 mt-0.5"></i>
+                <div class="leading-relaxed">
+                  <p class="font-bold">ধাপ ৫: নিরাপত্তা, উৎস যাচাই ও বিধিনিষেধ (Safety & Boundaries)</p>
+                  <p class="text-[11px] text-amber-700">কোনো ভুল তথ্য, রাজনৈতিক বা বিতর্কিত বিষয় যেন প্রকাশ না পায় তা নিশ্চিত করতে ফিল্টার ও উৎস বাধ্যবাধকতা সেট করুন।</p>
+                </div>
+              </div>
+
+              <div>
+                <label class="block font-bold text-slate-800 mb-1">Blocked Topics / নিষিদ্ধ বিষয় (কমা দিয়ে লিখুন)</label>
+                <input type="text" id="dnaBlockedTopicsInput" placeholder="e.g. gambling, controversial politics, adult content, unverified gossip" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500 font-medium">
+                <span class="text-[10px] text-slate-400 mt-0.5 block">এই শব্দ বা বিষয় থাকলে AI পোস্ট সম্পূর্ণ বাতিল করবে।</span>
+              </div>
+
+              <div>
+                <label class="block font-bold text-slate-800 mb-1">Blocked Claims / নিষিদ্ধ মিথ্যা বা অতিরঞ্জিত দাবি</label>
+                <input type="text" id="dnaBlockedClaimsInput" placeholder="e.g. 100% guarantee pass, overnight fortune, instant cure" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500">
+                <span class="text-[10px] text-slate-400 mt-0.5 block">কোনো বিভ্রান্তিকর বা অবাস্তব প্রতিশ্রুতি দেওয়া নিষিদ্ধ।</span>
+              </div>
+
+              <div class="p-4 bg-slate-50/70 rounded-2xl border border-slate-200/80 space-y-2.5">
+                <span class="font-bold text-slate-800 text-xs block mb-1">Source Verification Policies (উৎস যাচাই নীতি)</span>
+                <label class="flex items-center gap-2 cursor-pointer text-[11px] font-semibold text-slate-700">
+                  <input type="checkbox" id="dnaRequireSourcesNewsCheck" checked class="rounded text-purple-600 w-4 h-4">
+                  <span>Require verified sources for News & Current Affairs (সংবাদের জন্য নির্ভরযোগ্য উৎস লিংক বা উদ্ধৃতি আবশ্যক)</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer text-[11px] font-semibold text-slate-700">
+                  <input type="checkbox" id="dnaRequireSourcesAnnounceCheck" checked class="rounded text-purple-600 w-4 h-4">
+                  <span>Require official source for Announcements & Exam Dates (অফিসিয়াল নোটিশ ছাড়া তারিখ দাবি করা যাবে না)</span>
+                </label>
+                <div class="pt-2 flex items-center gap-3">
+                  <label class="text-[11px] font-bold text-slate-700">Minimum Sources for High-Risk Claims:</label>
+                  <input type="number" id="dnaMinSourcesInput" min="1" max="5" value="2" class="w-16 p-1.5 border border-slate-200 rounded-lg text-center font-bold text-purple-700">
+                </div>
+              </div>
+            </div>
+
+            <!-- STEP 6: PUBLISHING & AUTOMATION PREFERENCES -->
+            <div id="dnaStepContainer6" class="dna-step-panel space-y-4 hidden">
+              <div class="bg-rose-50/70 border border-rose-100 rounded-xl p-3.5 text-rose-900 flex items-start gap-2.5">
+                <i data-lucide="clock" class="w-4 h-4 text-rose-600 shrink-0 mt-0.5"></i>
+                <div class="leading-relaxed">
+                  <p class="font-bold">ধাপ ৬: প্রকাশনা ও স্বয়ংক্রিয় নীতি (Publishing & Automation Preferences)</p>
+                  <p class="text-[11px] text-rose-700">অটো-পাইলট কীভাবে কাজ করবে এবং দৈনিক কতটি পোস্ট করা যাবে তা নিয়ন্ত্রণ করুন।</p>
+                </div>
+              </div>
+
+              <div>
+                <label class="block font-bold text-slate-800 mb-1">Approval Mode / প্রকাশনা অনুমোদন নীতি <span class="text-rose-500">*</span></label>
+                <select id="dnaApprovalModeSelect" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500 font-medium bg-white">
+                  <option value="manual">Manual Approval (সম্পূর্ণ ম্যানুয়াল - প্রতিটি পোস্ট কিউতে জমা থাকবে এবং আপনার অনুমোদনের পর পোস্ট হবে)</option>
+                  <option value="low_risk_auto">Low-Risk Auto (কম ঝুঁকিপূর্ণ শিক্ষামূলক পোস্ট অটো-পোস্ট হবে, সংবাদ বা প্রচার রিভিউতে থাকবে)</option>
+                  <option value="trusted_categories_auto">Trusted Categories Auto (শুধুমাত্র অনুমোদিত ক্যাটাগরি স্বয়ংক্রিয়ভাবে লাইভ হবে)</option>
+                </select>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label class="block font-bold text-slate-800 mb-1">Max Posts Per Day</label>
+                  <input type="number" id="dnaMaxPostsInput" min="1" max="20" value="3" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500 font-bold text-slate-800">
+                  <span class="text-[10px] text-slate-400 mt-0.5 block">দৈনিক সর্বোচ্চ পোস্ট (1-20)</span>
+                </div>
+                <div>
+                  <label class="block font-bold text-slate-800 mb-1">Minimum Post Gap (Mins)</label>
+                  <input type="number" id="dnaMinGapInput" min="30" max="1440" value="180" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500 font-bold text-slate-800">
+                  <span class="text-[10px] text-slate-400 mt-0.5 block">দুটি পোস্টের মধ্যবর্তী বিরতি (মিনিট)</span>
+                </div>
+                <div>
+                  <label class="block font-bold text-slate-800 mb-1">Timezone / টাইমজোন</label>
+                  <input type="text" id="dnaTimezoneInput" value="Asia/Kolkata" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500 font-mono text-xs">
+                  <span class="text-[10px] text-slate-400 mt-0.5 block">e.g. Asia/Kolkata, Asia/Dhaka</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- STEP 7: REVIEW & CONFIRM -->
+            <div id="dnaStepContainer7" class="dna-step-panel space-y-4 hidden">
+              <div class="bg-purple-50/70 border border-purple-100 rounded-xl p-3.5 text-purple-900 flex items-start gap-2.5">
+                <i data-lucide="check-circle" class="w-4 h-4 text-purple-600 shrink-0 mt-0.5"></i>
+                <div class="leading-relaxed">
+                  <p class="font-bold">ধাপ ৭: পর্যালোচনা ও সংরক্ষণ (Review & Confirm)</p>
+                  <p class="text-[11px] text-purple-700">কনফিগারেশন পর্যালোচনা করুন। নিচের লাইভ ভ্যালিডেশন চেক দেখে 'Save Page DNA' বাটনে ক্লিক করে সংরক্ষণ করুন।</p>
+                </div>
+              </div>
+
+              <!-- Live Validation Box -->
+              <div id="dnaValidationBox" class="p-3.5 rounded-xl border bg-slate-50 border-slate-200 flex items-start gap-2.5">
+                <div id="dnaValidationIcon" class="mt-0.5 shrink-0"><i data-lucide="check" class="w-4 h-4 text-emerald-600"></i></div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center justify-between">
+                    <span id="dnaValidationTitle" class="font-bold text-slate-800 text-xs">Validation Passed</span>
+                    <button type="button" id="dnaDryRunBtn" class="text-[10px] text-purple-700 hover:text-purple-900 font-bold underline">Re-check</button>
+                  </div>
+                  <p id="dnaValidationDesc" class="text-[11px] text-slate-500 mt-0.5">Profile meets all required Page DNA criteria.</p>
+                </div>
+              </div>
+
+              <!-- Summary Card Grid -->
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs" id="dnaReviewSummaryGrid">
+                <!-- Injected via JavaScript -->
+              </div>
+
+              <div class="flex items-center justify-between pt-2 border-t border-slate-100">
+                <button type="button" id="dnaResetProfileBtn" class="text-xs font-semibold text-rose-600 hover:text-rose-800 px-3 py-2 rounded-xl hover:bg-rose-50 transition flex items-center gap-1">
+                  <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+                  <span>Reset to Defaults (ডিফল্ট রিসেট)</span>
+                </button>
+                <span class="text-[10px] text-slate-400">রিসেট করলে সব কাস্টম ডিএনএ মুছে ডিফল্ট সেটিং ফিরে আসবে।</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Modal Footer with Navigation Buttons -->
+          <div class="px-6 py-3.5 border-t border-slate-100 bg-slate-50/70 flex items-center justify-between">
+            <div class="flex items-center gap-2 text-[11px] text-slate-400">
+              <i data-lucide="sparkles" class="w-3.5 h-3.5 text-purple-500"></i>
+              <span id="dnaDraftIndicator">Draft auto-saved locally</span>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button type="button" id="dnaPrevStepBtn" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition disabled:opacity-40" disabled>
+                ← Previous (পূর্ববর্তী)
+              </button>
+              <button type="button" id="dnaNextStepBtn" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-xs transition flex items-center gap-1">
+                <span>Next (পরবর্তী) →</span>
+              </button>
+              <button type="button" id="dnaSaveProfileBtn" class="px-6 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-1.5 hidden">
+                <i data-lucide="save" class="w-3.5 h-3.5"></i>
+                <span>Save Page DNA (সংরক্ষণ করুন)</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
