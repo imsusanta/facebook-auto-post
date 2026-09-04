@@ -499,7 +499,7 @@ function calculateOnboardingStatus(profile) {
   if (hasNiche && hasTone && hasPillars && hasAudience) {
     return 'complete';
   }
-  if (hasNiche || hasTone || (Array.isArray(profile.contentPillars) && profile.contentPillars.length > 0)) {
+  if (hasNiche) {
     return 'incomplete';
   }
   return 'not_started';
