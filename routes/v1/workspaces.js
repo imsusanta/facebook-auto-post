@@ -4,9 +4,54 @@ const express = require('express');
 const router = express.Router();
 const workspaceRepository = require('../../repositories/workspace-repository');
 const membershipRepository = require('../../repositories/membership-repository');
+const invitationRepository = require('../../repositories/invitation-repository');
 const { resolveWorkspaceContext, requireWorkspacePermission, generateRequestId } = require('../../middleware/workspace-context');
 
 // --- Global Workspace Endpoints (Authenticated User Scope) ---
+
+router.post('/invitations/accept', async (req, res) => {
+  const requestId = req.headers['x-request-id'] || generateRequestId();
+  const user = req.user;
+
+  if (!user || !user.id) {
+    return res.status(401).json({
+      error: 'AuthRequired',
+      message: 'Authentication required to accept an invitation.',
+      code: 'AUTH_REQUIRED',
+      requestId
+    });
+  }
+
+  const { token } = req.body || {};
+  if (!token || typeof token !== 'string') {
+    return res.status(400).json({
+      error: 'ValidationFailed',
+      message: 'Invitation token is required.',
+      code: 'VALIDATION_FAILED',
+      requestId
+    });
+  }
+
+  try {
+    const membership = await invitationRepository.acceptInvitation({
+      token,
+      userId: user.id
+    });
+
+    return res.status(200).json({
+      success: true,
+      membership,
+      requestId
+    });
+  } catch (err) {
+    return res.status(400).json({
+      error: 'InvitationInvalid',
+      message: err.message,
+      code: 'INVITATION_INVALID',
+      requestId
+    });
+  }
+});
 
 router.post('/', async (req, res) => {
   const requestId = req.headers['x-request-id'] || generateRequestId();
@@ -267,6 +312,122 @@ router.delete(
         error: 'MemberRemovalDenied',
         message: err.message,
         code: 'PERMISSION_DENIED',
+        requestId: req.requestId
+      });
+    }
+  }
+);
+
+// --- Workspace Invitation Endpoints ---
+
+router.post(
+  '/:workspaceId/invitations',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('members:invite'),
+  async (req, res) => {
+    const { workspaceId } = req.params;
+    const { email, role } = req.body || {};
+
+    if (!email || typeof email !== 'string' || !email.includes('@')) {
+      return res.status(400).json({
+        error: 'ValidationFailed',
+        message: 'A valid email address is required.',
+        code: 'VALIDATION_FAILED',
+        requestId: req.requestId
+      });
+    }
+
+    if (!role || typeof role !== 'string') {
+      return res.status(400).json({
+        error: 'ValidationFailed',
+        message: 'A valid role is required.',
+        code: 'VALIDATION_FAILED',
+        requestId: req.requestId
+      });
+    }
+
+    if (role === 'owner') {
+      return res.status(403).json({
+        error: 'InvalidRole',
+        message: 'Invitations cannot grant the owner role.',
+        code: 'INVALID_ROLE',
+        requestId: req.requestId
+      });
+    }
+
+    try {
+      const result = await invitationRepository.createInvitation({
+        workspaceId,
+        email,
+        role,
+        invitedBy: req.user.id
+      });
+
+      return res.status(201).json({
+        success: true,
+        invitation: result.invitation,
+        token: result.token,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return res.status(400).json({
+        error: 'InvitationFailed',
+        message: err.message,
+        code: 'VALIDATION_FAILED',
+        requestId: req.requestId
+      });
+    }
+  }
+);
+
+router.get(
+  '/:workspaceId/invitations',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('members:list'),
+  async (req, res) => {
+    const { workspaceId } = req.params;
+    try {
+      const invitations = await invitationRepository.listByWorkspace({ workspaceId });
+      return res.status(200).json({
+        success: true,
+        invitations,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      console.error(`[InvitationsAPI] Error listing invitations (req ${req.requestId}):`, err.message);
+      return res.status(503).json({
+        error: 'DatabaseUnavailable',
+        message: 'Failed to retrieve workspace invitations.',
+        code: 'DATABASE_UNAVAILABLE',
+        requestId: req.requestId
+      });
+    }
+  }
+);
+
+router.delete(
+  '/:workspaceId/invitations/:invitationId',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('members:invite'),
+  async (req, res) => {
+    const { workspaceId, invitationId } = req.params;
+    try {
+      const revoked = await invitationRepository.revokeInvitation({
+        workspaceId,
+        invitationId
+      });
+
+      return res.status(200).json({
+        success: true,
+        invitation: revoked,
+        message: 'Invitation successfully revoked.',
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return res.status(404).json({
+        error: 'ResourceNotFound',
+        message: 'Invitation not found or already inactive.',
+        code: 'RESOURCE_NOT_FOUND',
         requestId: req.requestId
       });
     }
