@@ -139,7 +139,7 @@ A Page DNA profile is defined as a JSON object adhering to the following schema:
 | `tone` | Array<Enum> | 1 to 5 items: `helpful`, `authoritative`, `encouraging`, `conversational`, `witty`, `inspiring`, `analytical`, `empathetic`, `formal`, `urgent` | `["helpful"]` | Editorial persona attributes. |
 | `audience.locations` | Array<String> | Max 10 items (max 60 chars each) | `["West Bengal"]` | Regional focus. |
 | `audience.knowledgeLevel` | Enum | `beginner`, `intermediate`, `advanced`, `mixed` | `mixed` | Content complexity calibration. |
-| `contentPillars` | Array<Object> | 1 to 8 pillars (each with unique title, weight > 0) | 3 default pillars | Content pillars rotated during generation. |
+| `contentPillars` | Array<Object> | 1 to 8 pillars (each with unique title, unique ID, integer weight 1-100, **weights sum strictly to 100**) | 3 default pillars | Content pillars rotated during generation. Duplicate titles or IDs rejected. |
 | `blockedTopics` | Array<String> | Max 50 items (max 80 chars each) | `[]` | Topics strictly banned by safety policy. |
 | `blockedClaims` | Array<String> | Max 50 items (max 120 chars each) | `[]` | Exact claim phrases forbidden from being asserted. |
 | `hashtagLimit` | Integer | 0 to 15 | `5` | Maximum number of hashtags generated. |
@@ -147,19 +147,19 @@ A Page DNA profile is defined as a JSON object adhering to the following schema:
 | `preferredCaptionLength` | Object | `min`: 100-3000, `max`: 150-6000 (`min <= max`) | `{ min: 300, max: 2000 }` | Character budget for post captions. |
 | `maxPostsPerDay` | Integer | 1 to 20 | `3` | Daily post limit enforced by scheduler. |
 | `minimumPostGapMinutes` | Integer | 15 to 1440 | `180` | Cooldown period between auto-published posts. |
-| `contentMix` | Object | 5 categories, values 0-100, **sum strictly 100** | `{ educational: 50, community: 20, authority: 15, timely: 10, promotional: 5 }` | Target volume distribution across post types. |
-| `approvalMode` | Enum | `manual`, `low_risk_auto`, `trusted_categories_auto` | `manual` | Governance policy for unattended AutoPilot. |
+| `contentMix` | Object | 5 categories, values 0-100, **sum strictly 100**, promotional <= `promotionalPostLimitPercent` | `{ educational: 50, community: 20, authority: 15, timely: 10, promotional: 5 }` | Target volume distribution across post types. |
+| `approvalMode` | Enum | `manual`, `low_risk_auto`, `trusted_categories_auto` | `manual` | Governance policy for unattended AutoPilot. All built-in presets default to `manual`. |
 
 ---
 
 ## 4. REST API Specification
 
-All Page DNA endpoints require session authentication (signed `connect.sid` cookie), anti-CSRF verification (`X-CSRF-Token` header for mutation requests), and rate limiting.
+All Page DNA endpoints require session authentication (signed HttpOnly `auth_session` cookie), anti-CSRF verification (`X-CSRF-Token` header for mutation requests), and rate limiting.
 
 ### 4.1. Get Content Profile
 - **Method:** `GET`
 - **Path:** `/api/facebook/pages/:id/content-profile`
-- **Headers:** `Cookie: connect.sid=...`
+- **Headers:** `Cookie: auth_session=...`
 - **Response `200 OK`:**
 ```json
 {
@@ -176,14 +176,14 @@ All Page DNA endpoints require session authentication (signed `connect.sid` cook
 
 ---
 
-### 4.2. Update Content Profile
+### 4.2. Update Content Profile (Complete Replacement)
 - **Method:** `PUT`
 - **Path:** `/api/facebook/pages/:id/content-profile`
 - **Headers:**
-  - `Cookie: connect.sid=...`
+  - `Cookie: auth_session=...`
   - `X-CSRF-Token: <csrf_token>`
   - `Content-Type: application/json`
-- **Body:** Partial or complete content profile object.
+- **Body:** Complete content profile object adhering to schemaVersion 1 (`requireFullProfile: true`). Partial profile updates are rejected.
 - **Response `200 OK`:**
 ```json
 {
@@ -193,21 +193,23 @@ All Page DNA endpoints require session authentication (signed `connect.sid` cook
   "contentProfile": { ... }
 }
 ```
-- **Response `400 Bad Request` (Validation Failure):**
+- **Response `400 Bad Request` (Validation Failure or Partial Profile):**
 ```json
 {
   "success": false,
   "error": "Invalid content profile data.",
+  "code": "INVALID_CONTENT_PROFILE",
   "errors": [
     {
-      "field": "contentMix",
-      "code": "SUM_NOT_100",
-      "message": "Content mix percentages must sum to 100 (current sum: 110)."
+      "field": "contentPillars",
+      "code": "PILLAR_WEIGHTS_SUM_NOT_100",
+      "message": "Content pillar weights must sum to exactly 100 (current sum: 110)."
     }
   ]
 }
 ```
 - **Error Codes:**
+  - `400 Bad Request`: Validation failure or incomplete profile payload (`code: 'INVALID_CONTENT_PROFILE'`).
   - `401 Unauthorized`: Missing authentication.
   - `403 Forbidden`: Missing or mismatched CSRF token.
   - `404 Not Found`: Page does not exist.
@@ -268,3 +270,4 @@ All Page DNA endpoints require session authentication (signed `connect.sid` cook
 3. **Strict Whitelist Normalization**: Any unapproved object fields are rejected during validation and dropped during normalization.
 4. **Control Character Sanitization**: User-supplied text strings are sanitized to eliminate non-printable ASCII control characters (`\x00` - `\x1F` except standard newlines).
 5. **Rate Limiting**: Mutations and reset requests are throttled via an isolated in-memory sliding window rate limiter (`profileLimiter`).
+6. **Source Verification & Factual Truth Boundaries**: Source policy controls require verifiable links for official announcements. URL reachability does not prove factual truth or accuracy; content safety rules hold automated publishing to manual operator review whenever unverified or high-risk claims are detected.

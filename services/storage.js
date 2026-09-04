@@ -226,6 +226,59 @@ function writeJsonFile(filePath, data) {
   }
 }
 
+/**
+ * Clean up old backups keeping only the newest N (PAGE_DNA_BACKUP_RETENTION)
+ * Rejects symlinks to avoid directory traversal
+ */
+function pruneOldBackups(dataDir, retentionCount = null) {
+  try {
+    const rawLimit = retentionCount !== null ? retentionCount : process.env.PAGE_DNA_BACKUP_RETENTION;
+    const retention = Math.max(1, parseInt(rawLimit || 5, 10) || 5);
+    if (!fs.existsSync(dataDir)) return [];
+
+    const files = fs.readdirSync(dataDir);
+    const backupRegex = /^settings\.backup\.\d+\.json$/;
+
+    const backupFiles = [];
+    for (const file of files) {
+      if (!backupRegex.test(file)) continue;
+      const fullPath = path.join(dataDir, file);
+      try {
+        const lstat = fs.lstatSync(fullPath);
+        // Reject symlinks to prevent traversal / deletion of outside files
+        if (lstat.isSymbolicLink()) {
+          console.warn(`[Backup Prune] Skipping symlinked backup: ${file}`);
+          continue;
+        }
+        if (!lstat.isFile()) continue;
+        backupFiles.push({ file, fullPath, mtimeMs: lstat.mtimeMs });
+      } catch {
+        // Skip unreadable
+      }
+    }
+
+    // Sort descending by mtime (newest first)
+    backupFiles.sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+    const deleted = [];
+    if (backupFiles.length > retention) {
+      const toDelete = backupFiles.slice(retention);
+      for (const b of toDelete) {
+        try {
+          fs.unlinkSync(b.fullPath);
+          deleted.push(b.file);
+        } catch (unlinkErr) {
+          console.warn(`[Backup Prune] Could not remove old backup ${b.file}:`, unlinkErr.message);
+        }
+      }
+    }
+    return deleted;
+  } catch (err) {
+    console.warn('[Backup Prune] Error during backup retention cleanup:', err.message);
+    return [];
+  }
+}
+
 const DEFAULT_SYSTEM_PROMPT = `ব্যবহারকারীর দেওয়া টপিক ও নির্দেশনা অনুযায়ী আকর্ষণীয়, তথ্যবহুল এবং সম্পূর্ণ মৌলিক ফেসবুক পোস্ট তৈরি করো। বিষয়বস্তুর সাথে মানানসই সুন্দর বাংলা ভাষা, প্রাসঙ্গিক ইমোজি এবং উপযুক্ত ট্রেন্ডিং হ্যাশট্যাগ ব্যবহার করবে।`;
 
 // Storage helpers
@@ -571,8 +624,8 @@ const storage = {
     return page.contentProfile || createDefaultContentProfile();
   },
 
-  savePageProfile(pageId, profileInput) {
-    const validation = validateContentProfile(profileInput);
+  savePageProfile(pageId, profileInput, options = { requireFullProfile: true }) {
+    const validation = validateContentProfile(profileInput, options);
     if (!validation.valid) {
       return { success: false, errors: validation.errors };
     }
@@ -609,33 +662,83 @@ const storage = {
     return updated;
   },
 
+  pruneOldBackups(retentionCount) {
+    return pruneOldBackups(DATA_DIR, retentionCount);
+  },
+
   migrateAllPages(options = {}) {
-    const { createBackup = true } = options;
+    const { apply = false, createBackup = true } = options;
     const s = this.getSettings();
     if (!Array.isArray(s.pages) || s.pages.length === 0) {
-      return { success: true, migratedCount: 0, pages: [] };
+      return { success: true, migratedCount: 0, totalPages: 0, pages: [] };
     }
 
+    // Dry-run mode by default
+    if (!apply) {
+      let wouldMigrateCount = 0;
+      const previewPages = s.pages.map(page => {
+        const needsMigration = !page.contentProfile;
+        if (needsMigration) wouldMigrateCount++;
+        return {
+          id: page.id,
+          name: page.name,
+          needsMigration
+        };
+      });
+      return {
+        success: true,
+        dryRun: true,
+        migratedCount: wouldMigrateCount,
+        totalPages: s.pages.length,
+        pages: previewPages
+      };
+    }
+
+    // Apply mode: create backup first
     if (createBackup && fs.existsSync(SETTINGS_FILE)) {
       const backupPath = path.join(DATA_DIR, `settings.backup.${Date.now()}.json`);
       try {
         fs.copyFileSync(SETTINGS_FILE, backupPath);
-        fs.chmodSync(backupPath, 0o600);
+        try { fs.chmodSync(backupPath, 0o600); } catch {}
+        pruneOldBackups(DATA_DIR);
       } catch (backupErr) {
-        console.warn('[Page Migration] Could not create backup file:', backupErr.message);
+        console.error('[Page Migration] Could not create backup file. Aborting migration:', backupErr.message);
+        return {
+          success: false,
+          error: `Backup creation failed: ${backupErr.message}. Aborting migration to protect data.`
+        };
       }
     }
 
     let migratedCount = 0;
+    const updatedPages = [];
     s.pages = s.pages.map(page => {
       const hadProfile = !!page.contentProfile;
       const migrated = migrateContentProfile(page);
       if (!hadProfile) migratedCount++;
+      updatedPages.push({ id: page.id, name: page.name });
       return migrated;
     });
 
-    writeJsonFile(SETTINGS_FILE, s);
-    return { success: true, migratedCount, totalPages: s.pages.length };
+    // Atomic write to SETTINGS_FILE with 0600 permissions
+    const tmpFile = `${SETTINGS_FILE}.tmp.${Date.now()}`;
+    try {
+      fs.writeFileSync(tmpFile, JSON.stringify(s, null, 2), { encoding: 'utf8', mode: 0o600 });
+      try { fs.chmodSync(tmpFile, 0o600); } catch {}
+      fs.renameSync(tmpFile, SETTINGS_FILE);
+      try { fs.chmodSync(SETTINGS_FILE, 0o600); } catch {}
+    } catch (writeErr) {
+      try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
+      return { success: false, error: `Failed writing settings: ${writeErr.message}` };
+    }
+
+    return {
+      success: true,
+      dryRun: false,
+      migratedCount,
+      totalPages: s.pages.length,
+      pages: updatedPages
+    };
   },
 
   getCategories() {

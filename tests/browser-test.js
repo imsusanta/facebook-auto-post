@@ -220,6 +220,15 @@ async function runBrowserTests(options = {}) {
 
     // Ensure default admin user is initialized in fixture
     storage.initDefaultUsers();
+    storage.addConnectedPage({
+      id: 'browser_page_dna_1',
+      name: 'Bengal Career Hub',
+      category: 'Education',
+      accessToken: 'EAATestTokenForBrowserFixture',
+      isActive: true,
+      onboardingStatus: 'not_started'
+    });
+    storage.saveSettings({ activePageId: 'browser_page_dna_1' });
 
     // 2. Start Express application
     const app = createApp();
@@ -250,15 +259,37 @@ async function runBrowserTests(options = {}) {
     const nonLoopbackRequests = [];
     const requestedOrigins = new Set();
     const failedRequests = [];
+    const mutatingRequests = [];
+    const mutatingResponses = [];
 
     await cdp.send('Network.enable');
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
     await cdp.send('Console.enable');
 
+    // Auto-accept alert and confirm dialogs so modal actions do not hang headless Chrome
+    cdp.on('Page.javascriptDialogOpening', async () => {
+      try {
+        await cdp.send('Page.handleJavaScriptDialog', { accept: true });
+      } catch {
+        // ignore
+      }
+    });
+
     cdp.on('Network.requestWillBeSent', (params) => {
       const reqUrl = params.request.url;
+      const req = params.request;
+      const method = (req.method || 'GET').toUpperCase();
       browserRequests.push(reqUrl);
+      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+        mutatingRequests.push({
+          requestId: params.requestId,
+          url: reqUrl,
+          method,
+          headers: req.headers || {},
+          postData: req.postData
+        });
+      }
       try {
         const parsed = new URL(reqUrl);
         if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
@@ -277,6 +308,14 @@ async function runBrowserTests(options = {}) {
       if (!params.canceled) {
         failedRequests.push({ requestId: params.requestId, errorText: params.errorText });
       }
+    });
+
+    cdp.on('Network.responseReceived', (params) => {
+      mutatingResponses.push({
+        requestId: params.requestId,
+        url: params.response.url,
+        status: params.response.status
+      });
     });
 
     cdp.on('Runtime.consoleAPICalled', (params) => {
@@ -384,6 +423,9 @@ async function runBrowserTests(options = {}) {
 
     assert('Login successfully closes auth modal and enters dashboard', loginSucceeded.passed === true, loginSucceeded.error);
 
+    // Auto-resolve modal dialogs non-blockingly
+    await cdp.evaluate('window.confirm = () => true; window.alert = () => {};');
+
     // Assertion 8: Cookie Auth State
     const hasAuthCookie = await cdp.evaluate('document.cookie.includes("auth_session=")');
     // HttpOnly cookies cannot be read from document.cookie, which is the secure expected behavior
@@ -402,7 +444,7 @@ async function runBrowserTests(options = {}) {
       'const modal = document.getElementById("pageDnaModal");' +
       'return !!modal && modal.classList.contains("hidden");' +
     '})()');
-    assert('Page DNA modal is present in DOM and starts hidden', dnaModalInitial === true, 'pageDnaModal initial state');
+    assert('Journey 1: Page DNA modal is present in DOM and starts hidden', dnaModalInitial === true, 'pageDnaModal initial state');
 
     // Assertion 10c: Open Page DNA Modal via studio button and wait for async fetch
     const openDnaModal = await cdp.evaluate('new Promise((resolve) => {' +
@@ -414,7 +456,7 @@ async function runBrowserTests(options = {}) {
         'const modal = document.getElementById("pageDnaModal");' +
         'if (modal && !modal.classList.contains("hidden")) {' +
           'clearInterval(interval);' +
-          'return resolve({ success: true });' +
+          'return resolve({ success: true, pageId: document.getElementById("dnaCurrentPageId")?.value });' +
         '}' +
         'if (Date.now() - start > 4000) {' +
           'clearInterval(interval);' +
@@ -422,7 +464,7 @@ async function runBrowserTests(options = {}) {
         '}' +
       '}, 50);' +
     '})');
-    assert('Opening Page DNA modal displays the 7-step wizard', openDnaModal.success === true, openDnaModal.reason);
+    assert('Journey 1: Opening Page DNA modal displays the wizard for active page', openDnaModal.success === true && openDnaModal.pageId === 'browser_page_dna_1', openDnaModal.reason);
 
     // Assertion 10d: Page DNA Step Navigation (Step 1 -> Step 2 -> Step 7)
     const stepNavResult = await cdp.evaluate('(() => {' +
@@ -439,28 +481,291 @@ async function runBrowserTests(options = {}) {
       'const step7Active = step7El && !step7El.classList.contains("hidden");' +
       'return { success: step2Active && step7Active };' +
     '})()');
-    assert('Page DNA step navigation activates target wizard steps', stepNavResult.success === true, stepNavResult.reason);
+    assert('Journey 1b: Page DNA step navigation activates target wizard steps', stepNavResult.success === true, stepNavResult.reason);
 
-    // Assertion 10e: Page DNA Presets apply correctly
-    const presetResult = await cdp.evaluate('(() => {' +
+    // Journey Step 2 & 3: Apply Exam Preset & Assert fields populated
+    const applyPresetRes = await cdp.evaluate('(() => {' +
       'const examPresetBtn = document.getElementById("dnaPresetExamBtn");' +
       'if (!examPresetBtn) return { success: false, reason: "dnaPresetExamBtn not found" };' +
       'examPresetBtn.click();' +
-      'const nicheInput = document.getElementById("dnaNicheInput");' +
-      'const val = nicheInput ? nicheInput.value : "";' +
-      'return { success: val.includes("Govt Exam") || val.includes("চাকরি প্রস্তুতি"), value: val };' +
+      'const niche = document.getElementById("dnaNicheInput")?.value || "";' +
+      'const primaryGoal = document.getElementById("dnaPrimaryGoalSelect")?.value || "";' +
+      'const knowledgeLevel = document.getElementById("dnaKnowledgeLevelSelect")?.value || "";' +
+      'const language = document.getElementById("dnaLanguageSelect")?.value || "";' +
+      'const rows = document.querySelectorAll("#dnaPillarsList .pillar-row").length;' +
+      'const valid = niche.length > 0 && primaryGoal === "education" && knowledgeLevel === "intermediate" && language === "bn" && rows === 4;' +
+      'return { success: valid, niche, primaryGoal, knowledgeLevel, language, rows };' +
     '})()');
-    assert('Page DNA exam preset populates niche and audience fields', presetResult.success === true, `Preset niche: ${presetResult.value}`);
+    assert('Journey 2-3: Exam preset populates niche, goals, knowledge level, language, and 4 pillars', applyPresetRes.success === true, JSON.stringify(applyPresetRes));
 
-    // Assertion 10f: Close Page DNA Modal
-    const closeDnaResult = await cdp.evaluate('(() => {' +
-      'const closeBtn = document.getElementById("closePageDnaModalBtn");' +
-      'if (!closeBtn) return { success: false, reason: "closePageDnaModalBtn not found" };' +
-      'closeBtn.click();' +
-      'const modal = document.getElementById("pageDnaModal");' +
-      'return { success: modal && modal.classList.contains("hidden") };' +
+    // Journey Step 4: Modify pillar weights to 40 / 25 / 25 / 10 and verify live badge
+    const modifyPillarRes = await cdp.evaluate('(() => {' +
+      'const tab3 = document.querySelector(".dna-step-tab[data-step=\\"3\\"]");' +
+      'if (tab3) tab3.click();' +
+      'const weightInputs = document.querySelectorAll(".pillar-weight");' +
+      'if (weightInputs.length < 4) return { success: false, reason: "Expected at least 4 pillar weight inputs" };' +
+      'weightInputs[0].value = 40;' +
+      'weightInputs[0].dispatchEvent(new Event("input", { bubbles: true }));' +
+      'weightInputs[1].value = 25;' +
+      'weightInputs[1].dispatchEvent(new Event("input", { bubbles: true }));' +
+      'const badge = document.getElementById("dnaPillarTotalBadge");' +
+      'const badgeText = badge ? badge.textContent : "";' +
+      'const isEmerald = badge && badge.className.includes("emerald");' +
+      'const hasSum100 = badgeText.includes("১০০%") || badgeText.includes("100%");' +
+      'return { success: hasSum100 && isEmerald, badgeText, val0: weightInputs[0].value, val1: weightInputs[1].value };' +
     '})()');
-    assert('Closing Page DNA modal restores hidden state', closeDnaResult.success === true, closeDnaResult.reason);
+    assert('Journey 4: Live pillar total badge reflects modified weights summing to 100%', modifyPillarRes.success === true, JSON.stringify(modifyPillarRes));
+
+    // Journey Step 5 & 6: Navigate to review, trigger save, intercept PUT request with CSRF
+    const mutatingCountBeforeSave = mutatingRequests.length;
+    const saveProfileRes = await cdp.evaluate('new Promise((resolve) => {' +
+      'const tab7 = document.querySelector(".dna-step-tab[data-step=\\"7\\"]");' +
+      'if (!tab7) return resolve({ success: false, reason: "Step 7 tab not found" });' +
+      'tab7.click();' +
+      'const saveBtn = document.getElementById("dnaSaveProfileBtn");' +
+      'if (!saveBtn) return resolve({ success: false, reason: "dnaSaveProfileBtn not found" });' +
+      'saveBtn.click();' +
+      'const start = Date.now();' +
+      'const interval = setInterval(() => {' +
+        'const modal = document.getElementById("pageDnaModal");' +
+        'if (modal && modal.classList.contains("hidden")) {' +
+          'clearInterval(interval);' +
+          'return resolve({ success: true });' +
+        '}' +
+        'if (Date.now() - start > 5000) {' +
+          'clearInterval(interval);' +
+          'return resolve({ success: false, reason: "Timeout waiting for profile save completion" });' +
+        '}' +
+      '}, 50);' +
+    '})');
+    assert('Journey 5: Saving Page DNA closes modal after successful update', saveProfileRes.success === true, saveProfileRes.reason);
+
+    // Assert CDP intercepted PUT request
+    const putRequest = mutatingRequests.slice(mutatingCountBeforeSave).find(r => r.method === 'PUT' && r.url.includes('/content-profile'));
+    const hasPutReq = !!putRequest;
+    const csrfHeader = putRequest ? (putRequest.headers['X-CSRF-Token'] || putRequest.headers['x-csrf-token']) : null;
+    let parsedPutPayload = null;
+    try {
+      if (putRequest && putRequest.postData) parsedPutPayload = JSON.parse(putRequest.postData);
+    } catch {}
+    const isPutPayloadComplete = parsedPutPayload &&
+      parsedPutPayload.schemaVersion === 1 &&
+      typeof parsedPutPayload.niche === 'string' &&
+      Array.isArray(parsedPutPayload.contentPillars) &&
+      parsedPutPayload.contentPillars.length === 4 &&
+      parsedPutPayload.contentPillars[0].weight === 40;
+
+    assert('Journey 6: Intercepted PUT request contains valid X-CSRF-Token and complete payload',
+      hasPutReq && typeof csrfHeader === 'string' && csrfHeader.length >= 16 && isPutPayloadComplete,
+      `PUT found: ${hasPutReq}, CSRF: ${csrfHeader ? csrfHeader.substring(0, 8) + '...' : 'none'}, Complete: ${isPutPayloadComplete}`
+    );
+
+    // Journey Step 7: Reopen modal and verify persisted profile values
+    const reopenRes = await cdp.evaluate('new Promise((resolve) => {' +
+      'const btn = document.getElementById("studioOpenPageDnaBtn");' +
+      'if (!btn) return resolve({ success: false, reason: "studioOpenPageDnaBtn not found" });' +
+      'btn.click();' +
+      'const start = Date.now();' +
+      'const interval = setInterval(() => {' +
+        'const modal = document.getElementById("pageDnaModal");' +
+        'const niche = document.getElementById("dnaNicheInput")?.value || "";' +
+        'if (modal && !modal.classList.contains("hidden") && niche.length > 0) {' +
+          'clearInterval(interval);' +
+          'const weightInputs = document.querySelectorAll(".pillar-weight");' +
+          'const p0Weight = weightInputs[0] ? Number(weightInputs[0].value) : 0;' +
+          'return resolve({ success: true, niche, p0Weight });' +
+        '}' +
+        'if (Date.now() - start > 4000) {' +
+          'clearInterval(interval);' +
+          'return resolve({ success: false, reason: "Timeout waiting for modal reload" });' +
+        '}' +
+      '}, 50);' +
+    '})');
+    assert('Journey 7: Reopened modal accurately renders persisted niche and modified pillar weights (40%)',
+      reopenRes.success === true && (reopenRes.niche.includes('Govt Exam') || reopenRes.niche.includes('চাকরি প্রস্তুতি')) && reopenRes.p0Weight === 40,
+      JSON.stringify(reopenRes)
+    );
+
+    // Journey Step 8: Edit fields again, save via UI
+    const editAgainRes = await cdp.evaluate('new Promise((resolve) => {' +
+      'const nicheInput = document.getElementById("dnaNicheInput");' +
+      'if (!nicheInput) return resolve({ success: false, reason: "dnaNicheInput not found" });' +
+      'nicheInput.value = "Updated WB Govt Exam Preparation & Quiz";' +
+      'nicheInput.dispatchEvent(new Event("input", { bubbles: true }));' +
+      'const tab7 = document.querySelector(".dna-step-tab[data-step=\\"7\\"]");' +
+      'if (tab7) tab7.click();' +
+      'const saveBtn = document.getElementById("dnaSaveProfileBtn");' +
+      'if (!saveBtn) return resolve({ success: false, reason: "dnaSaveProfileBtn not found" });' +
+      'saveBtn.click();' +
+      'const start = Date.now();' +
+      'const interval = setInterval(() => {' +
+        'const modal = document.getElementById("pageDnaModal");' +
+        'if (modal && modal.classList.contains("hidden")) {' +
+          'clearInterval(interval);' +
+          'return resolve({ success: true });' +
+        '}' +
+        'if (Date.now() - start > 5000) {' +
+          'clearInterval(interval);' +
+          'return resolve({ success: false, reason: "Timeout waiting for second save completion" });' +
+        '}' +
+      '}, 50);' +
+    '})');
+    assert('Journey 8: Second edit saved successfully via UI', editAgainRes.success === true, editAgainRes.reason);
+
+    // Journey Step 9: Reopen to verify second persistence
+    const secondPersistenceRes = await cdp.evaluate('new Promise((resolve) => {' +
+      'const btn = document.getElementById("studioOpenPageDnaBtn");' +
+      'if (!btn) return resolve({ success: false, reason: "studioOpenPageDnaBtn not found" });' +
+      'btn.click();' +
+      'const start = Date.now();' +
+      'const interval = setInterval(() => {' +
+        'const modal = document.getElementById("pageDnaModal");' +
+        'const niche = document.getElementById("dnaNicheInput")?.value || "";' +
+        'if (modal && !modal.classList.contains("hidden") && niche === "Updated WB Govt Exam Preparation & Quiz") {' +
+          'clearInterval(interval);' +
+          'return resolve({ success: true, niche });' +
+        '}' +
+        'if (Date.now() - start > 4000) {' +
+          'clearInterval(interval);' +
+          'return resolve({ success: false, reason: "Timeout waiting for second persistence verification", niche });' +
+        '}' +
+      '}, 50);' +
+    '})');
+    assert('Journey 9: Second edit persists correctly upon reopening modal',
+      secondPersistenceRes.success === true,
+      `Niche value: ${secondPersistenceRes.niche}`
+    );
+
+    // Journey Step 10 & 11: Reset profile via UI and assert reset to not_started
+    const resetRes = await cdp.evaluate('new Promise((resolve) => {' +
+      'const tab7 = document.querySelector(".dna-step-tab[data-step=\\"7\\"]");' +
+      'if (tab7) tab7.click();' +
+      'const resetBtn = document.getElementById("dnaResetProfileBtn");' +
+      'if (!resetBtn) return resolve({ success: false, reason: "dnaResetProfileBtn not found" });' +
+      'resetBtn.click();' +
+      'const start = Date.now();' +
+      'const interval = setInterval(() => {' +
+        'const badge = document.getElementById("dnaModalStatusBadge");' +
+        'const niche = document.getElementById("dnaNicheInput")?.value || "";' +
+        'if (badge && badge.textContent.includes("Incomplete") && niche !== "Updated WB Govt Exam Preparation & Quiz") {' +
+          'clearInterval(interval);' +
+          'return resolve({ success: true, niche, badgeText: badge.textContent });' +
+        '}' +
+        'if (Date.now() - start > 4000) {' +
+          'clearInterval(interval);' +
+          'return resolve({ success: false, reason: "Timeout waiting for reset", badgeText: badge?.textContent, niche });' +
+        '}' +
+      '}, 50);' +
+    '})');
+    assert('Journey 10-11: Resetting profile with operator confirmation clears inputs and restores not_started state',
+      resetRes.success === true,
+      resetRes.reason || `Niche: ${resetRes.niche}, Badge: ${resetRes.badgeText}`
+    );
+
+    // Close modal
+    await cdp.evaluate('document.getElementById("closePageDnaModalBtn")?.click()');
+
+    // Journey Step 12-14: Inject stored XSS test vectors and verify text-escaping / zero script execution
+    console.log('[Browser Test] Testing stored XSS immunity across Page DNA UI and Accounts view...');
+    const xssPayloads = {
+      pageName: 'Bengal Hub <img src=x onerror="window.__xssTriggered=true">',
+      niche: '<svg onload="window.__xssTriggered=true">',
+      pillarTitle: '</span><script>window.__xssTriggered=true</script>',
+      pillarDesc: '"><iframe src="javascript:window.__xssTriggered=true"></iframe>'
+    };
+
+    // Update storage directly with the XSS payload for the connected page
+    storage.addConnectedPage({
+      id: 'browser_page_dna_1',
+      name: xssPayloads.pageName,
+      category: 'Education',
+      accessToken: 'EAATestTokenForBrowserFixture',
+      isActive: true,
+      onboardingStatus: 'complete',
+      contentProfile: {
+        schemaVersion: 1,
+        niche: xssPayloads.niche,
+        nicheDescription: 'XSS safety audit test description',
+        primaryGoal: 'education',
+        secondaryGoals: [],
+        language: 'bn',
+        languageStyle: 'Standard',
+        tone: ['helpful'],
+        audience: { locations: ['Kolkata'], professions: [], interests: [], knowledgeLevel: 'general' },
+        contentPillars: [
+          {
+            id: 'pillar_xss_1',
+            title: xssPayloads.pillarTitle,
+            description: xssPayloads.pillarDesc,
+            targetAudienceSegment: 'All',
+            weight: 100
+          }
+        ],
+        productsOrServices: [],
+        allowedTopics: [],
+        blockedTopics: [],
+        blockedClaims: [],
+        preferredFormats: ['tips'],
+        ctaStyle: 'none',
+        hashtagStyle: 'none',
+        hashtagLimit: 3,
+        emojiLimit: 2,
+        preferredCaptionLength: { min: 50, max: 500 },
+        timezone: 'Asia/Kolkata',
+        maxPostsPerDay: 2,
+        minimumPostGapMinutes: 60,
+        promotionalPostLimitPercent: 10,
+        contentMix: { educational: 100, community: 0, authority: 0, promotional: 0, timely: 0 },
+        approvalMode: 'manual'
+      }
+    });
+
+    // Switch to accounts view and open DNA modal to verify XSS rendering immunity
+    const xssAuditResult = await cdp.evaluate('new Promise((resolve) => {' +
+      'window.__xssTriggered = false;' +
+      'const accountsNav = document.querySelector(\'[data-nav="accounts"]\');' +
+      'if (accountsNav) accountsNav.click();' +
+      'setTimeout(() => {' +
+        'const openBtn = document.getElementById("studioOpenPageDnaBtn");' +
+        'if (openBtn) openBtn.click();' +
+        'setTimeout(() => {' +
+          'const tab7 = document.querySelector(\'.dna-step-tab[data-step="7"]\');' +
+          'if (tab7) tab7.click();' +
+          'setTimeout(() => {' +
+            'const badImg = document.querySelectorAll(\'img[src="x"]\').length;' +
+            'const badSvg = document.querySelectorAll(\'svg[onload]\').length;' +
+            'const badIframe = document.querySelectorAll(\'iframe\').length;' +
+            'const badScript = Array.from(document.querySelectorAll(\'script\')).some(s => s.textContent.includes(\'__xssTriggered\'));' +
+            'document.getElementById("closePageDnaModalBtn")?.click();' +
+            'resolve({' +
+              'xssTriggered: window.__xssTriggered,' +
+              'badImg,' +
+              'badSvg,' +
+              'badIframe,' +
+              'badScript' +
+            '});' +
+          '}, 400);' +
+        '}, 500);' +
+      '}, 400);' +
+    '})');
+
+    assert('Journey 12-14: Zero stored XSS payloads executed (window.__xssTriggered is false)',
+      xssAuditResult.xssTriggered === false,
+      `xssTriggered: ${xssAuditResult.xssTriggered}`
+    );
+    assert('Journey 12-14: Zero malicious unescaped elements injected into DOM',
+      xssAuditResult.badImg === 0 && xssAuditResult.badSvg === 0 && xssAuditResult.badIframe === 0 && xssAuditResult.badScript === false,
+      JSON.stringify(xssAuditResult)
+    );
+
+    // Verify escapeHtml utility directly
+    const escapeHtmlTest = await cdp.evaluate('(() => {' +
+      'if (typeof escapeHtml !== "function") return false;' +
+      'const raw = "<img src=\\"x\\" onerror=\\"alert(1)\\"> & `test`";' +
+      'const enc = escapeHtml(raw);' +
+      'return enc === "&lt;img src=&quot;x&quot; onerror=&quot;alert(1)&quot;&gt; &amp; &#096;test&#096;";' +
+    '})()');
+    assert('DOM XSS: escapeHtml encodes &, <, >, ", \', and ` to safe HTML entities', escapeHtmlTest === true, `escapeHtml result: ${escapeHtmlTest}`);
 
     // Assertion 11: Zero secrets stored in client-side Web Storage or DOM
     const storageAudit = await cdp.evaluate('(() => {' +

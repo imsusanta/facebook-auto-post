@@ -1697,10 +1697,14 @@
                 <div>
                   <label class="block font-bold text-slate-800 mb-1">Primary Goal / মূল উদ্দেশ্য <span class="text-rose-500">*</span></label>
                   <select id="dnaPrimaryGoalSelect" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-purple-500 font-medium bg-white">
-                    <option value="engagement">Engagement (লাইক, কমেন্ট ও মিথস্ক্রিয়া)</option>
-                    <option value="reach">Reach (সর্বোচ্চ মানুষের কাছে পৌঁছানো)</option>
+                    <option value="education">Education (শিক্ষা ও তথ্য প্রদান)</option>
                     <option value="authority">Authority (বিশেষজ্ঞ ও নির্ভরযোগ্য ভাবমূর্তি)</option>
                     <option value="community">Community (নিবেদিত অনুসারী তৈরি)</option>
+                    <option value="entertainment">Entertainment (বিনোদন ও আনন্দদায়ক)</option>
+                    <option value="engagement">Engagement (লাইক, কমেন্ট ও মিথস্ক্রিয়া)</option>
+                    <option value="brand_awareness">Brand Awareness (ব্র্যান্ড পরিচিতি)</option>
+                    <option value="reach">Reach (সর্বোচ্চ মানুষের কাছে পৌঁছানো)</option>
+                    <option value="lead_generation">Lead Generation (গ্রাহক অনুসন্ধান)</option>
                     <option value="leads">Leads (শিক্ষার্থী বা গ্রাহক সংগ্রহ)</option>
                     <option value="sales">Sales (কোর্স বা পণ্য বিক্রয়)</option>
                   </select>
@@ -1728,6 +1732,7 @@
                     <option value="beginner">Beginner (প্রাথমিক শিক্ষার্থী)</option>
                     <option value="intermediate">Intermediate (মাঝারি পর্যায়ের)</option>
                     <option value="advanced">Advanced (উন্নত/অভিজ্ঞ)</option>
+                    <option value="mixed">Mixed (সকল স্তরের পাঠক)</option>
                   </select>
                 </div>
               </div>
@@ -1806,6 +1811,18 @@
                     <input type="checkbox" value="formal" class="dna-tone-cb rounded text-purple-600">
                     <span class="text-[11px] font-medium">Formal (আনুষ্ঠানিক)</span>
                   </label>
+                  <label class="flex items-center gap-1.5 p-2 rounded-xl border border-slate-200 hover:border-purple-300 cursor-pointer bg-white">
+                    <input type="checkbox" value="encouraging" class="dna-tone-cb rounded text-purple-600">
+                    <span class="text-[11px] font-medium">Encouraging (উৎসাহব্যঞ্জক)</span>
+                  </label>
+                  <label class="flex items-center gap-1.5 p-2 rounded-xl border border-slate-200 hover:border-purple-300 cursor-pointer bg-white">
+                    <input type="checkbox" value="witty" class="dna-tone-cb rounded text-purple-600">
+                    <span class="text-[11px] font-medium">Witty (চতুর/বুদ্ধিদীপ্ত)</span>
+                  </label>
+                  <label class="flex items-center gap-1.5 p-2 rounded-xl border border-slate-200 hover:border-purple-300 cursor-pointer bg-white">
+                    <input type="checkbox" value="urgent" class="dna-tone-cb rounded text-purple-600">
+                    <span class="text-[11px] font-medium">Urgent (জরুরি)</span>
+                  </label>
                 </div>
               </div>
 
@@ -1827,6 +1844,8 @@
                     <label class="flex items-center gap-1 text-[11px]"><input type="checkbox" value="tips" checked class="dna-format-cb rounded text-purple-600"> Tips & Lists</label>
                     <label class="flex items-center gap-1 text-[11px]"><input type="checkbox" value="comparison" class="dna-format-cb rounded text-purple-600"> Comparison</label>
                     <label class="flex items-center gap-1 text-[11px]"><input type="checkbox" value="quote" class="dna-format-cb rounded text-purple-600"> Quote Card</label>
+                    <label class="flex items-center gap-1 text-[11px]"><input type="checkbox" value="minimal" class="dna-format-cb rounded text-purple-600"> Minimal</label>
+                    <label class="flex items-center gap-1 text-[11px]"><input type="checkbox" value="news_strip" class="dna-format-cb rounded text-purple-600"> News Strip</label>
                   </div>
                 </div>
               </div>
@@ -1844,13 +1863,18 @@
 
               <!-- Quick Preset Buttons -->
               <div class="flex items-center justify-between flex-wrap gap-2">
-                <span class="font-bold text-slate-700 text-[11px]">দ্রুত প্রিসেট লোড করুন:</span>
-                <div class="flex items-center gap-1.5 flex-wrap">
-                  <button type="button" id="dnaPresetExamBtn" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-semibold transition">📚 Exam Notes</button>
-                  <button type="button" id="dnaPresetFoodBtn" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-semibold transition">🍛 Food & Recipe</button>
-                  <button type="button" id="dnaPresetShopBtn" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-semibold transition">👗 Shop & Fashion</button>
-                  <button type="button" id="dnaPresetNewsBtn" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-semibold transition">📰 News & Facts</button>
+                <div class="flex items-center gap-2">
+                  <span class="font-bold text-slate-700 text-[11px]">দ্রুত প্রিসেট লোড করুন:</span>
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <button type="button" id="dnaPresetExamBtn" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-semibold transition">📚 Exam Notes</button>
+                    <button type="button" id="dnaPresetFoodBtn" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-semibold transition">🍛 Food & Recipe</button>
+                    <button type="button" id="dnaPresetShopBtn" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-semibold transition">👗 Shop & Fashion</button>
+                    <button type="button" id="dnaPresetNewsBtn" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-semibold transition">📰 News & Facts</button>
+                  </div>
                 </div>
+                <span id="dnaPillarTotalBadge" class="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  মোট ওয়েট: ১০০% ✓
+                </span>
               </div>
 
               <!-- Dynamic Pillars Container -->

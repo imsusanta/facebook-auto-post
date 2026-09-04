@@ -240,10 +240,11 @@ router.put('/pages/:id/content-profile', profileLimiter, (req, res) => {
     return res.status(404).json({ success: false, error: 'Page not found.' });
   }
 
-  const result = storage.savePageProfile(req.params.id, req.body);
+  const result = storage.savePageProfile(req.params.id, req.body, { requireFullProfile: true });
   if (!result.success) {
     return res.status(400).json({
       success: false,
+      code: 'INVALID_CONTENT_PROFILE',
       error: 'Invalid content profile data.',
       errors: result.errors || [result.error]
     });
@@ -269,11 +270,13 @@ router.post('/pages/:id/content-profile/validate', (req, res) => {
     return res.status(404).json({ success: false, error: 'Page not found.' });
   }
 
-  const validation = validateContentProfile(req.body);
+  const validation = validateContentProfile(req.body, { requireFullProfile: true });
   if (!validation.valid) {
     return res.status(400).json({
       success: false,
       valid: false,
+      code: 'INVALID_CONTENT_PROFILE',
+      error: 'Invalid content profile data.',
       errors: validation.errors
     });
   }

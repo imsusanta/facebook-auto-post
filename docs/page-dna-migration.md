@@ -84,8 +84,9 @@ migrateAllPages(options = {}) {
     };
   });
 
-  if (migratedCount > 0) {
+  if (apply && migratedCount > 0) {
     this.saveSettings(s);
+    this.pruneOldBackups();
   }
 
   return { success: true, migratedCount, pages: s.pages };
@@ -94,7 +95,31 @@ migrateAllPages(options = {}) {
 
 ---
 
-## 3. Backward Compatibility Assurances
+## 3. Operator CLI Migration Tool (`npm run migrate:page-dna`)
+
+To prevent unexpected disk writes during startup, production deployments use the dedicated CLI runner `scripts/migrate-page-dna.js`:
+
+```bash
+# Dry-run mode (default, zero disk modifications):
+npm run migrate:page-dna
+# or: node scripts/migrate-page-dna.js --dry-run
+
+# Apply mode (creates atomic backup, writes settings.json with 0600 permissions):
+npm run migrate:page-dna -- --apply
+# or: node scripts/migrate-page-dna.js --apply
+```
+
+### Safety & Isolation Guarantees:
+1. **Dry-Run by Default**: Unless `--apply` is explicitly passed, the migration runs in dry-run mode and modifies nothing on disk.
+2. **Pre-Migration Backup**: When `--apply` is specified, an atomic timestamped backup `settings.backup.<timestamp>.json` is generated before writing. If backup generation fails, migration halts immediately.
+3. **Atomic File Replacement & 0600 Permissions**: Writes to a temporary file with strict `0600` permissions before atomically renaming it to `settings.json`.
+4. **Automated Backup Retention**: Automatically retains only the newest 5 backups (configurable via `PAGE_DNA_BACKUP_RETENTION`). Older backups are pruned safely.
+5. **Symlink Protection**: Backup pruning inspects file entries via `lstat` and strictly ignores symbolic links to avoid symlink traversal attacks.
+6. **Zero Secret Leakage in CLI**: CLI output only reports page counts, page IDs, and names. Tokens, keys, and password hashes are never logged to console.
+
+---
+
+## 4. Backward Compatibility Assurances
 
 | Legacy Field | Migrated State | Behavior / Impact |
 | :--- | :--- | :--- |
@@ -108,17 +133,17 @@ migrateAllPages(options = {}) {
 
 ---
 
-## 4. Rollback & Recovery Procedures
+## 5. Rollback & Recovery Procedures
 
 If a migration issue occurs in production:
 
-### 4.1. Locate Backup File
+### 5.1. Locate Backup File
 All backups are saved in the `data/` directory with the timestamp format:
 ```bash
 ls -lt data/settings.backup.*.json
 ```
 
-### 4.2. Restore From Backup
+### 5.2. Restore From Backup
 1. Stop the application daemon:
    ```bash
    npm run stop # or pm2 stop facebook-auto-poster
@@ -126,13 +151,14 @@ ls -lt data/settings.backup.*.json
 2. Copy the desired backup file over `data/settings.json`:
    ```bash
    cp data/settings.backup.<TIMESTAMP>.json data/settings.json
+   chmod 0600 data/settings.json
    ```
 3. Restart the service:
    ```bash
    npm start
    ```
 
-### 4.3. Verification Checklist Post-Rollback
+### 5.3. Verification Checklist Post-Rollback
 - Verify pages are listed with original tokens and categories.
 - Verify existing scheduled queue items remain executable.
 - Run tests:

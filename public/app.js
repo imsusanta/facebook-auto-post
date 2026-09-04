@@ -21,6 +21,21 @@ window.fetch = async function(resource, init = {}) {
   return _nativeFetch.call(this, resource, init);
 };
 
+/**
+ * HTML Entity Encoder preventing DOM-based Cross-Site Scripting (XSS)
+ * Escapes &, <, >, ", ', and `
+ */
+function escapeHtml(str) {
+  if (typeof str !== 'string') return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+    .replace(/`/g, '&#096;');
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   // Global State
   let state = {
@@ -2512,20 +2527,26 @@ document.addEventListener('DOMContentLoaded', () => {
         ? '<span class="bg-purple-50 text-purple-700 border border-purple-200 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-purple-500"></span>DNA Complete</span>'
         : '<span class="bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>DNA Incomplete</span>';
 
+      const safeName = escapeHtml(p.name || 'Unnamed Page');
+      const safeCategory = escapeHtml(p.category || 'General');
+      const safePrompt = p.systemPrompt ? escapeHtml(p.systemPrompt) : 'No custom guidelines configured yet. AI uses default Bengali post rules.';
+      const safePic = escapeHtml(p.pictureUrl || '/pariksha_notes_logo.jpg');
+      const safeId = escapeHtml(p.id || '');
+
       const card = document.createElement('div');
       card.className = `p-5 rounded-2xl border transition-all ${isActive ? 'bg-gradient-to-br from-white via-indigo-50/20 to-purple-50/20 border-indigo-200 shadow-md ring-2 ring-indigo-500/20' : 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'}`;
       card.innerHTML = `
         <div class="flex items-start justify-between gap-3 mb-4">
           <div class="flex items-center gap-3.5 min-w-0">
-            <img src="${p.pictureUrl || '/pariksha_notes_logo.jpg'}" class="w-12 h-12 rounded-full object-cover ring-2 ${isActive ? 'ring-indigo-500' : 'ring-slate-200'} shrink-0">
+            <img src="${safePic}" class="w-12 h-12 rounded-full object-cover ring-2 ${isActive ? 'ring-indigo-500' : 'ring-slate-200'} shrink-0">
             <div class="min-w-0">
               <div class="flex items-center gap-1.5 flex-wrap">
-                <h4 class="text-sm font-bold text-slate-900 truncate">${p.name}</h4>
+                <h4 class="text-sm font-bold text-slate-900 truncate">${safeName}</h4>
                 ${isActive ? '<span class="bg-emerald-50 text-emerald-600 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Active</span>' : '<span class="bg-slate-100 text-slate-500 text-[10px] font-medium px-2 py-0.5 rounded-full">Connected</span>'}
                 ${dnaBadge}
               </div>
-              <p class="text-xs text-slate-500 font-medium mt-0.5">${p.category || 'General'}</p>
-              <p class="text-[11px] text-slate-400 font-mono mt-0.5 truncate">Page ID: ${p.id}</p>
+              <p class="text-xs text-slate-500 font-medium mt-0.5">${safeCategory}</p>
+              <p class="text-[11px] text-slate-400 font-mono mt-0.5 truncate">Page ID: ${safeId}</p>
             </div>
           </div>
         </div>
@@ -2552,31 +2573,31 @@ document.addEventListener('DOMContentLoaded', () => {
               ${p.systemPrompt ? '<span class="text-[9px] text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">Custom Rules</span>' : '<span class="text-[9px] text-slate-400">Default Rules</span>'}
             </div>
             <p class="text-[10.5px] text-slate-600 line-clamp-2 italic leading-relaxed">
-              ${p.systemPrompt ? p.systemPrompt : 'No custom guidelines configured yet. AI uses default Bengali post rules.'}
+              ${safePrompt}
             </p>
           </div>
         </div>
 
         <div class="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 flex-wrap">
-          <button class="page-dna-btn px-3 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-semibold rounded-xl border border-purple-200 transition flex items-center justify-center gap-1.5" data-id="${p.id}" title="Page DNA Strategy Wizard">
+          <button class="page-dna-btn px-3 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-semibold rounded-xl border border-purple-200 transition flex items-center justify-center gap-1.5" data-id="${safeId}" title="Page DNA Strategy Wizard">
             <i data-lucide="dna" class="w-3.5 h-3.5 text-purple-600"></i>
             <span>Page DNA</span>
           </button>
           ${isActive ? `
-            <button class="edit-page-btn flex-1 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-xl border border-indigo-200 transition flex items-center justify-center gap-1.5" data-id="${p.id}">
+            <button class="edit-page-btn flex-1 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-xl border border-indigo-200 transition flex items-center justify-center gap-1.5" data-id="${safeId}">
               <i data-lucide="settings" class="w-3.5 h-3.5"></i>
               <span>Edit Instructions</span>
             </button>
           ` : `
-            <button class="switch-page-btn flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl shadow-sm transition flex items-center justify-center gap-1.5" data-id="${p.id}">
+            <button class="switch-page-btn flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl shadow-sm transition flex items-center justify-center gap-1.5" data-id="${safeId}">
               <i data-lucide="arrow-right-left" class="w-3.5 h-3.5"></i>
               <span>Switch</span>
             </button>
-            <button class="edit-page-btn px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition flex items-center justify-center gap-1" data-id="${p.id}" title="Edit Guidelines">
+            <button class="edit-page-btn px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition flex items-center justify-center gap-1" data-id="${safeId}" title="Edit Guidelines">
               <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
               <span>Edit</span>
             </button>
-            <button class="delete-page-btn p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition" data-id="${p.id}" data-name="${p.name}" title="Disconnect Page">
+            <button class="delete-page-btn p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition" data-id="${safeId}" data-name="${safeName}" title="Disconnect Page">
               <i data-lucide="trash-2" class="w-4 h-4"></i>
             </button>
           `}
@@ -2758,13 +2779,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Helper to render pillars rows
+  // Helper to render pillars rows safely without innerHTML attribute interpolation
   function renderPillarsList(pillars) {
     if (!dnaPillarsList) return;
     dnaPillarsList.innerHTML = '';
 
     const list = Array.isArray(pillars) && pillars.length > 0 ? pillars : [
-      { title: '', description: '', targetAudienceSegment: '', weight: 30 }
+      { title: '', description: '', targetAudienceSegment: '', weight: 100 }
     ];
 
     list.forEach((p, idx) => {
@@ -2778,18 +2799,28 @@ document.addEventListener('DOMContentLoaded', () => {
           </span>
           <div class="flex items-center gap-2">
             <label class="text-[11px] text-slate-500 font-semibold">Weight %:</label>
-            <input type="number" min="1" max="100" value="${p.weight || 25}" class="pillar-weight w-14 p-1 border border-slate-200 rounded text-center font-bold text-purple-700 bg-white">
+            <input type="number" min="1" max="100" class="pillar-weight w-14 p-1 border border-slate-200 rounded text-center font-bold text-purple-700 bg-white">
             <button type="button" class="pillar-remove-btn text-slate-400 hover:text-rose-600 p-1 rounded" title="Remove Pillar">
               <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
             </button>
           </div>
         </div>
-        <input type="text" value="${p.title || ''}" placeholder="e.g. বিগত বছরের প্রশ্ন ও সমাধান (Previous Year Q&A)" class="pillar-title w-full p-2 border border-slate-200 rounded-lg outline-none focus:border-purple-500 bg-white font-medium">
+        <input type="text" placeholder="e.g. বিগত বছরের প্রশ্ন ও সমাধান (Previous Year Q&A)" class="pillar-title w-full p-2 border border-slate-200 rounded-lg outline-none focus:border-purple-500 bg-white font-medium">
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-          <input type="text" value="${p.description || ''}" placeholder="সংক্ষিপ্ত বিবরণ (e.g. বিভিন্ন পরীক্ষার সমাধানসহ প্রশ্নোত্তর)" class="pillar-desc p-1.5 border border-slate-200 rounded-lg outline-none focus:border-purple-500 bg-white">
-          <input type="text" value="${p.targetAudienceSegment || ''}" placeholder="টার্গেট পাঠক (e.g. WBCS Aspirants, Job Seekers)" class="pillar-segment p-1.5 border border-slate-200 rounded-lg outline-none focus:border-purple-500 bg-white">
+          <input type="text" placeholder="সংক্ষিপ্ত বিবরণ (e.g. বিভিন্ন পরীক্ষার সমাধানসহ প্রশ্নোত্তর)" class="pillar-desc p-1.5 border border-slate-200 rounded-lg outline-none focus:border-purple-500 bg-white">
+          <input type="text" placeholder="টার্গেট পাঠক (e.g. WBCS Aspirants, Job Seekers)" class="pillar-segment p-1.5 border border-slate-200 rounded-lg outline-none focus:border-purple-500 bg-white">
         </div>
       `;
+
+      const weightInput = row.querySelector('.pillar-weight');
+      const titleInput = row.querySelector('.pillar-title');
+      const descInput = row.querySelector('.pillar-desc');
+      const segmentInput = row.querySelector('.pillar-segment');
+
+      if (weightInput) weightInput.value = p.weight !== undefined ? p.weight : 25;
+      if (titleInput) titleInput.value = p.title || '';
+      if (descInput) descInput.value = p.description || '';
+      if (segmentInput) segmentInput.value = p.targetAudienceSegment || '';
 
       row.querySelector('.pillar-remove-btn')?.addEventListener('click', () => {
         if (dnaPillarsList.children.length <= 1) {
@@ -2797,16 +2828,21 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
         row.remove();
+        updatePillarWeightSum();
         saveLocalDraft();
       });
 
       row.querySelectorAll('input').forEach(inp => {
-        inp.addEventListener('input', () => saveLocalDraft());
+        inp.addEventListener('input', () => {
+          updatePillarWeightSum();
+          saveLocalDraft();
+        });
       });
 
       dnaPillarsList.appendChild(row);
     });
 
+    updatePillarWeightSum();
     refreshIcons();
   }
 
@@ -2882,7 +2918,10 @@ document.addEventListener('DOMContentLoaded', () => {
       timezone: (document.getElementById('dnaTimezoneInput')?.value || 'Asia/Kolkata').trim(),
       maxPostsPerDay: parseInt(document.getElementById('dnaMaxPostsInput')?.value, 10) || 3,
       minimumPostGapMinutes: parseInt(document.getElementById('dnaMinGapInput')?.value, 10) || 180,
-      promotionalPostLimitPercent: parseInt(document.getElementById('dnaPromoLimitInput')?.value, 10) || 20,
+      promotionalPostLimitPercent: (() => {
+        const val = parseInt(document.getElementById('dnaPromoLimitInput')?.value, 10);
+        return isNaN(val) ? 20 : val;
+      })(),
       contentMix: {
         educational: mixEdu,
         community: mixCom,
@@ -2977,6 +3016,27 @@ document.addEventListener('DOMContentLoaded', () => {
     if (document.getElementById('dnaTimezoneInput')) document.getElementById('dnaTimezoneInput').value = profile.timezone || 'Asia/Kolkata';
   }
 
+  // Update Pillar weight sum badge
+  function updatePillarWeightSum() {
+    let total = 0;
+    if (dnaPillarsList) {
+      dnaPillarsList.querySelectorAll('.pillar-weight').forEach(inp => {
+        total += parseInt(inp.value, 10) || 0;
+      });
+    }
+    const badge = document.getElementById('dnaPillarTotalBadge');
+    if (badge) {
+      if (total === 100) {
+        badge.className = 'text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300';
+        badge.textContent = 'মোট ওয়েট: ১০০% ✓';
+      } else {
+        badge.className = 'text-xs font-bold px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 border border-rose-300';
+        badge.textContent = `মোট ওয়েট: ${total}% (১০০% আবশ্যক)`;
+      }
+    }
+    return total === 100;
+  }
+
   // Update Mix sum badge
   function updateMixSum() {
     const mixEdu = parseInt(document.getElementById('dnaMixEduInput')?.value, 10) || 0;
@@ -3054,49 +3114,97 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshIcons();
   }
 
-  // Build review cards
+  // Build review cards safely using DOM textContent
   function buildReviewSummary() {
     if (!dnaReviewSummaryGrid) return;
+    dnaReviewSummaryGrid.innerHTML = '';
     const profile = gatherProfileFromForm();
 
-    dnaReviewSummaryGrid.innerHTML = `
-      <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
-        <span class="font-bold text-slate-800 text-xs flex items-center gap-1">
-          <i data-lucide="target" class="w-3.5 h-3.5 text-purple-600"></i>
-          Niche & Purpose
-        </span>
-        <p class="text-slate-700 font-semibold">${profile.niche || '<span class="text-rose-500">Not Specified</span>'}</p>
-        <p class="text-slate-500 text-[11px]">Goal: <span class="capitalize font-medium text-slate-700">${profile.primaryGoal}</span> | Level: <span class="capitalize font-medium text-slate-700">${profile.audience.knowledgeLevel}</span></p>
-      </div>
-
-      <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
-        <span class="font-bold text-slate-800 text-xs flex items-center gap-1">
-          <i data-lucide="message-square" class="w-3.5 h-3.5 text-indigo-600"></i>
-          Voice & Language
-        </span>
-        <p class="text-slate-700 font-semibold">Language: ${profile.language === 'bn' ? 'Bengali (বাংলা)' : profile.language === 'en' ? 'English' : 'Bilingual'}</p>
-        <p class="text-slate-500 text-[11px]">Tones: <span class="font-medium text-slate-700">${profile.tone.join(', ')}</span></p>
-      </div>
-
-      <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
-        <span class="font-bold text-slate-800 text-xs flex items-center gap-1">
-          <i data-lucide="columns" class="w-3.5 h-3.5 text-blue-600"></i>
-          Content Pillars (${profile.contentPillars.length})
-        </span>
-        <ul class="text-[11px] text-slate-600 list-disc list-inside space-y-0.5">
-          ${profile.contentPillars.map(p => `<li class="truncate">${p.title} (${p.weight}%)</li>`).join('') || '<li class="text-amber-600">No pillars added</li>'}
-        </ul>
-      </div>
-
-      <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
-        <span class="font-bold text-slate-800 text-xs flex items-center gap-1">
-          <i data-lucide="pie-chart" class="w-3.5 h-3.5 text-emerald-600"></i>
-          Mix & Automation
-        </span>
-        <p class="text-[11px] text-slate-600">Edu: ${profile.contentMix.educational}% | Com: ${profile.contentMix.community}% | Auth: ${profile.contentMix.authority}% | Promo: ${profile.contentMix.promotional}% | Timely: ${profile.contentMix.timely}%</p>
-        <p class="text-slate-500 text-[11px]">Approval: <span class="font-medium text-slate-700">${profile.approvalMode}</span> | Max/Day: ${profile.maxPostsPerDay}</p>
-      </div>
+    // Card 1: Niche & Purpose
+    const card1 = document.createElement('div');
+    card1.className = 'p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1';
+    card1.innerHTML = `
+      <span class="font-bold text-slate-800 text-xs flex items-center gap-1">
+        <i data-lucide="target" class="w-3.5 h-3.5 text-purple-600"></i>
+        Niche & Purpose
+      </span>
     `;
+    const pNiche = document.createElement('p');
+    pNiche.className = 'text-slate-700 font-semibold';
+    pNiche.textContent = profile.niche || 'Not Specified';
+    const pGoal = document.createElement('p');
+    pGoal.className = 'text-slate-500 text-[11px]';
+    pGoal.textContent = `Goal: ${profile.primaryGoal} | Level: ${profile.audience.knowledgeLevel}`;
+    card1.appendChild(pNiche);
+    card1.appendChild(pGoal);
+    dnaReviewSummaryGrid.appendChild(card1);
+
+    // Card 2: Voice & Language
+    const card2 = document.createElement('div');
+    card2.className = 'p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1';
+    card2.innerHTML = `
+      <span class="font-bold text-slate-800 text-xs flex items-center gap-1">
+        <i data-lucide="message-square" class="w-3.5 h-3.5 text-indigo-600"></i>
+        Voice & Language
+      </span>
+    `;
+    const pLang = document.createElement('p');
+    pLang.className = 'text-slate-700 font-semibold';
+    const langLabel = profile.language === 'bn' ? 'Bengali (বাংলা)' : profile.language === 'en' ? 'English' : 'Bilingual';
+    pLang.textContent = `Language: ${langLabel}`;
+    const pTone = document.createElement('p');
+    pTone.className = 'text-slate-500 text-[11px]';
+    pTone.textContent = `Tones: ${Array.isArray(profile.tone) ? profile.tone.join(', ') : ''}`;
+    card2.appendChild(pLang);
+    card2.appendChild(pTone);
+    dnaReviewSummaryGrid.appendChild(card2);
+
+    // Card 3: Content Pillars
+    const card3 = document.createElement('div');
+    card3.className = 'p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1';
+    const spanPillars = document.createElement('span');
+    spanPillars.className = 'font-bold text-slate-800 text-xs flex items-center gap-1';
+    spanPillars.innerHTML = '<i data-lucide="columns" class="w-3.5 h-3.5 text-blue-600"></i>';
+    const spanPillarsText = document.createTextNode(` Content Pillars (${profile.contentPillars.length})`);
+    spanPillars.appendChild(spanPillarsText);
+    card3.appendChild(spanPillars);
+
+    const ulPillars = document.createElement('ul');
+    ulPillars.className = 'text-[11px] text-slate-600 list-disc list-inside space-y-0.5';
+    if (profile.contentPillars.length > 0) {
+      profile.contentPillars.forEach(p => {
+        const li = document.createElement('li');
+        li.className = 'truncate';
+        li.textContent = `${p.title} (${p.weight}%)`;
+        ulPillars.appendChild(li);
+      });
+    } else {
+      const li = document.createElement('li');
+      li.className = 'text-amber-600';
+      li.textContent = 'No pillars added';
+      ulPillars.appendChild(li);
+    }
+    card3.appendChild(ulPillars);
+    dnaReviewSummaryGrid.appendChild(card3);
+
+    // Card 4: Mix & Automation
+    const card4 = document.createElement('div');
+    card4.className = 'p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1';
+    card4.innerHTML = `
+      <span class="font-bold text-slate-800 text-xs flex items-center gap-1">
+        <i data-lucide="pie-chart" class="w-3.5 h-3.5 text-emerald-600"></i>
+        Mix & Automation
+      </span>
+    `;
+    const pMix = document.createElement('p');
+    pMix.className = 'text-[11px] text-slate-600';
+    pMix.textContent = `Edu: ${profile.contentMix.educational}% | Com: ${profile.contentMix.community}% | Auth: ${profile.contentMix.authority}% | Promo: ${profile.contentMix.promotional}% | Timely: ${profile.contentMix.timely}%`;
+    const pAppr = document.createElement('p');
+    pAppr.className = 'text-slate-500 text-[11px]';
+    pAppr.textContent = `Approval: ${profile.approvalMode} | Max/Day: ${profile.maxPostsPerDay}`;
+    card4.appendChild(pMix);
+    card4.appendChild(pAppr);
+    dnaReviewSummaryGrid.appendChild(card4);
 
     refreshIcons();
   }
@@ -3199,7 +3307,7 @@ document.addEventListener('DOMContentLoaded', () => {
       loadProfileIntoForm({
         niche: 'সরকারি চাকরি প্রস্তুতি ও স্টাডি নোটস (Govt Exam Preparation)',
         nicheDescription: 'পশ্চিমবঙ্গ ও ভারতের সমস্ত প্রতিযোগিতামূলক পরীক্ষার (WBCS, SSC, Rail, Police) সাধারণ জ্ঞান, বিগত বছরের প্রশ্ন ও অধ্যায়ভিত্তিক আলোচনা।',
-        primaryGoal: 'engagement',
+        primaryGoal: 'education',
         language: 'bn',
         languageStyle: 'সহজ ও প্রাঞ্জল চলিত বাংলা',
         tone: ['helpful', 'credible', 'inspiring'],
@@ -3208,7 +3316,7 @@ document.addEventListener('DOMContentLoaded', () => {
           locations: ['West Bengal', 'Kolkata', 'Tripura'],
           professions: ['Students', 'Job Seekers', 'WBCS Aspirants'],
           interests: ['WBCS', 'SSC', 'General Knowledge', 'Current Affairs'],
-          knowledgeLevel: 'general'
+          knowledgeLevel: 'intermediate'
         },
         contentPillars: [
           { title: 'বিগত বছরের প্রশ্ন ও সমাধান (Previous Year Q&A)', description: 'বিভিন্ন পরীক্ষার গুরুত্বপূর্ণ প্রশ্ন ও সমাধান', targetAudienceSegment: 'Job Seekers', weight: 35 },
@@ -3216,8 +3324,14 @@ document.addEventListener('DOMContentLoaded', () => {
           { title: 'দৈনিক কুইজ ও সেলফ টেস্ট (Daily Quiz)', description: 'প্রতিদিনের অনুশীলন কুইজ ও সেলফ অ্যাসেসমেন্ট', targetAudienceSegment: 'Aspirants', weight: 25 },
           { title: 'পরীক্ষার বিজ্ঞপ্তি ও কৌশল (Exam Updates & Strategy)', description: 'সিলেবাস গাইড ও প্রস্তুতি কৌশল', targetAudienceSegment: 'All', weight: 10 }
         ],
-        contentMix: { educational: 45, community: 20, authority: 15, promotional: 10, timely: 10 },
-        approvalMode: 'low_risk_auto'
+        contentMix: { educational: 50, community: 20, authority: 15, promotional: 5, timely: 10 },
+        promotionalPostLimitPercent: 10,
+        sourcePolicy: {
+          requireSourcesForNews: true,
+          requireOfficialSourceForAnnouncements: true,
+          minimumSourcesForHighRiskClaims: 2
+        },
+        approvalMode: 'manual'
       });
     } else if (presetName === 'food') {
       loadProfileIntoForm({
@@ -3240,7 +3354,13 @@ document.addEventListener('DOMContentLoaded', () => {
           { title: 'রান্নার দরকারি টিপস (Kitchen Tips)', description: 'মসলা সংরক্ষণ ও রান্নার কৌশল', targetAudienceSegment: 'All', weight: 25 },
           { title: 'স্ট্রিট ফুড ও সুইটস এক্সপ্লোর (Street Food & Sweets)', description: 'কলকাতার স্ট্রিট ফুড ও মিষ্টির গল্প', targetAudienceSegment: 'Foodies', weight: 15 }
         ],
-        contentMix: { educational: 35, community: 30, authority: 15, promotional: 10, timely: 10 },
+        contentMix: { educational: 40, community: 30, authority: 15, promotional: 5, timely: 10 },
+        promotionalPostLimitPercent: 10,
+        sourcePolicy: {
+          requireSourcesForNews: true,
+          requireOfficialSourceForAnnouncements: false,
+          minimumSourcesForHighRiskClaims: 2
+        },
         approvalMode: 'manual'
       });
     } else if (presetName === 'shop') {
@@ -3264,7 +3384,13 @@ document.addEventListener('DOMContentLoaded', () => {
           { title: 'গ্রাহক সন্তুষ্টি ও রিভিউ (Customer Stories)', description: 'গ্রাহকদের ছবি ও রিভিউ', targetAudienceSegment: 'Potential Buyers', weight: 20 },
           { title: 'উৎসবের অফার ও সেল (Special Offers)', description: 'ডিসকাউন্ট ও লিমিটেড এডিশন সেল', targetAudienceSegment: 'All', weight: 20 }
         ],
-        contentMix: { educational: 25, community: 20, authority: 15, promotional: 30, timely: 10 },
+        contentMix: { educational: 30, community: 25, authority: 15, promotional: 20, timely: 10 },
+        promotionalPostLimitPercent: 25,
+        sourcePolicy: {
+          requireSourcesForNews: true,
+          requireOfficialSourceForAnnouncements: false,
+          minimumSourcesForHighRiskClaims: 2
+        },
         approvalMode: 'manual'
       });
     } else if (presetName === 'news') {
@@ -3288,10 +3414,18 @@ document.addEventListener('DOMContentLoaded', () => {
           { title: 'ফ্যাক্ট-চেক ও তথ্য যাচাই (Fact Check)', description: 'গুজব নিরসন ও সঠিক তথ্যের উৎস', targetAudienceSegment: 'All', weight: 20 },
           { title: 'আজকের দিনে ইতিহাস (This Day in History)', description: 'ঐতিহাসিক ঘটনার স্মরণ ও গুরুত্ব', targetAudienceSegment: 'History Buffs', weight: 15 }
         ],
-        contentMix: { educational: 35, community: 15, authority: 25, promotional: 5, timely: 20 },
+        contentMix: { educational: 35, community: 15, authority: 30, promotional: 0, timely: 20 },
+        promotionalPostLimitPercent: 5,
+        sourcePolicy: {
+          requireSourcesForNews: true,
+          requireOfficialSourceForAnnouncements: true,
+          minimumSourcesForHighRiskClaims: 2
+        },
         approvalMode: 'manual'
       });
     }
+    updatePillarWeightSum();
+    updateMixSum();
     saveLocalDraft();
   }
 
@@ -3319,7 +3453,7 @@ document.addEventListener('DOMContentLoaded', () => {
         </span>
         <div class="flex items-center gap-2">
           <label class="text-[11px] text-slate-500 font-semibold">Weight %:</label>
-          <input type="number" min="1" max="100" value="25" class="pillar-weight w-14 p-1 border border-slate-200 rounded text-center font-bold text-purple-700 bg-white">
+          <input type="number" min="1" max="100" class="pillar-weight w-14 p-1 border border-slate-200 rounded text-center font-bold text-purple-700 bg-white">
           <button type="button" class="pillar-remove-btn text-slate-400 hover:text-rose-600 p-1 rounded" title="Remove Pillar">
             <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
           </button>
@@ -3332,14 +3466,26 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
     `;
 
+    const weightInput = row.querySelector('.pillar-weight');
+    if (weightInput) weightInput.value = 25;
+
     row.querySelector('.pillar-remove-btn')?.addEventListener('click', () => {
+      if (dnaPillarsList.children.length <= 1) {
+        alert('At least one pillar row must remain.');
+        return;
+      }
       row.remove();
+      updatePillarWeightSum();
       saveLocalDraft();
     });
     row.querySelectorAll('input').forEach(inp => {
-      inp.addEventListener('input', () => saveLocalDraft());
+      inp.addEventListener('input', () => {
+        updatePillarWeightSum();
+        saveLocalDraft();
+      });
     });
     dnaPillarsList.appendChild(row);
+    updatePillarWeightSum();
     refreshIcons();
     saveLocalDraft();
   });
@@ -3374,6 +3520,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // Save Page DNA Profile Handler
   dnaSaveProfileBtn?.addEventListener('click', async () => {
     if (!currentDnaPageId) return;
+
+    const totalPillars = updatePillarWeightSum();
+    if (!totalPillars) {
+      alert('Content pillar weights must sum to exactly 100%. Please adjust before saving.');
+      goToDnaStep(3);
+      return;
+    }
 
     const totalMix = updateMixSum();
     if (!totalMix) {

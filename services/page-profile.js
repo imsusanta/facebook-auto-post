@@ -6,19 +6,211 @@
  * normalized, validated contentProfile object.
  */
 
-const ALLOWED_PRIMARY_GOALS = new Set(['engagement', 'reach', 'leads', 'sales', 'authority', 'community']);
+const ALLOWED_PRIMARY_GOALS = new Set([
+  'education', 'authority', 'community', 'entertainment',
+  'lead_generation', 'leads', 'brand_awareness', 'reach',
+  'engagement', 'sales'
+]);
 const ALLOWED_LANGUAGES = new Set(['bn', 'en', 'bn_en']);
 const ALLOWED_TONES = new Set([
   'helpful', 'credible', 'friendly', 'formal', 'inspiring',
-  'humorous', 'analytical', 'conversational', 'empathetic', 'authoritative'
+  'humorous', 'analytical', 'conversational', 'empathetic', 'authoritative',
+  'encouraging', 'witty', 'urgent'
 ]);
-const ALLOWED_KNOWLEDGE_LEVELS = new Set(['beginner', 'intermediate', 'advanced', 'general']);
+const ALLOWED_KNOWLEDGE_LEVELS = new Set(['beginner', 'intermediate', 'advanced', 'general', 'mixed']);
 const ALLOWED_FORMATS = new Set(['infographic', 'minimal', 'news_strip', 'quote', 'story', 'tips', 'comparison']);
 const ALLOWED_CTA_STYLES = new Set(['soft', 'strong', 'question', 'none']);
 const ALLOWED_HASHTAG_STYLES = new Set(['minimal', 'moderate', 'none']);
 const ALLOWED_APPROVAL_MODES = new Set(['manual', 'low_risk_auto', 'trusted_categories_auto']);
 
 const PROHIBITED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * Canonical Built-In Page DNA Presets
+ * All presets default to approvalMode: 'manual' to prevent unintended autonomous publishing.
+ */
+const PAGE_DNA_PRESETS = Object.freeze({
+  exam: Object.freeze({
+    schemaVersion: 1,
+    niche: 'সরকারি চাকরি প্রস্তুতি ও স্টাডি নোটস (Govt Exam Preparation)',
+    nicheDescription: 'পশ্চিমবঙ্গ ও ভারতের সমস্ত প্রতিযোগিতামূলক পরীক্ষার (WBCS, SSC, Rail, Police) সাধারণ জ্ঞান, বিগত বছরের প্রশ্ন ও অধ্যায়ভিত্তিক আলোচনা।',
+    primaryGoal: 'education',
+    secondaryGoals: ['authority', 'community'],
+    language: 'bn',
+    languageStyle: 'সহজ ও প্রাঞ্জল চলিত বাংলা',
+    tone: ['helpful', 'credible', 'inspiring'],
+    audience: {
+      locations: ['West Bengal', 'Kolkata', 'Tripura'],
+      ageRange: '18-35',
+      professions: ['Students', 'Job Seekers', 'WBCS Aspirants'],
+      interests: ['WBCS', 'SSC', 'General Knowledge', 'Current Affairs'],
+      knowledgeLevel: 'intermediate'
+    },
+    contentPillars: [
+      { id: 'pillar_exam_pyq', title: 'বিগত বছরের প্রশ্ন ও সমাধান (Previous Year Q&A)', description: 'বিভিন্ন পরীক্ষার গুরুত্বপূর্ণ প্রশ্ন ও সমাধান', targetAudienceSegment: 'Job Seekers', weight: 35 },
+      { id: 'pillar_exam_notes', title: 'বিষয়ভিত্তিক স্টাডি নোটস (Subject Notes)', description: 'ইতিহাস, ভূগোল, সংবিধান ও বিজ্ঞানের সংক্ষিপ্ত নোটস', targetAudienceSegment: 'Students', weight: 30 },
+      { id: 'pillar_exam_quiz', title: 'দৈনিক কুইজ ও সেলফ টেস্ট (Daily Quiz)', description: 'প্রতিদিনের অনুশীলন কুইজ ও সেলফ অ্যাসেসমেন্ট', targetAudienceSegment: 'Aspirants', weight: 25 },
+      { id: 'pillar_exam_updates', title: 'পরীক্ষার বিজ্ঞপ্তি ও কৌশল (Exam Updates & Strategy)', description: 'সিলেবাস গাইড ও প্রস্তুতি কৌশল', targetAudienceSegment: 'All', weight: 10 }
+    ],
+    contentMix: { educational: 50, community: 20, authority: 15, promotional: 5, timely: 10 },
+    promotionalPostLimitPercent: 10,
+    sourcePolicy: {
+      requireSourcesForNews: true,
+      requireOfficialSourceForAnnouncements: true,
+      minimumSourcesForHighRiskClaims: 2
+    },
+    preferredFormats: ['infographic', 'tips', 'story'],
+    ctaStyle: 'question',
+    hashtagStyle: 'minimal',
+    hashtagLimit: 5,
+    emojiLimit: 3,
+    preferredCaptionLength: { min: 300, max: 1500 },
+    timezone: 'Asia/Kolkata',
+    maxPostsPerDay: 3,
+    minimumPostGapMinutes: 180,
+    approvalMode: 'manual',
+    allowedTopics: ['WBCS', 'SSC', 'General Knowledge', 'Current Affairs', 'Math'],
+    blockedTopics: ['gambling', 'betting', 'rumors', 'party politics'],
+    blockedClaims: ['100% selection guaranteed', '১০০% চাকরি নিশ্চিত', 'প্রশ্ন ফাঁস'],
+    productsOrServices: [],
+    learnedPreferences: []
+  }),
+  food: Object.freeze({
+    schemaVersion: 1,
+    niche: 'বাঙালি খাবার ও রেসিপি (Bengali Cuisine & Recipes)',
+    nicheDescription: 'ঐতিহ্যবাহী বাঙালি রান্না, রেস্তোরাঁর জনপ্রিয় পদ এবং সহজ ঘরোয়া রান্নার টিপস।',
+    primaryGoal: 'community',
+    secondaryGoals: ['entertainment', 'education'],
+    language: 'bn',
+    languageStyle: 'ঘরোয়া ও উষ্ণ বাংলা',
+    tone: ['friendly', 'helpful', 'conversational'],
+    audience: {
+      locations: ['Kolkata', 'West Bengal', 'Dhaka'],
+      ageRange: '20-60',
+      professions: ['Home Cooks', 'Foodies'],
+      interests: ['Traditional Recipes', 'Sweets', 'Kitchen Hacks'],
+      knowledgeLevel: 'beginner'
+    },
+    contentPillars: [
+      { id: 'pillar_food_trad', title: 'ঐতিহ্যবাহী বাংলা রান্না (Traditional Dishes)', description: 'মাছের পদ, মিষ্টি ও খাঁটি বাঙালি খাবারের রেসিপি', targetAudienceSegment: 'Home Cooks', weight: 35 },
+      { id: 'pillar_food_quick', title: 'চটজলদি সহজ রেসিপি (Quick 15-min Recipes)', description: '১০-১৫ মিনিটে তৈরি সহজ খাবার', targetAudienceSegment: 'Working People', weight: 25 },
+      { id: 'pillar_food_tips', title: 'রান্নার দরকারি টিপস (Kitchen Tips)', description: 'মসলা সংরক্ষণ ও রান্নার কৌশল', targetAudienceSegment: 'All', weight: 25 },
+      { id: 'pillar_food_street', title: 'স্ট্রিট ফুড ও সুইটস এক্সপ্লোর (Street Food & Sweets)', description: 'কলকাতার স্ট্রিট ফুড ও মিষ্টির গল্প', targetAudienceSegment: 'Foodies', weight: 15 }
+    ],
+    contentMix: { educational: 40, community: 30, authority: 15, promotional: 5, timely: 10 },
+    promotionalPostLimitPercent: 10,
+    sourcePolicy: {
+      requireSourcesForNews: true,
+      requireOfficialSourceForAnnouncements: false,
+      minimumSourcesForHighRiskClaims: 2
+    },
+    preferredFormats: ['infographic', 'story', 'tips'],
+    ctaStyle: 'soft',
+    hashtagStyle: 'moderate',
+    hashtagLimit: 5,
+    emojiLimit: 4,
+    preferredCaptionLength: { min: 250, max: 1200 },
+    timezone: 'Asia/Kolkata',
+    maxPostsPerDay: 3,
+    minimumPostGapMinutes: 180,
+    approvalMode: 'manual',
+    allowedTopics: ['Bengali Cooking', 'Recipes', 'Sweets', 'Fish Dishes', 'Kitchen Tips'],
+    blockedTopics: ['diet pills', 'starvation diets', 'chemical food coloring'],
+    blockedClaims: ['miracle weight loss', 'instant cure'],
+    productsOrServices: [],
+    learnedPreferences: []
+  }),
+  shop: Object.freeze({
+    schemaVersion: 1,
+    niche: 'পোশাক ও ফ্যাশন ট্রেন্ডস (Clothing & Fashion Trends)',
+    nicheDescription: 'আধুনিক শাড়ি, এথনিক ওয়্যার এবং ট্রেন্ডি ফ্যাশন কালেকশন ও স্টাইলিং গাইড।',
+    primaryGoal: 'sales',
+    secondaryGoals: ['brand_awareness', 'community'],
+    language: 'bn_en',
+    languageStyle: 'স্মার্ট ও ট্রেন্ডি বাংলা-ইংরেজি মিশ্রণ',
+    tone: ['friendly', 'inspiring', 'conversational'],
+    audience: {
+      locations: ['Kolkata', 'West Bengal', 'Bangalore'],
+      ageRange: '20-50',
+      professions: ['Women', 'Professionals', 'Students'],
+      interests: ['Sarees', 'Ethnic Wear', 'Fashion Styling'],
+      knowledgeLevel: 'general'
+    },
+    contentPillars: [
+      { id: 'pillar_shop_new', title: 'নতুন ফ্যাশন কালেকশন (New Arrivals)', description: 'সাপ্তাহিক নতুন শাড়ি ও পোশাক শোকেস', targetAudienceSegment: 'Shoppers', weight: 35 },
+      { id: 'pillar_shop_styling', title: 'স্টাইলিং টিপস ও ম্যাচিং (Styling Guides)', description: 'কোন পোশাকের সাথে কোন গয়না মানাবে', targetAudienceSegment: 'Fashion Lovers', weight: 25 },
+      { id: 'pillar_shop_reviews', title: 'গ্রাহক সন্তুষ্টি ও রিভিউ (Customer Stories)', description: 'গ্রাহকদের ছবি ও রিভিউ', targetAudienceSegment: 'Potential Buyers', weight: 20 },
+      { id: 'pillar_shop_offers', title: 'উৎসবের অফার ও সেল (Special Offers)', description: 'ডিসকাউন্ট ও লিমিটেড এডিশন সেল', targetAudienceSegment: 'All', weight: 20 }
+    ],
+    contentMix: { educational: 30, community: 25, authority: 15, promotional: 20, timely: 10 },
+    promotionalPostLimitPercent: 25,
+    sourcePolicy: {
+      requireSourcesForNews: true,
+      requireOfficialSourceForAnnouncements: false,
+      minimumSourcesForHighRiskClaims: 2
+    },
+    preferredFormats: ['infographic', 'story', 'comparison'],
+    ctaStyle: 'strong',
+    hashtagStyle: 'moderate',
+    hashtagLimit: 6,
+    emojiLimit: 3,
+    preferredCaptionLength: { min: 200, max: 1000 },
+    timezone: 'Asia/Kolkata',
+    maxPostsPerDay: 3,
+    minimumPostGapMinutes: 180,
+    approvalMode: 'manual',
+    allowedTopics: ['Sarees', 'Handloom', 'Fashion Tips', 'Festive Wear'],
+    blockedTopics: ['replica brands', 'counterfeit products'],
+    blockedClaims: ['100% free gift', 'unlimited free delivery'],
+    productsOrServices: [],
+    learnedPreferences: []
+  }),
+  news: Object.freeze({
+    schemaVersion: 1,
+    niche: 'চলতি ঘটনা ও তথ্য বিশ্লেষণ (Current Affairs & Fact Analysis)',
+    nicheDescription: 'জাতীয় ও আন্তর্জাতিক গুরুত্বপূর্ণ খবরের নির্ভরযোগ্য তথ্য ও সহজ ব্যাখ্যা।',
+    primaryGoal: 'authority',
+    secondaryGoals: ['education', 'reach'],
+    language: 'bn',
+    languageStyle: 'নিরপেক্ষ, প্রাঞ্জল ও বস্তুনিষ্ঠ বাংলা',
+    tone: ['analytical', 'credible', 'authoritative'],
+    audience: {
+      locations: ['India', 'West Bengal', 'Global'],
+      ageRange: '18-65',
+      professions: ['Informed Citizens', 'Educators', 'Students'],
+      interests: ['Current Affairs', 'Technology', 'Geopolitics'],
+      knowledgeLevel: 'intermediate'
+    },
+    contentPillars: [
+      { id: 'pillar_news_brief', title: 'দৈনিক সংবাদ সারসংক্ষেপ (Daily Brief)', description: 'দিনের প্রধান খবরগুলোর সংক্ষিপ্তসার', targetAudienceSegment: 'General Readers', weight: 35 },
+      { id: 'pillar_news_analysis', title: 'ঘটনার প্রেক্ষাপট ও বিশ্লেষণ (Context & Analysis)', description: 'গুরুত্বপূর্ণ ঘটনার পেছনের কারণ ও প্রভাব', targetAudienceSegment: 'Curious Readers', weight: 30 },
+      { id: 'pillar_news_factcheck', title: 'ফ্যাক্ট-চেক ও তথ্য যাচাই (Fact Check)', description: 'গুজব নিরসন ও সঠিক তথ্যের উৎস', targetAudienceSegment: 'All', weight: 20 },
+      { id: 'pillar_news_history', title: 'আজকের দিনে ইতিহাস (This Day in History)', description: 'ঐতিহাসিক ঘটনার স্মরণ ও গুরুত্ব', targetAudienceSegment: 'History Buffs', weight: 15 }
+    ],
+    contentMix: { educational: 35, community: 15, authority: 30, promotional: 0, timely: 20 },
+    promotionalPostLimitPercent: 5,
+    sourcePolicy: {
+      requireSourcesForNews: true,
+      requireOfficialSourceForAnnouncements: true,
+      minimumSourcesForHighRiskClaims: 2
+    },
+    preferredFormats: ['news_strip', 'infographic', 'quote'],
+    ctaStyle: 'question',
+    hashtagStyle: 'minimal',
+    hashtagLimit: 4,
+    emojiLimit: 1,
+    preferredCaptionLength: { min: 400, max: 2000 },
+    timezone: 'Asia/Kolkata',
+    maxPostsPerDay: 4,
+    minimumPostGapMinutes: 120,
+    approvalMode: 'manual',
+    allowedTopics: ['Current Events', 'Science News', 'Policy Analysis', 'History'],
+    blockedTopics: ['gossip', 'unverified rumors', 'hate speech', 'scandals'],
+    blockedClaims: ['breaking exclusive secret', 'confirmed leak'],
+    productsOrServices: [],
+    learnedPreferences: []
+  })
+});
 
 /**
  * Validate IANA timezone string
@@ -245,6 +437,7 @@ function normalizeContentMix(raw, defaultVal) {
 function normalizeContentPillars(pillars) {
   if (!Array.isArray(pillars)) return [];
   const seen = new Set();
+  const seenIds = new Set();
   const result = [];
 
   for (const p of pillars) {
@@ -256,13 +449,36 @@ function normalizeContentPillars(pillars) {
     if (seen.has(normKey)) continue;
     seen.add(normKey);
 
+    let pid = cleanString(p.id, 40) || `pillar_${result.length + 1}`;
+    if (seenIds.has(pid.toLowerCase())) {
+      pid = `pillar_${result.length + 1}_${result.length}`;
+    }
+    seenIds.add(pid.toLowerCase());
+
     result.push({
-      id: cleanString(p.id, 40) || `pillar_${result.length + 1}`,
+      id: pid,
       title,
       description: cleanString(p.description, 200),
       targetAudienceSegment: cleanString(p.targetAudienceSegment, 100),
       weight: normalizeInteger(p.weight, 1, 100, 20)
     });
+  }
+
+  // If weights don't sum to 100, rebalance them to equal exactly 100
+  if (result.length > 0) {
+    const sum = result.reduce((acc, p) => acc + p.weight, 0);
+    if (sum !== 100) {
+      let currentSum = 0;
+      for (let i = 0; i < result.length; i++) {
+        if (i === result.length - 1) {
+          result[i].weight = Math.max(1, 100 - currentSum);
+        } else {
+          const scaled = Math.max(1, Math.round((result[i].weight / sum) * 100));
+          result[i].weight = scaled;
+          currentSum += scaled;
+        }
+      }
+    }
   }
 
   return result;
@@ -301,11 +517,17 @@ const ALLOWED_PROFILE_KEYS = new Set([
   'learnedPreferences'
 ]);
 
+const REQUIRED_FULL_FIELDS = [
+  'schemaVersion', 'niche', 'primaryGoal', 'language', 'tone',
+  'audience', 'contentPillars', 'contentMix', 'promotionalPostLimitPercent',
+  'sourcePolicy', 'approvalMode'
+];
+
 /**
  * Validate Content Profile
  * Returns { valid: boolean, errors: Array<{ field, code, message }> }
  */
-function validateContentProfile(input) {
+function validateContentProfile(input, options = {}) {
   const errors = [];
 
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -315,7 +537,20 @@ function validateContentProfile(input) {
     };
   }
 
-  // 1. Prototype pollution check
+  // 0. Full profile requirement check (e.g. for PUT replacement)
+  if (options && options.requireFullProfile) {
+    for (const field of REQUIRED_FULL_FIELDS) {
+      if (typeof input[field] === 'undefined' || input[field] === null) {
+        errors.push({
+          field,
+          code: 'REQUIRED_FIELD',
+          message: `Field "${field}" is required for complete content profile replacement.`
+        });
+      }
+    }
+  }
+
+  // 1. Prototype pollution check & allowed keys check
   for (const key of Object.keys(input)) {
     if (PROHIBITED_KEYS.has(key)) {
       errors.push({ field: key, code: 'PROHIBITED_KEY', message: `Key "${key}" is prohibited for security reasons.` });
@@ -330,6 +565,8 @@ function validateContentProfile(input) {
       errors.push({ field: 'niche', code: 'INVALID_TYPE', message: 'Niche must be a string.' });
     } else if (input.niche.length > 100) {
       errors.push({ field: 'niche', code: 'MAX_LENGTH_EXCEEDED', message: 'Niche must not exceed 100 characters.' });
+    } else if (options && options.requireFullProfile && input.niche.trim().length === 0) {
+      errors.push({ field: 'niche', code: 'REQUIRED', message: 'Niche cannot be empty.' });
     }
   }
 
@@ -382,7 +619,20 @@ function validateContentProfile(input) {
     }
   }
 
-  // 7. Preferred Caption Length
+  // 7. Audience
+  if (typeof input.audience !== 'undefined') {
+    if (!input.audience || typeof input.audience !== 'object' || Array.isArray(input.audience)) {
+      errors.push({ field: 'audience', code: 'INVALID_TYPE', message: 'Audience must be an object.' });
+    } else if (typeof input.audience.knowledgeLevel !== 'undefined' && !ALLOWED_KNOWLEDGE_LEVELS.has(input.audience.knowledgeLevel)) {
+      errors.push({
+        field: 'audience.knowledgeLevel',
+        code: 'INVALID_ENUM',
+        message: `Audience knowledge level must be one of: ${Array.from(ALLOWED_KNOWLEDGE_LEVELS).join(', ')}.`
+      });
+    }
+  }
+
+  // 8. Preferred Caption Length
   if (typeof input.preferredCaptionLength !== 'undefined') {
     const len = input.preferredCaptionLength;
     if (!len || typeof len !== 'object') {
@@ -400,12 +650,12 @@ function validateContentProfile(input) {
     }
   }
 
-  // 8. Timezone
+  // 9. Timezone
   if (typeof input.timezone !== 'undefined' && !isValidTimezone(input.timezone)) {
     errors.push({ field: 'timezone', code: 'INVALID_TIMEZONE', message: `Invalid IANA timezone: "${input.timezone}".` });
   }
 
-  // 9. Limits & Gaps
+  // 10. Limits & Gaps
   if (typeof input.maxPostsPerDay !== 'undefined') {
     if (typeof input.maxPostsPerDay !== 'number' || input.maxPostsPerDay < 1 || input.maxPostsPerDay > 20) {
       errors.push({ field: 'maxPostsPerDay', code: 'OUT_OF_RANGE', message: 'Maximum posts per day must be between 1 and 20.' });
@@ -432,7 +682,7 @@ function validateContentProfile(input) {
     }
   }
 
-  // 10. Content Mix
+  // 11. Content Mix & Promotional Limit
   if (typeof input.contentMix !== 'undefined') {
     const mix = input.contentMix;
     if (!mix || typeof mix !== 'object') {
@@ -451,28 +701,61 @@ function validateContentProfile(input) {
       if (total !== 100) {
         errors.push({ field: 'contentMix', code: 'SUM_NOT_100', message: `Content mix percentages must sum to 100 (current sum: ${total}).` });
       }
+
+      const promoLimit = typeof input.promotionalPostLimitPercent === 'number'
+        ? input.promotionalPostLimitPercent
+        : 100;
+      if (typeof mix.promotional === 'number' && mix.promotional > promoLimit) {
+        errors.push({
+          field: 'contentMix.promotional',
+          code: 'EXCEEDS_PROMOTIONAL_LIMIT',
+          message: `Promotional mix percentage (${mix.promotional}%) cannot exceed promotional post limit (${promoLimit}%).`
+        });
+      }
     }
   }
 
-  // 11. Approval Mode
+  // 12. Source Policy
+  if (typeof input.sourcePolicy !== 'undefined') {
+    if (!input.sourcePolicy || typeof input.sourcePolicy !== 'object' || Array.isArray(input.sourcePolicy)) {
+      errors.push({ field: 'sourcePolicy', code: 'INVALID_TYPE', message: 'Source policy must be an object.' });
+    } else if (typeof input.sourcePolicy.minimumSourcesForHighRiskClaims !== 'undefined') {
+      const minS = input.sourcePolicy.minimumSourcesForHighRiskClaims;
+      if (typeof minS !== 'number' || minS < 1 || minS > 5) {
+        errors.push({ field: 'sourcePolicy.minimumSourcesForHighRiskClaims', code: 'OUT_OF_RANGE', message: 'Minimum sources for high risk claims must be between 1 and 5.' });
+      }
+    }
+  }
+
+  // 13. Approval Mode
   if (typeof input.approvalMode !== 'undefined' && !ALLOWED_APPROVAL_MODES.has(input.approvalMode)) {
     errors.push({ field: 'approvalMode', code: 'INVALID_ENUM', message: `Approval mode must be one of: ${Array.from(ALLOWED_APPROVAL_MODES).join(', ')}.` });
   }
 
-  // 12. Content Pillars
+  // 14. Content Pillars
   if (typeof input.contentPillars !== 'undefined') {
     if (!Array.isArray(input.contentPillars)) {
       errors.push({ field: 'contentPillars', code: 'INVALID_TYPE', message: 'Content pillars must be an array.' });
     } else {
-      if (input.contentPillars.length > 8) {
+      if (options && options.requireFullProfile && input.contentPillars.length === 0) {
+        errors.push({ field: 'contentPillars', code: 'EMPTY_PILLARS', message: 'At least one content pillar is required.' });
+      } else if (input.contentPillars.length > 8) {
         errors.push({ field: 'contentPillars', code: 'ARRAY_TOO_LARGE', message: 'Maximum 8 content pillars allowed.' });
       }
+
       const seenTitles = new Set();
+      const seenIds = new Set();
+      let pillarWeightSum = 0;
+      let hasInvalidWeights = false;
+
       input.contentPillars.forEach((p, idx) => {
         if (!p || typeof p !== 'object') {
           errors.push({ field: `contentPillars[${idx}]`, code: 'INVALID_OBJECT', message: 'Pillar must be an object.' });
+          hasInvalidWeights = true;
           return;
         }
+
+        // Title check
         if (!p.title || typeof p.title !== 'string' || p.title.trim().length === 0) {
           errors.push({ field: `contentPillars[${idx}].title`, code: 'REQUIRED', message: 'Pillar title is required.' });
         } else {
@@ -482,7 +765,36 @@ function validateContentProfile(input) {
           }
           seenTitles.add(normTitle);
         }
+
+        // ID check
+        if (p.id) {
+          if (typeof p.id !== 'string') {
+            errors.push({ field: `contentPillars[${idx}].id`, code: 'INVALID_TYPE', message: 'Pillar ID must be a string.' });
+          } else {
+            const normId = p.id.trim().toLowerCase();
+            if (seenIds.has(normId)) {
+              errors.push({ field: `contentPillars[${idx}].id`, code: 'DUPLICATE_ID', message: `Duplicate pillar ID: "${p.id.trim()}".` });
+            }
+            seenIds.add(normId);
+          }
+        }
+
+        // Weight check
+        if (typeof p.weight !== 'number' || !Number.isInteger(p.weight) || p.weight < 1 || p.weight > 100) {
+          errors.push({ field: `contentPillars[${idx}].weight`, code: 'OUT_OF_RANGE', message: 'Pillar weight must be an integer between 1 and 100.' });
+          hasInvalidWeights = true;
+        } else {
+          pillarWeightSum += p.weight;
+        }
       });
+
+      if (input.contentPillars.length > 0 && !hasInvalidWeights && pillarWeightSum !== 100) {
+        errors.push({
+          field: 'contentPillars',
+          code: 'PILLAR_WEIGHTS_SUM_NOT_100',
+          message: `Content pillar weights must sum to exactly 100 (current sum: ${pillarWeightSum}).`
+        });
+      }
     }
   }
 
@@ -564,6 +876,7 @@ module.exports = {
   ALLOWED_CTA_STYLES,
   ALLOWED_HASHTAG_STYLES,
   ALLOWED_APPROVAL_MODES,
+  PAGE_DNA_PRESETS,
   createDefaultContentProfile,
   normalizeContentProfile,
   validateContentProfile,
