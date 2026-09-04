@@ -6,6 +6,7 @@ const facebook = require('../services/facebook');
 const storage = require('../services/storage');
 const upload = require('../middleware/upload');
 const { broadcastSSE } = require('../middleware/sse');
+const { serializePage, serializePages } = require('../utils/public-serializer');
 
 // POST /api/post (or /api/facebook/post) - Instant Post Publishing
 router.post('/post', upload.single('image'), async (req, res, next) => {
@@ -67,15 +68,15 @@ router.get('/account', async (req, res, next) => {
 
 // ================= MULTI-PAGE MANAGEMENT APIS =================
 
-// GET /api/facebook/pages - List all connected pages
+// GET /api/facebook/pages - List all connected pages (credentials redacted)
 router.get('/pages', (req, res) => {
   const s = storage.getSettings();
   const pages = storage.getConnectedPages();
   res.json({
     success: true,
     activePageId: s.activePageId || pages[0]?.id,
-    activePage: storage.getActivePage(),
-    pages
+    activePage: serializePage(storage.getActivePage()),
+    pages: serializePages(pages)
   });
 });
 
@@ -112,12 +113,15 @@ router.post('/pages', async (req, res, next) => {
       setAsActive: !!setAsActive
     });
 
-    broadcastSSE('page_switched', { activePage: storage.getActivePage(), pages: storage.getConnectedPages() });
+    broadcastSSE('page_switched', {
+      activePage: serializePage(storage.getActivePage()),
+      pages: serializePages(storage.getConnectedPages())
+    });
 
     res.json({
       success: true,
-      page: addedPage,
-      pages: storage.getConnectedPages(),
+      page: serializePage(addedPage),
+      pages: serializePages(storage.getConnectedPages()),
       activePageId: storage.getActivePage()?.id
     });
   } catch (err) {
@@ -137,12 +141,15 @@ router.post('/pages/switch', (req, res) => {
     return res.status(404).json({ success: false, error: 'Page not found in connected pages.' });
   }
 
-  broadcastSSE('page_switched', { activePage: switched, pages: storage.getConnectedPages() });
+  broadcastSSE('page_switched', {
+    activePage: serializePage(switched),
+    pages: serializePages(storage.getConnectedPages())
+  });
 
   res.json({
     success: true,
-    activePage: switched,
-    pages: storage.getConnectedPages()
+    activePage: serializePage(switched),
+    pages: serializePages(storage.getConnectedPages())
   });
 });
 
@@ -152,7 +159,7 @@ router.get('/pages/:id', (req, res) => {
   if (!page) {
     return res.status(404).json({ success: false, error: 'Page not found.' });
   }
-  res.json({ success: true, page });
+  res.json({ success: true, page: serializePage(page) });
 });
 
 // PUT /api/facebook/pages/:id - Edit connected page info and custom system prompt
@@ -172,13 +179,16 @@ router.put('/pages/:id', async (req, res, next) => {
     if (typeof pictureUrl === 'string' && pictureUrl.trim()) updates.pictureUrl = pictureUrl.trim();
 
     const updated = storage.updateConnectedPage(req.params.id, updates);
-    broadcastSSE('page_switched', { activePage: storage.getActivePage(), pages: storage.getConnectedPages() });
+    broadcastSSE('page_switched', {
+      activePage: serializePage(storage.getActivePage()),
+      pages: serializePages(storage.getConnectedPages())
+    });
 
     res.json({
       success: true,
-      page: updated,
-      pages: storage.getConnectedPages(),
-      activePage: storage.getActivePage()
+      page: serializePage(updated),
+      pages: serializePages(storage.getConnectedPages()),
+      activePage: serializePage(storage.getActivePage())
     });
   } catch (err) {
     next(err);
@@ -189,11 +199,14 @@ router.put('/pages/:id', async (req, res, next) => {
 router.delete('/pages/:id', (req, res) => {
   try {
     const remaining = storage.removeConnectedPage(req.params.id);
-    broadcastSSE('page_switched', { activePage: storage.getActivePage(), pages: remaining });
+    broadcastSSE('page_switched', {
+      activePage: serializePage(storage.getActivePage()),
+      pages: serializePages(remaining)
+    });
     res.json({
       success: true,
-      pages: remaining,
-      activePage: storage.getActivePage()
+      pages: serializePages(remaining),
+      activePage: serializePage(storage.getActivePage())
     });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
@@ -208,7 +221,14 @@ router.post('/test-connection', async (req, res) => {
 
   try {
     const info = await facebook.verifyConnection(pageId, accessToken);
-    res.json({ success: true, info });
+    res.json({
+      success: true,
+      info: {
+        pageId: info.pageId,
+        pageName: info.pageName,
+        category: info.category
+      }
+    });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
   }

@@ -1,7 +1,9 @@
 /**
  * Server-Sent Events (SSE) Hub
- * Manages real-time client subscriptions and event broadcasting
+ * Manages real-time client subscriptions and event broadcasting with automatic secret redaction.
  */
+
+const { serializePublic } = require('../utils/public-serializer');
 
 const sseClients = new Set();
 
@@ -13,7 +15,7 @@ function handleSSEConnection(req, res) {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*'
+    'Access-Control-Allow-Origin': process.env.ALLOWED_ORIGIN || '*'
   });
 
   res.write('event: connected\ndata: {"status":"connected"}\n\n');
@@ -36,10 +38,11 @@ function handleSSEConnection(req, res) {
 }
 
 /**
- * Broadcast an event to all connected SSE clients
+ * Broadcast an event to all connected SSE clients (payload sanitized)
  */
 function broadcastSSE(event, data) {
-  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  const sanitizedData = serializePublic(data);
+  const payload = `event: ${event}\ndata: ${JSON.stringify(sanitizedData)}\n\n`;
   for (const client of sseClients) {
     try {
       client.write(payload);

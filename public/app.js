@@ -2722,8 +2722,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Update fields
       if (pageSettingsPageId) pageSettingsPageId.value = state.settings.pageId || '';
-      if (pageSettingsAccessToken) pageSettingsAccessToken.value = state.settings.accessToken || '';
-      if (pageSettingsGeminiKey) pageSettingsGeminiKey.value = state.settings.geminiApiKey || '';
+      if (pageSettingsAccessToken) {
+        pageSettingsAccessToken.value = '';
+        pageSettingsAccessToken.placeholder = state.settings.facebookConnected
+          ? '•••••••••••••••• (Configured - leave blank to keep unchanged)'
+          : 'Enter Page Access Token';
+      }
+      if (pageSettingsGeminiKey) {
+        pageSettingsGeminiKey.value = '';
+        pageSettingsGeminiKey.placeholder = state.settings.geminiConfigured
+          ? '•••••••••••••••• (Configured - leave blank to keep unchanged)'
+          : 'Enter Gemini API Key';
+      }
       if (pageSettingsDemoMode) pageSettingsDemoMode.checked = !!state.settings.isDemoMode;
 
       // Update Profile & Accounts view

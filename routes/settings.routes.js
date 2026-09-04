@@ -5,23 +5,36 @@ const scheduler = require('../services/scheduler');
 const facebook = require('../services/facebook');
 const ai = require('../services/ai');
 const { broadcastSSE } = require('../middleware/sse');
+const { serializeSettings } = require('../utils/public-serializer');
 
-// GET /api/settings
+// GET /api/settings - Returns sanitized settings without exposing secrets
 router.get('/', (req, res) => {
-  res.json(storage.getSettings());
+  res.json(serializeSettings(storage.getSettings()));
 });
 
-// POST /api/settings
+// POST /api/settings - Update settings with credential protection
 router.post('/', (req, res, next) => {
   try {
-    const updated = storage.saveSettings(req.body);
+    const payload = { ...req.body };
+
+    // Prevent accidental erasure of secret keys if empty or not provided
+    if (!payload.geminiApiKey || typeof payload.geminiApiKey !== 'string' || !payload.geminiApiKey.trim()) {
+      delete payload.geminiApiKey;
+    }
+    if (!payload.accessToken || typeof payload.accessToken !== 'string' || !payload.accessToken.trim()) {
+      delete payload.accessToken;
+    }
+
+    const updated = storage.saveSettings(payload);
     if (updated.autoPostEnabled || updated.autoPilotEnabled) {
       scheduler.start();
     } else {
       scheduler.stop();
     }
-    broadcastSSE('settings_updated', updated);
-    res.json({ success: true, settings: updated });
+
+    const publicSettings = serializeSettings(updated);
+    broadcastSSE('settings_updated', publicSettings);
+    res.json({ success: true, settings: publicSettings });
   } catch (err) {
     next(err);
   }
@@ -33,7 +46,14 @@ router.post('/verify', async (req, res) => {
   try {
     const info = await facebook.verifyConnection(pageId, accessToken);
     storage.saveSettings({ pageName: info.pageName, pageId: info.pageId });
-    res.json({ success: true, info });
+    res.json({
+      success: true,
+      info: {
+        pageId: info.pageId,
+        pageName: info.pageName,
+        category: info.category
+      }
+    });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
   }
@@ -45,7 +65,13 @@ router.post('/verify-gemini', async (req, res) => {
   try {
     const info = await ai.verifyGeminiKey(apiKey);
     storage.saveSettings({ geminiApiKey: apiKey });
-    res.json({ success: true, info });
+    res.json({
+      success: true,
+      info: {
+        valid: true,
+        models: info.models || []
+      }
+    });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
   }
