@@ -167,23 +167,28 @@ function validateContent(postData = {}, options = {}) {
 
   const reasons = [];
   const warnings = [];
+  const issueCodes = [];
   let reviewRequired = false;
 
   // 1. Length Check
   if (!caption || typeof caption !== 'string') {
     reasons.push('Caption is empty or missing.');
+    issueCodes.push('SHORT_CAPTION');
   } else {
     const charCount = caption.trim().length;
     if (charCount < 30) {
       reasons.push(`Caption too short (${charCount} chars). Minimum 30 characters required.`);
+      issueCodes.push('SHORT_CAPTION');
     } else if (charCount > 6000) {
       reasons.push(`Caption too long (${charCount} chars). Maximum 6,000 characters allowed.`);
+      issueCodes.push('LONG_CAPTION');
     }
   }
 
   // 2. Mojibake / Corrupted Encoding Check
   if (containsMojibake(caption) || containsMojibake(postData.title || '')) {
     reasons.push('Corrupted character encoding (mojibake) detected in caption or title.');
+    issueCodes.push('MOJIBAKE_DETECTED');
   }
 
   // 3. Topic Check
@@ -195,6 +200,7 @@ function validateContent(postData = {}, options = {}) {
   const emojiMatches = caption.match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu) || [];
   if (emojiMatches.length > 25) {
     warnings.push(`Excessive emojis detected (${emojiMatches.length}). Recommended maximum is 15.`);
+    issueCodes.push('EXCESSIVE_EMOJIS');
     reviewRequired = true;
   }
 
@@ -202,6 +208,7 @@ function validateContent(postData = {}, options = {}) {
   const hashtags = caption.match(/#[\w\u0980-\u09FF]+/g) || [];
   if (hashtags.length > 15) {
     warnings.push(`Excessive hashtags detected (${hashtags.length}). Recommended maximum is 10.`);
+    issueCodes.push('EXCESSIVE_HASHTAGS');
     reviewRequired = true;
   }
 
@@ -212,18 +219,16 @@ function validateContent(postData = {}, options = {}) {
   if (isNewsCategory || hasSensitiveClaim) {
     const sourceCheck = validateSources(sources);
     if (!sourceCheck.valid) {
-      if (isAutoPilot) {
-        reasons.push(`News or sensitive claims cannot be auto-published without verified sources: ${sourceCheck.errors.join(' ')}`);
-      } else {
-        warnings.push(`Unverified news claims: ${sourceCheck.errors.join(' ')}`);
-        reviewRequired = true;
-      }
+      issueCodes.push('MISSING_SOURCE');
+      reasons.push(`News or sensitive claims cannot be published without verified sources: ${sourceCheck.errors.join(' ')}`);
+      reviewRequired = true;
     }
   }
 
   // 7. Duplicate Content Check
   const dupCheck = checkDuplicate(caption, history, 0.65);
   if (dupCheck.isDuplicate) {
+    issueCodes.push('DUPLICATE_CONTENT');
     if (isAutoPilot) {
       reasons.push(`High content similarity (${Math.round(dupCheck.similarity * 100)}%) detected with existing post ${dupCheck.matchedPostId}.`);
     } else {
@@ -238,6 +243,7 @@ function validateContent(postData = {}, options = {}) {
     const hasRealPerson = REAL_PERSON_KEYWORDS.some(k => lowerCaption.includes(k));
     if (hasRealPerson && (isNewsCategory || hasSensitiveClaim)) {
       reasons.push('Meta safety policy: AI-generated synthetic imagery cannot be used for breaking news concerning real living people.');
+      issueCodes.push('REAL_PERSON_AI_IMAGE');
     }
   }
 
@@ -247,6 +253,7 @@ function validateContent(postData = {}, options = {}) {
     const cleanPostCat = category.toLowerCase();
     if (cleanPageCat.includes('cook') && cleanPostCat.includes('space')) {
       warnings.push(`Post category "${category}" appears mismatched with Page niche "${pageCategory}".`);
+      issueCodes.push('CATEGORY_MISMATCH');
       reviewRequired = true;
     }
   }
@@ -255,6 +262,7 @@ function validateContent(postData = {}, options = {}) {
   for (const banned of BANNED_PATTERNS) {
     if (banned.test(caption)) {
       reasons.push('Caption contains prohibited keywords or spam patterns violating community standards.');
+      issueCodes.push('BANNED_CONTENT');
       break;
     }
   }
@@ -262,6 +270,9 @@ function validateContent(postData = {}, options = {}) {
   // 11. Unverified Claims
   if (hasSensitiveClaim && sources.length === 0) {
     reviewRequired = true;
+    if (!issueCodes.includes('MISSING_SOURCE')) {
+      issueCodes.push('MISSING_SOURCE');
+    }
     warnings.push('Post makes urgent or breaking claims without citing an official source.');
   }
 
@@ -270,6 +281,7 @@ function validateContent(postData = {}, options = {}) {
   for (const urlStr of urlsInCaption) {
     if (!isValidPublicUrl(urlStr)) {
       reasons.push(`Suspicious or private URL found in post text: ${urlStr}`);
+      issueCodes.push('UNSAFE_URL');
     }
   }
 
@@ -278,6 +290,7 @@ function validateContent(postData = {}, options = {}) {
     const fs = require('fs');
     if (!fs.existsSync(postData.imagePath)) {
       reasons.push(`Image path specified does not exist on disk: ${postData.imagePath}`);
+      issueCodes.push('INVALID_IMAGE_PATH');
     }
   }
 
@@ -294,6 +307,7 @@ function validateContent(postData = {}, options = {}) {
     safe,
     reviewRequired: reviewRequired || reasons.length > 0,
     reasons,
+    issueCodes,
     warnings
   };
 }

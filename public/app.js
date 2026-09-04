@@ -1,5 +1,26 @@
 // AutoPost - Complete Modern Facebook Automation UI Engine
 
+let currentCsrfToken = null;
+
+// Wrap window.fetch to automatically include X-CSRF-Token on mutating requests
+const _nativeFetch = window.fetch;
+window.fetch = async function(resource, init = {}) {
+  const method = (init.method || 'GET').toUpperCase();
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && currentCsrfToken) {
+    init.headers = init.headers || {};
+    if (init.headers instanceof Headers) {
+      if (!init.headers.has('X-CSRF-Token')) {
+        init.headers.set('X-CSRF-Token', currentCsrfToken);
+      }
+    } else if (Array.isArray(init.headers)) {
+      init.headers.push(['X-CSRF-Token', currentCsrfToken]);
+    } else {
+      init.headers['X-CSRF-Token'] = currentCsrfToken;
+    }
+  }
+  return _nativeFetch.call(this, resource, init);
+};
+
 document.addEventListener('DOMContentLoaded', () => {
   // Global State
   let state = {
@@ -40,7 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
       title: 'Breaking / Trending News Analysis',
       badge: '📰 সাম্প্রতিক খবর',
       category: 'trending_news',
-      imageUrl: 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=1080&h=1080&q=85',
+      imageUrl: '/robot.svg',
       desc: 'Catch immediate viral attention with a sensational event breakdown.',
       sample: '🚨 ব্রেকিং নিউজ ও সমসাময়িক আপডেট! 📢✨\n\nআজকের আলোচিত ঘটনার পেছনের মূল তথ্য ও বিস্তারিত বিশ্লেষণ:\n\n📌 গুরুত্বপূর্ণ পয়েন্ট:\n🔹 মূল ঘটনা ও প্রেক্ষাপট...\n🔹 জনসাধারণের ওপর এর প্রভাব...\n🔹 বিশেষজ্ঞদের মতামত...\n\nএই বিষয়ে আপনার ব্যক্তিগত মতামত কি? কমেন্টে জানান! 👇\n\n#TrendingNews #BreakingNews #CurrentAffairs #ViralPost'
     },
@@ -49,7 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
       title: 'Amazing Science & Nature Mystery',
       badge: '🔬 বিজ্ঞানের রহস্য',
       category: 'science_nature',
-      imageUrl: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1080&h=1080&q=85',
+      imageUrl: '/robot.svg',
       desc: 'Fascinating mind-bending facts about the cosmos, ocean or biology.',
       sample: '🌌 মহাবিশ্বের এমন এক রহস্য যা জানলে আপনার চোখ কপালে উঠবে! 🔭✨\n\nবিজ্ঞানীদের সাম্প্রতিক গবেষণায় উঠে এসেছে কিছু অবিশ্বাস্য তথ্য:\n\n📌 বিস্ময়কর ফ্যাক্টস:\n🔹 প্রথম অদ্ভুত সত্য...\n🔹 মানবদেহের ওপর এর চমকপ্রদ প্রভাব...\n🔹 পৃথিবী ও মহাকাশের অদ্ভুত সংযোগ...\n\nবিজ্ঞানের এমন অদ্ভুত সব তথ্য বন্ধুদের সাথে শেয়ার করতে ভুলবেন না! 🚀\n\n#ScienceFacts #AmazingUniverse #Astronomy #NatureMystery'
     },
@@ -58,7 +79,7 @@ document.addEventListener('DOMContentLoaded', () => {
       title: 'Historical Heritage & Lost Legends',
       badge: '🏛️ ইতিহাসের রহস্য',
       category: 'history_civilization',
-      imageUrl: 'https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&w=1080&h=1080&q=85',
+      imageUrl: '/robot.svg',
       desc: 'Unveil the forgotten facts about ancient empires and heroic rulers.',
       sample: '🏛️ ইতিহাসের পাতা থেকে: এক অজানা বীরগাথা ও ধ্বংস হওয়া সাম্রাজ্যের গল্প! 📜✨\n\nআজ থেকে শত শত বছর আগের এক অবিস্মরণীয় ঘটনা:\n\n📌 ঐতিহাসিক সত্য:\n🔹 ঘটনার পেছনের আসল রহস্য...\n🔹 যুগান্তকারী যুদ্ধের ফলাফল...\n🔹 কীভাবে বদলে গিয়েছিল ইতিহাস...\n\nআমাদের সমৃদ্ধ ঐতিহ্য ও অতীত জানতে সঙ্গে থাকুন! 🇮🇳\n\n#IndianHistory #Heritage #HistoryFacts #AncientLegends'
     },
@@ -67,7 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
       title: 'Mind Power & Psychology Hacks',
       badge: '🧠 মানব মস্তিষ্ক',
       category: 'psychology_mind',
-      imageUrl: 'https://images.unsplash.com/photo-1507499739999-097706ad8914?auto=format&fit=crop&w=1080&h=1080&q=85',
+      imageUrl: '/robot.svg',
       desc: 'High-engagement behavioral psychology and memory habits.',
       sample: '🧠 প্রতিদিন সকালে এই ১টি ভুল করলেই কমে যায় আপনার ব্রেইনের শক্তি! 💡\n\nমনোবিজ্ঞান ও নিউরোসায়েন্সের গবেষণায় পাওয়া ৩টি দারুণ টিপস:\n\n📌 মস্তিষ্কের গোপন নিয়ম:\n🔹 স্মৃতিশক্তি বাড়ানোর সহজ কৌশল...\n🔹 মানসিক চাপ দ্রুত কমানোর উপায়...\n🔹 অবচেতন মনের অবিশ্বাস্য ক্ষমতা...\n\nনিজেকে প্রতিদিন ১% উন্নত করতে আজই শুরু করুন! 📚✨\n\n#PsychologyTricks #MindPower #SelfImprovement #BrainFacts'
     },
@@ -76,7 +97,7 @@ document.addEventListener('DOMContentLoaded', () => {
       title: 'AI Revolution & Future Inventions',
       badge: '💡 ভবিষ্যৎ প্রযুক্তি',
       category: 'tech_inventions',
-      imageUrl: 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1080&h=1080&q=85',
+      imageUrl: '/robot.svg',
       desc: 'Viral discussions on artificial intelligence, robots, and tech jobs.',
       sample: '🤖 কৃত্রিম বুদ্ধিমত্তা (AI) কি সত্যিই প্রযুক্তির ভবিষ্যৎ বদলে দেবে? ⚡\n\nবিশ্বজুড়ে প্রযুক্তির দ্রুত পরিবর্তন নিয়ে যা বলছেন শীর্ষ বিজ্ঞানীরা:\n\n📌 প্রযুক্তির নতুন দিগন্ত:\n🔹 যে কাজগুলো এআই কখনোই করতে পারবে না...\n🔹 নতুন কী ধরণের চাকরির সুযোগ আসছে...\n🔹 সাধারণ মানুষ কীভাবে এতে লাভবান হবে...\n\nপ্রযুক্তির এই বিপ্লবে আপনার অভিমত কি? কমেন্টে জানান! 👇\n\n#ArtificialIntelligence #TechInventions #FutureTech #Innovation'
     },
@@ -85,7 +106,7 @@ document.addEventListener('DOMContentLoaded', () => {
       title: 'Inspiring Life Philosophy & Quotes',
       badge: '✨ জীবন ভাবনা',
       category: 'philosophy_wisdom',
-      imageUrl: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1080&h=1080&q=85',
+      imageUrl: '/robot.svg',
       desc: 'Emotional storytelling and moral guidance that drives massive shares.',
       sample: '✨ জীবনের এই ৩টি কঠিন সত্য যত তাড়াতাড়ি বুঝবেন, ততই ভালো থাকবেন! 🌸\n\nঅভিজ্ঞতার চেয়ে বড় কোনো শিক্ষক জীবনে আর নেই:\n\n📌 জীবনের ৩টি শিক্ষা:\n🔹 মানুষের আচরণ ও প্রত্যাশা নিয়ন্ত্রণ...\n🔹 সময়ের মূল্য ও আত্মসম্মান...\n🔹 কঠিন সময়ে নিজেকে শান্ত রাখার কৌশল...\n\nকথাগুলো মনের মতো লাগলে আপনার প্রিয় মানুষের সাথে শেয়ার করুন। ❤️\n\n#LifeQuotes #Inspiration #Philosophy #DailyWisdom #Motivational'
     }
@@ -973,7 +994,7 @@ document.addEventListener('DOMContentLoaded', () => {
         snippet: 'Good morning! Make today amazing...',
         date: '28 May 2024',
         time: '09:15 AM',
-        thumb: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=120&auto=format&fit=crop&q=80'
+        thumb: '/robot.svg'
       },
       {
         id: 'mock_2',
@@ -981,7 +1002,7 @@ document.addEventListener('DOMContentLoaded', () => {
         snippet: 'Boost your productivity with these simple...',
         date: '28 May 2024',
         time: '12:00 PM',
-        thumb: 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=120&auto=format&fit=crop&q=80'
+        thumb: '/robot.svg'
       },
       {
         id: 'mock_3',
@@ -989,7 +1010,7 @@ document.addEventListener('DOMContentLoaded', () => {
         snippet: 'We have something great to share...',
         date: '28 May 2024',
         time: '03:00 PM',
-        thumb: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=120&auto=format&fit=crop&q=80'
+        thumb: '/robot.svg'
       },
       {
         id: 'mock_4',
@@ -997,7 +1018,7 @@ document.addEventListener('DOMContentLoaded', () => {
         snippet: 'See how our solution helped...',
         date: '28 May 2024',
         time: '06:00 PM',
-        thumb: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=120&auto=format&fit=crop&q=80'
+        thumb: '/robot.svg'
       }
     ];
 
@@ -3004,6 +3025,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function hideAuthModal() {
     if (adminAuthModal) adminAuthModal.classList.add('hidden');
     if (adminAuthError) adminAuthError.classList.add('hidden');
+    if (adminAuthPasswordInput) adminAuthPasswordInput.value = '';
   }
 
   // Toggle Password Visibility Eye Button
@@ -3048,6 +3070,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const data = await res.json();
         if (data.success && data.authenticated) {
+          currentCsrfToken = data.csrfToken || null;
           hideAuthModal();
           updateAuthUI(true, data.user);
           initApp();
@@ -3084,6 +3107,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const data = await res.json();
         if (data.success && data.authenticated) {
+          currentCsrfToken = data.csrfToken || null;
           hideAuthModal();
           updateAuthUI(true, data.user);
           initApp();
@@ -3107,6 +3131,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch {
       // ignore
     }
+    currentCsrfToken = null;
     updateAuthUI(false);
     showAuthModal(true);
   }
@@ -3218,19 +3243,23 @@ document.addEventListener('DOMContentLoaded', () => {
       if (res.ok) {
         const data = await res.json();
         if (data.authenticated) {
+          currentCsrfToken = data.csrfToken || null;
           hideAuthModal();
           updateAuthUI(true, data.user);
           initApp();
           return;
         } else {
+          currentCsrfToken = null;
           updateAuthUI(false);
           showAuthModal(Boolean(data.isDev));
           return;
         }
       }
+      currentCsrfToken = null;
       updateAuthUI(false);
       showAuthModal(true);
     } catch {
+      currentCsrfToken = null;
       updateAuthUI(false);
       showAuthModal(true);
     }

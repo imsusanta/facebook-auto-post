@@ -1,23 +1,62 @@
 /**
- * Comprehensive Security & Regression Test Suite
+ * Comprehensive Independent Integration & Security Test Suite
  * Powered by Node.js built-in test runner (node:test and node:assert).
- * Hermetic execution: Strictly mocks all external network endpoints (Facebook, Gemini, Pollinations).
+ *
+ * Strict Security Controls (Ordered strictly A through G):
+ * A. Create temporary directory.
+ * B. Set process.env.DATA_DIR.
+ * C. Create safe fixture files.
+ * D. Install network guard.
+ * E. Import application modules.
+ * F. Run tests.
+ * G. Stop services, inspect open handles, assert zero data tampering, and delete temp directory.
  */
 
-const test = require('node:test');
+// Step A: Create temporary test directory
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const crypto = require('crypto');
+
+const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-int-test-data-'));
+
+// Step B: Set process.env.DATA_DIR before ANY application module is required
+process.env.DATA_DIR = testDataDir;
+process.env.NODE_ENV = 'development';
+process.env.DEV_AUTH_BYPASS = 'false';
+process.env.FB_APP_SECRET = 'test_meta_app_secret_12345';
+process.env.ADMIN_API_KEY = 'test_admin_api_key_secret_999';
+
+// Step C: Record real data/settings.json state (if exists) without reading or exposing contents
+const realSettingsPath = path.join(__dirname, '..', 'data', 'settings.json');
+let initialSettingsHash = null;
+let initialSettingsMtime = null;
+
+if (fs.existsSync(realSettingsPath)) {
+  const content = fs.readFileSync(realSettingsPath);
+  initialSettingsHash = crypto.createHash('sha256').update(content).digest('hex');
+  initialSettingsMtime = fs.statSync(realSettingsPath).mtimeMs;
+}
+
+// Step D: Install loopback-only network deny guard
+const networkGuard = require('./network-guard');
+networkGuard.installNetworkGuard();
+
+// Step E: Import application modules (only AFTER DATA_DIR and network guard are initialized)
+const { test, describe, before, after, afterEach } = require('node:test');
 const assert = require('node:assert');
+const http = require('http');
+const https = require('https');
+const net = require('net');
 const axios = require('axios');
 
-// =========================================================================
-// MOCK ALL EXTERNAL CALLS HERMETICALLY (No network egress)
-// =========================================================================
-const originalAxiosPost = axios.post;
-const originalAxiosGet = axios.get;
-
+// Mock external providers for AI generation
 axios.post = async (url, data) => {
-  // 1. Mock Google Gemini API responses
   if (typeof url === 'string' && url.includes('generateContent')) {
     const payloadStr = JSON.stringify(data);
+    if (payloadStr.includes('Reply: OK')) {
+      return { data: { candidates: [{ content: { parts: [{ text: 'Reply: OK' }] } }] } };
+    }
     if (payloadStr.includes('JSON array')) {
       return {
         data: {
@@ -25,9 +64,8 @@ axios.post = async (url, data) => {
             content: {
               parts: [{
                 text: JSON.stringify([
-                  { title: "মহাকাশের কৃষ্ণগহ্বর", search_term: "black hole in space", angle: "মহাকাশ গবেষণা", badge: "মহাকাশ বিজ্ঞান" },
-                  { title: "জেমস ওয়েব টেলিস্কোপ", search_term: "James Webb Telescope", angle: "টেলিস্কোপ আবিষ্কার", badge: "মহাকাশ বিজ্ঞান" },
-                  { title: "মঙ্গল গ্রহে প্রাণের সন্ধান", search_term: "Mars rover discovery", angle: "মঙ্গল অভিযান", badge: "মহাকাশ বিজ্ঞান" }
+                  { title: 'মহাকাশের কৃষ্ণগহ্বর', search_term: 'black hole in space', angle: 'মহাকাশ গবেষণা', badge: 'মহাকাশ বিজ্ঞান' },
+                  { title: 'জেমস ওয়েব টেলিস্কোপ', search_term: 'James Webb Telescope', angle: 'টেলিস্কোপ আবিষ্কার', badge: 'মহাকাশ বিজ্ঞান' }
                 ])
               }]
             }
@@ -57,7 +95,6 @@ axios.post = async (url, data) => {
     };
   }
 
-  // 2. Mock Pollinations API fallback
   if (typeof url === 'string' && url.includes('pollinations.ai')) {
     return {
       data: JSON.stringify({
@@ -75,740 +112,937 @@ axios.post = async (url, data) => {
   return { data: {} };
 };
 
+const sharp = require('sharp');
+let mockImageBuffer = null;
+
 axios.get = async () => {
-  return { data: Buffer.from('mock-image-data-for-tests') };
+  if (!mockImageBuffer) {
+    mockImageBuffer = await sharp({
+      create: { width: 100, height: 100, channels: 4, background: { r: 15, g: 23, b: 42, alpha: 1 } }
+    }).jpeg().toBuffer();
+  }
+  return { data: mockImageBuffer };
 };
 
-// Modules under test
+const storage = require('../services/storage');
+const facebook = require('../services/facebook');
+const ai = require('../services/ai');
+const scheduler = require('../services/scheduler');
+const { getFallbacks } = require('../services/ai/fallbacks');
+const {
+  validateContent,
+  containsMojibake,
+  checkDuplicate,
+  isValidPublicUrl
+} = require('../services/content-safety');
 const {
   isSensitiveKey,
-  redactString,
-  deepSanitize,
   serializePublic,
   serializeSettings,
   serializePage,
   serializePages
 } = require('../utils/public-serializer');
-
 const {
-  authMiddleware,
-  safeCompare,
-  createSession,
-  getSession,
-  validateSession,
-  destroySession,
-  clearAllSessions,
-  hasQueryCredentials,
   hashPassword,
   verifyPassword,
   isAuthConfigured,
-  requireRole
+  createSession,
+  getSession,
+  destroySession,
+  clearAllSessions,
+  stopSessionPruneTimer
 } = require('../middleware/auth');
-const storage = require('../services/storage');
-
-const {
-  validateSettingsPayload,
-  ALLOWED_SETTINGS_KEYS,
-  FORBIDDEN_SECRET_KEYS
-} = require('../middleware/settings-validator');
-
-const errorHandler = require('../middleware/errorHandler');
+const { validateSettingsPayload } = require('../middleware/settings-validator');
 const { isOriginAllowed, isValidOriginFormat, getAllowedOrigins } = require('../utils/cors-validator');
-const { validateContent, checkDuplicate, containsMojibake, validateSources } = require('../services/content-safety');
-const ai = require('../services/ai');
-const facebook = require('../services/facebook');
+const errorHandler = require('../middleware/errorHandler');
+const { closeAllSseClients } = require('../middleware/sse');
+const { createApp } = require('../createApp');
+const { runBrowserTests } = require('./browser-test');
 
-// =========================================================================
-// 1. PUBLIC SERIALIZER & SECRET STRIPPING TESTS (Items 11 & 15)
-// =========================================================================
-test('Serializer: isSensitiveKey correctly identifies all secret key variations', () => {
-  assert.strictEqual(isSensitiveKey('accessToken'), true);
-  assert.strictEqual(isSensitiveKey('access_token'), true);
-  assert.strictEqual(isSensitiveKey('geminiApiKey'), true);
-  assert.strictEqual(isSensitiveKey('GEMINI_API_KEY'), true);
-  assert.strictEqual(isSensitiveKey('webhookVerifyToken'), true);
-  assert.strictEqual(isSensitiveKey('password'), true);
-  assert.strictEqual(isSensitiveKey('jwtSecret'), true);
-  assert.strictEqual(isSensitiveKey('adminKey'), true);
-  assert.strictEqual(isSensitiveKey('credential'), true);
+// Ephemeral Test Server Setup
+let server = null;
+let baseUrl = '';
 
-  // Safe non-secret keys
-  assert.strictEqual(isSensitiveKey('pageId'), false);
-  assert.strictEqual(isSensitiveKey('pageName'), false);
-  assert.strictEqual(isSensitiveKey('autoPostEnabled'), false);
-  assert.strictEqual(isSensitiveKey('cronSchedule'), false);
+before(async () => {
+  storage.initDefaultUsers();
+  const app = createApp();
+  server = http.createServer(app);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  baseUrl = `http://127.0.0.1:${port}`;
 });
 
-test('Serializer: Shared object references (DAG) are NOT marked [Circular]', () => {
-  const sharedAuthor = { name: 'Susanta', role: 'Maintainer' };
-  const post = {
-    title: 'Facebook Automation OS',
-    primaryAuthor: sharedAuthor,
-    secondaryAuthor: sharedAuthor
-  };
-
-  const sanitized = serializePublic(post);
-  assert.strictEqual(sanitized.primaryAuthor.name, 'Susanta');
-  assert.strictEqual(sanitized.secondaryAuthor.name, 'Susanta');
-  assert.notStrictEqual(sanitized.secondaryAuthor, '[Circular]');
+afterEach(() => {
+  scheduler.stop();
+  scheduler.resetDependencies();
 });
 
-test('Serializer: Real circular references are safely marked [Circular]', () => {
-  const cycleObj = { name: 'Root' };
-  cycleObj.self = cycleObj;
+after(async () => {
+  scheduler.stop();
+  scheduler.resetDependencies();
+  closeAllSseClients();
+  clearAllSessions();
+  stopSessionPruneTimer();
 
-  const sanitized = serializePublic(cycleObj);
-  assert.strictEqual(sanitized.name, 'Root');
-  assert.strictEqual(sanitized.self, '[Circular]');
-});
+  if (server) {
+    if (server.closeAllConnections) server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+  networkGuard.uninstallNetworkGuard();
 
-test('Serializer: Buffer values are omitted from public serialization', () => {
-  const payload = {
-    filename: 'test.png',
-    data: Buffer.from('binary-image-data'),
-    meta: { size: 100 }
-  };
+  // Inspect open handles for memory leaks
+  if (typeof process._getActiveHandles === 'function') {
+    const handles = process._getActiveHandles();
+    const safeHandles = handles
+      .filter((h) => h && !h._unrefed)
+      .map((h) => {
+        const type = h.constructor ? h.constructor.name : typeof h;
+        const port = h.localPort || (h._handle && h._handle.localPort) || null;
+        return port ? `${type}(:${port})` : type;
+      });
+    if (safeHandles.length > 0) {
+      console.log(`[Teardown Audit] Active un-refed handles remaining: ${safeHandles.join(', ')}`);
+    }
+  }
 
-  const sanitized = serializePublic(payload);
-  assert.strictEqual(sanitized.data, undefined);
-  assert.strictEqual(sanitized.filename, 'test.png');
-  assert.strictEqual(sanitized.meta.size, 100);
-});
+  // Verify real local settings file was completely untouched
+  if (initialSettingsHash) {
+    const finalContent = fs.readFileSync(realSettingsPath);
+    const finalHash = crypto.createHash('sha256').update(finalContent).digest('hex');
+    const finalMtime = fs.statSync(realSettingsPath).mtimeMs;
+    assert.strictEqual(finalHash, initialSettingsHash, 'CRITICAL: data/settings.json SHA256 was altered during tests!');
+    assert.strictEqual(finalMtime, initialSettingsMtime, 'CRITICAL: data/settings.json mtime was altered during tests!');
+  }
 
-test('Serializer: Map and Set instances are safely converted without leaks', () => {
-  const setObj = new Set(['cat', 'dog', 'EAASecretToken1234567890']);
-  const sanitizedSet = serializePublic(setObj);
-  assert.ok(Array.isArray(sanitizedSet));
-  assert.strictEqual(sanitizedSet.length, 3);
-  assert.ok(sanitizedSet.includes('[REDACTED_FB_TOKEN]'));
-
-  const mapObj = new Map();
-  mapObj.set('publicTitle', 'Safe Title');
-  mapObj.set('accessToken', 'EAASecretToken1234567890');
-  mapObj.set('geminiApiKey', 'AIzaSyFakeKey12345678901234567890');
-
-  const sanitizedMap = serializePublic(mapObj);
-  assert.strictEqual(sanitizedMap.publicTitle, 'Safe Title');
-  assert.strictEqual(sanitizedMap.accessToken, undefined);
-  assert.strictEqual(sanitizedMap.geminiApiKey, undefined);
-});
-
-test('Serializer: Error objects have sensitive tokens redacted from message', () => {
-  const err = new Error('Failed to connect to Meta Graph API with token EAABwzSecretToken12345');
-  const sanitized = serializePublic(err);
-  assert.strictEqual(sanitized.name, 'Error');
-  assert.ok(!sanitized.message.includes('EAABwzSecretToken'));
-  assert.ok(sanitized.message.includes('[REDACTED_FB_TOKEN]'));
-  assert.strictEqual(sanitized.stack, undefined);
-});
-
-test('Serializer: Specialized serializeSettings strips secrets and enriches booleans', () => {
-  const rawSettings = {
-    pageId: '12345',
-    pageName: 'Tech News',
-    accessToken: 'EAABwz1234567890',
-    geminiApiKey: 'AIzaSy12345678901234567890',
-    pages: [
-      { id: '12345', name: 'Tech News', accessToken: 'EAABwz1234567890' }
-    ]
-  };
-
-  const sanitized = serializeSettings(rawSettings);
-  assert.strictEqual(sanitized.accessToken, undefined);
-  assert.strictEqual(sanitized.geminiApiKey, undefined);
-  assert.strictEqual(sanitized.pages[0].accessToken, undefined);
-  assert.strictEqual(sanitized.geminiConfigured, true);
-  assert.strictEqual(sanitized.facebookConnected, true);
-  assert.strictEqual(sanitized.pages[0].hasToken, true);
-  assert.strictEqual(sanitized.pages[0].connected, true);
-});
-
-test('Serializer: Specialized serializePage and serializePages strip access tokens', () => {
-  const page = { id: 'pg_1', name: 'Science Page', accessToken: 'EAABwz1234567890', category: 'Science' };
-  const sanitizedPage = serializePage(page);
-  assert.strictEqual(sanitizedPage.accessToken, undefined);
-  assert.strictEqual(sanitizedPage.id, 'pg_1');
-  assert.strictEqual(sanitizedPage.hasToken, true);
-  assert.strictEqual(sanitizedPage.connected, true);
-
-  const sanitizedPages = serializePages([page]);
-  assert.strictEqual(sanitizedPages[0].accessToken, undefined);
-  assert.strictEqual(sanitizedPages[0].hasToken, true);
-});
-
-test('Serializer: Generic serializePublic does NOT infer misleading business fields', () => {
-  const arbitraryObject = {
-    foo: 'bar',
-    count: 42
-  };
-
-  const sanitized = serializePublic(arbitraryObject);
-  assert.strictEqual('geminiConfigured' in sanitized, false);
-  assert.strictEqual('facebookConnected' in sanitized, false);
-  assert.strictEqual('hasToken' in sanitized, false);
-});
-
-// =========================================================================
-// 2. AUTHENTICATION & ACCESS CONTROL TESTS (Items 1, 2, 3, 5)
-// =========================================================================
-test('Auth: hasQueryCredentials detects query string secrets', () => {
-  assert.strictEqual(hasQueryCredentials({ apiKey: 'secret' }), true);
-  assert.strictEqual(hasQueryCredentials({ token: 'secret' }), true);
-  assert.strictEqual(hasQueryCredentials({ key: 'secret' }), true);
-  assert.strictEqual(hasQueryCredentials({ password: 'secret' }), true);
-  assert.strictEqual(hasQueryCredentials({ access_token: 'secret' }), true);
-  assert.strictEqual(hasQueryCredentials({ page: '1', limit: '10' }), false);
-});
-
-test('Auth: Query-string credentials are strictly rejected with 400', () => {
-  let statusSent = 0;
-  let responseData = null;
-
-  const mockRes = {
-    status(s) { statusSent = s; return this; },
-    json(d) { responseData = d; }
-  };
-
-  authMiddleware(
-    { path: '/settings', query: { apiKey: 'some_key' } },
-    mockRes,
-    () => assert.fail('Should not call next')
-  );
-
-  assert.strictEqual(statusSent, 400);
-  assert.strictEqual(responseData.code, 'CREDENTIALS_IN_URL_FORBIDDEN');
-});
-
-test('Auth: Production without auth config fails closed with 500', () => {
-  const origEnv = process.env.NODE_ENV;
-  const origKey = process.env.ADMIN_API_KEY;
-
+  // Cleanup temp directory
   try {
-    process.env.NODE_ENV = 'production';
-    delete process.env.ADMIN_API_KEY;
-
-    let statusSent = 0;
-    let responseData = null;
-    const mockRes = {
-      status(s) { statusSent = s; return this; },
-      json(d) { responseData = d; }
-    };
-
-    authMiddleware({ path: '/settings', headers: {} }, mockRes, () => assert.fail('Should not proceed'));
-    assert.strictEqual(statusSent, 500);
-    assert.strictEqual(responseData.code, 'AUTH_CONFIG_MISSING');
-  } finally {
-    process.env.NODE_ENV = origEnv;
-    process.env.ADMIN_API_KEY = origKey;
+    fs.rmSync(testDataDir, { recursive: true, force: true });
+  } catch {
+    // ignore
   }
 });
 
-test('Auth: Development without DEV_AUTH_BYPASS fails closed with 401', () => {
-  const origEnv = process.env.NODE_ENV;
-  const origKey = process.env.ADMIN_API_KEY;
-  const origBypass = process.env.DEV_AUTH_BYPASS;
+// =========================================================================
+// SUITE 1: STRICT NETWORK EGRESS DENY GUARD (REAL ATTEMPTS)
+// =========================================================================
+describe('1. Network Egress Deny Guard Verification', () => {
+  test('global.fetch to external URL throws NETWORK_EGRESS_BLOCKED', async () => {
+    await assert.rejects(
+      async () => fetch('https://graph.facebook.com'),
+      (err) => err.code === 'NETWORK_EGRESS_BLOCKED'
+    );
+  });
 
-  try {
-    process.env.NODE_ENV = 'development';
-    delete process.env.ADMIN_API_KEY;
-    delete process.env.DEV_AUTH_BYPASS;
+  test('https.get to external URL throws NETWORK_EGRESS_BLOCKED', () => {
+    assert.throws(
+      () => https.get('https://generativelanguage.googleapis.com'),
+      (err) => err.code === 'NETWORK_EGRESS_BLOCKED'
+    );
+  });
 
-    let statusSent = 0;
-    let responseData = null;
-    const mockRes = {
-      status(s) { statusSent = s; return this; },
-      json(d) { responseData = d; }
-    };
+  test('http.get to external URL throws NETWORK_EGRESS_BLOCKED', () => {
+    assert.throws(
+      () => http.get('http://text.pollinations.ai'),
+      (err) => err.code === 'NETWORK_EGRESS_BLOCKED'
+    );
+  });
 
-    authMiddleware({ path: '/settings', headers: {} }, mockRes, () => assert.fail('Should not proceed'));
-    assert.strictEqual(statusSent, 401);
-    assert.strictEqual(responseData.code, 'AUTH_REQUIRED');
-  } finally {
-    process.env.NODE_ENV = origEnv;
-    process.env.ADMIN_API_KEY = origKey;
-    process.env.DEV_AUTH_BYPASS = origBypass;
-  }
+  test('net.connect to external destination throws NETWORK_EGRESS_BLOCKED', () => {
+    assert.throws(
+      () => net.connect({ host: 'graph.facebook.com', port: 443 }),
+      (err) => err.code === 'NETWORK_EGRESS_BLOCKED'
+    );
+  });
+
+  test('Loopback requests remain permitted', async () => {
+    const res = await fetch(`${baseUrl}/api/auth/status`);
+    assert.strictEqual(res.status, 200);
+  });
+
+  // Clear intentional guard test attempts so test audit remains 0
+  networkGuard.clearBlockedAttempts();
 });
 
-test('Auth: Development with explicit DEV_AUTH_BYPASS=true bypasses cleanly', () => {
-  const origEnv = process.env.NODE_ENV;
-  const origKey = process.env.ADMIN_API_KEY;
-  const origBypass = process.env.DEV_AUTH_BYPASS;
+// =========================================================================
+// SUITE 2: SERIALIZER & DATA REDACTION SAFETY
+// =========================================================================
+describe('2. Serializer & Redaction Safety', () => {
+  test('isSensitiveKey detects all secret key patterns', () => {
+    assert.strictEqual(isSensitiveKey('accessToken'), true);
+    assert.strictEqual(isSensitiveKey('fb_app_secret'), true);
+    assert.strictEqual(isSensitiveKey('geminiApiKey'), true);
+    assert.strictEqual(isSensitiveKey('passwordHash'), true);
+    assert.strictEqual(isSensitiveKey('token'), true);
+    assert.strictEqual(isSensitiveKey('status'), false);
+    assert.strictEqual(isSensitiveKey('category'), false);
+    assert.strictEqual(isSensitiveKey('pageName'), false);
+  });
 
-  try {
-    process.env.NODE_ENV = 'development';
-    delete process.env.ADMIN_API_KEY;
-    process.env.DEV_AUTH_BYPASS = 'true';
+  test('serializeSettings strips all secret keys and enriches flags', () => {
+    const raw = {
+      pageName: 'My Page',
+      accessToken: 'EAABwzSecretToken123',
+      geminiApiKey: 'AIzaSyFakeKey456',
+      autoPostEnabled: true
+    };
+    const sanitized = serializeSettings(raw);
+    assert.strictEqual(sanitized.accessToken, undefined);
+    assert.strictEqual(sanitized.geminiApiKey, undefined);
+    assert.strictEqual(sanitized.facebookConnected, true);
+    assert.strictEqual(sanitized.geminiConfigured, true);
+    assert.strictEqual(sanitized.pageName, 'My Page');
+  });
 
-    let nextCalled = false;
-    authMiddleware({ path: '/settings', headers: {} }, {}, () => { nextCalled = true; });
-    assert.strictEqual(nextCalled, true);
-  } finally {
-    process.env.NODE_ENV = origEnv;
-    process.env.ADMIN_API_KEY = origKey;
-    process.env.DEV_AUTH_BYPASS = origBypass;
-  }
+  test('serializePage and serializePages omit access tokens', () => {
+    const page = { id: 'p1', name: 'Tech Page', accessToken: 'EAABwzSecret' };
+    const serialized = serializePage(page);
+    assert.strictEqual(serialized.accessToken, undefined);
+    assert.strictEqual(serialized.name, 'Tech Page');
+
+    const list = serializePages([page]);
+    assert.strictEqual(list[0].accessToken, undefined);
+  });
+
+  test('Public serializer strips passwordHash and passwordSalt from users', () => {
+    const user = {
+      id: 'usr_1',
+      email: 'test@example.com',
+      passwordHash: 'deadbeef1234',
+      passwordSalt: 'abcdef5678',
+      role: 'admin'
+    };
+    const pub = serializePublic(user);
+    assert.strictEqual(pub.passwordHash, undefined);
+    assert.strictEqual(pub.passwordSalt, undefined);
+    assert.strictEqual(pub.email, 'test@example.com');
+  });
 });
 
-test('Auth: Valid x-admin-key header succeeds, invalid is rejected', () => {
-  const origKey = process.env.ADMIN_API_KEY;
-  const origEnv = process.env.NODE_ENV;
-  const origBypass = process.env.DEV_AUTH_BYPASS;
-
-  try {
-    process.env.NODE_ENV = 'production';
-    process.env.ADMIN_API_KEY = 'correct_admin_secret_key_12345';
-    delete process.env.DEV_AUTH_BYPASS;
-
-    // Invalid credential
-    let statusSent = 0;
-    const mockRes = {
-      status(s) { statusSent = s; return this; },
-      json() {}
-    };
-    authMiddleware({ path: '/settings', headers: { 'x-admin-key': 'wrong_key' } }, mockRes, () => assert.fail());
-    assert.strictEqual(statusSent, 401);
-
-    // Valid credential
-    let nextCalled = false;
-    authMiddleware({ path: '/settings', headers: { 'x-admin-key': 'correct_admin_secret_key_12345' } }, mockRes, () => {
-      nextCalled = true;
+// =========================================================================
+// SUITE 3: REAL HTTP AUTH, SESSION & RATE LIMITING INTEGRATION
+// =========================================================================
+describe('3. Real HTTP Auth & Session Flow', () => {
+  test('POST /api/auth/login rejects invalid credentials with 401 and generic error', async () => {
+    const res = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'susantalohr@gmail.com', password: 'wrong_password_999' })
     });
-    assert.strictEqual(nextCalled, true);
-  } finally {
-    process.env.ADMIN_API_KEY = origKey;
-    process.env.NODE_ENV = origEnv;
-    process.env.DEV_AUTH_BYPASS = origBypass;
-  }
-});
-
-test('Auth: HttpOnly session cookie enables authentication without URL tokens', () => {
-  const origKey = process.env.ADMIN_API_KEY;
-  const origEnv = process.env.NODE_ENV;
-  const origBypass = process.env.DEV_AUTH_BYPASS;
-
-  try {
-    process.env.NODE_ENV = 'production';
-    process.env.ADMIN_API_KEY = 'my_admin_pass';
-    delete process.env.DEV_AUTH_BYPASS;
-
-    clearAllSessions();
-    const sessionId = createSession();
-    assert.strictEqual(validateSession(sessionId), true);
-
-    // Valid cookie authentication
-    let nextCalled = false;
-    authMiddleware({
-      path: '/events',
-      headers: { cookie: `auth_session=${sessionId}` }
-    }, {}, () => { nextCalled = true; });
-    assert.strictEqual(nextCalled, true);
-
-    // Invalid / destroyed session
-    destroySession(sessionId);
-    assert.strictEqual(validateSession(sessionId), false);
-
-    let statusSent = 0;
-    const mockRes = {
-      status(s) { statusSent = s; return this; },
-      json() {}
-    };
-    authMiddleware({
-      path: '/events',
-      headers: { cookie: `auth_session=${sessionId}` }
-    }, mockRes, () => assert.fail());
-    assert.strictEqual(statusSent, 401);
-  } finally {
-    process.env.ADMIN_API_KEY = origKey;
-    process.env.NODE_ENV = origEnv;
-    process.env.DEV_AUTH_BYPASS = origBypass;
-  }
-});
-
-test('Auth: hashPassword and verifyPassword work reliably using PBKDF2', () => {
-  const password = 'mySecretAdminPassword2026!';
-  const { hash, salt } = hashPassword(password);
-
-  assert.ok(typeof hash === 'string' && hash.length === 128);
-  assert.ok(typeof salt === 'string' && salt.length === 32);
-
-  // Correct password verification
-  assert.strictEqual(verifyPassword(password, hash, salt), true);
-
-  // Incorrect password verification
-  assert.strictEqual(verifyPassword('WrongPassword123', hash, salt), false);
-  assert.strictEqual(verifyPassword('', hash, salt), false);
-  assert.strictEqual(verifyPassword(null, hash, salt), false);
-});
-
-test('Auth: isAuthConfigured reports configuration state accurately', () => {
-  const origKey = process.env.ADMIN_API_KEY;
-  try {
-    delete process.env.ADMIN_API_KEY;
-    // With no env key and no settings password, isAuthConfigured returns false
-    const configuredWithoutKey = isAuthConfigured();
-    assert.strictEqual(typeof configuredWithoutKey, 'boolean');
-
-    process.env.ADMIN_API_KEY = 'configured_admin_key';
-    assert.strictEqual(isAuthConfigured(), true);
-  } finally {
-    process.env.ADMIN_API_KEY = origKey;
-  }
-});
-
-test('Auth: Default super_admin user is initialized in storage', () => {
-  const superAdmin = storage.findUserByEmail('susantalohr@gmail.com');
-  assert.ok(superAdmin, 'Super admin user susantalohr@gmail.com must exist');
-  assert.strictEqual(superAdmin.email, 'susantalohr@gmail.com');
-  assert.strictEqual(superAdmin.role, 'super_admin');
-  assert.strictEqual(superAdmin.name, 'Susanta Lohar');
-  assert.ok(superAdmin.passwordHash, 'User must have a hashed password');
-  assert.ok(superAdmin.passwordSalt, 'User must have a salt');
-
-  // Verify valid password
-  assert.strictEqual(verifyPassword('admin@123', superAdmin.passwordHash, superAdmin.passwordSalt), true);
-  // Verify invalid password fails
-  assert.strictEqual(verifyPassword('wrongpass', superAdmin.passwordHash, superAdmin.passwordSalt), false);
-
-  // Case and whitespace insensitive lookup
-  const lookupUser = storage.findUserByEmail('  SUSANTALOHR@GMAIL.COM  ');
-  assert.ok(lookupUser);
-  assert.strictEqual(lookupUser.id, superAdmin.id);
-});
-
-test('Auth: User sessions attach identity and role', () => {
-  const user = { id: 'usr_test_1', email: 'susantalohr@gmail.com', name: 'Susanta Lohar', role: 'super_admin' };
-  const sessionId = createSession(user);
-  assert.ok(typeof sessionId === 'string' && sessionId.length === 64);
-
-  const session = getSession(sessionId);
-  assert.ok(session);
-  assert.strictEqual(session.user.id, 'usr_test_1');
-  assert.strictEqual(session.user.email, 'susantalohr@gmail.com');
-  assert.strictEqual(session.user.name, 'Susanta Lohar');
-  assert.strictEqual(session.user.role, 'super_admin');
-
-  destroySession(sessionId);
-  assert.strictEqual(getSession(sessionId), null);
-});
-
-test('Auth: requireRole middleware enforces role permissions', () => {
-  const superAdminGuard = requireRole(['super_admin']);
-  const adminGuard = requireRole(['admin', 'super_admin']);
-
-  // Super admin accessing super admin route
-  let nextCalled = false;
-  superAdminGuard({ user: { role: 'super_admin' } }, {}, () => { nextCalled = true; });
-  assert.strictEqual(nextCalled, true);
-
-  // Super admin accessing admin route
-  nextCalled = false;
-  adminGuard({ user: { role: 'super_admin' } }, {}, () => { nextCalled = true; });
-  assert.strictEqual(nextCalled, true);
-
-  // Editor rejected on super admin route with 403
-  let statusSent = 0;
-  let responseData = null;
-  const mockRes = {
-    status(s) { statusSent = s; return this; },
-    json(d) { responseData = d; }
-  };
-  superAdminGuard({ user: { role: 'editor' } }, mockRes, () => assert.fail('Should not proceed'));
-  assert.strictEqual(statusSent, 403);
-  assert.strictEqual(responseData.code, 'FORBIDDEN_ROLE');
-
-  // Missing user rejected with 401
-  statusSent = 0;
-  responseData = null;
-  superAdminGuard({}, mockRes, () => assert.fail('Should not proceed'));
-  assert.strictEqual(statusSent, 401);
-  assert.strictEqual(responseData.code, 'UNAUTHORIZED');
-});
-
-test('Auth: Public serializer strips passwordHash and passwordSalt from user objects', () => {
-  const superAdmin = storage.findUserByEmail('susantalohr@gmail.com');
-  assert.ok(superAdmin);
-  const sanitized = serializePublic(superAdmin);
-
-  assert.strictEqual(sanitized.email, 'susantalohr@gmail.com');
-  assert.strictEqual(sanitized.role, 'super_admin');
-  assert.strictEqual(sanitized.name, 'Susanta Lohar');
-  assert.strictEqual(sanitized.passwordHash, undefined);
-  assert.strictEqual(sanitized.passwordSalt, undefined);
-  assert.strictEqual(sanitized.password_hash, undefined);
-  assert.strictEqual(sanitized.password_salt, undefined);
-});
-
-// =========================================================================
-// 3. SETTINGS VALIDATOR & CRON VALIDATION (Items 4, 13)
-// =========================================================================
-test('Settings Validator: General settings payload accepts non-secret fields', () => {
-  const validPayload = {
-    pageId: '12345',
-    pageName: 'Bangla Tech',
-    autoPostEnabled: true,
-    cronSchedule: '0 9,14,20 * * *',
-    intervalMinutes: 60,
-    selectedCategories: ['tech_inventions', 'science_nature']
-  };
-  const result = validateSettingsPayload(validPayload);
-  assert.strictEqual(result.valid, true);
-});
-
-test('Settings Validator: Rejects secret fields in general settings payload', () => {
-  assert.strictEqual(validateSettingsPayload({ accessToken: 'secret' }).valid, false);
-  assert.strictEqual(validateSettingsPayload({ geminiApiKey: 'secret' }).valid, false);
-  assert.strictEqual(validateSettingsPayload({ webhookVerifyToken: 'secret' }).valid, false);
-  assert.strictEqual(validateSettingsPayload({ password: 'secret' }).valid, false);
-});
-
-test('Settings Validator: Rejects unknown fields', () => {
-  const result = validateSettingsPayload({ rogueField: 'malicious' });
-  assert.strictEqual(result.valid, false);
-  assert.ok(result.error.includes('Disallowed or unexpected settings fields'));
-});
-
-test('Settings Validator: Rejects prototype pollution attempts', () => {
-  const malicious = JSON.parse('{"__proto__": {"isAdmin": true}}');
-  const result = validateSettingsPayload(malicious);
-  assert.strictEqual(result.valid, false);
-  assert.ok(result.error.includes('Prototype pollution detected'));
-});
-
-test('Settings Validator: Cron validation via node-cron accepts valid and rejects out-of-bounds', () => {
-  // Valid expressions
-  assert.strictEqual(validateSettingsPayload({ cronSchedule: '0 9,14,20 * * *' }).valid, true);
-  assert.strictEqual(validateSettingsPayload({ cronSchedule: '*/15 * * * *' }).valid, true);
-  assert.strictEqual(validateSettingsPayload({ cronSchedule: '30 4 * * 1-5' }).valid, true);
-
-  // Invalid expressions (out of range minute, hour, or malformed)
-  assert.strictEqual(validateSettingsPayload({ cronSchedule: '60 * * * *' }).valid, false);
-  assert.strictEqual(validateSettingsPayload({ cronSchedule: '* 25 * * *' }).valid, false);
-  assert.strictEqual(validateSettingsPayload({ cronSchedule: 'not a cron' }).valid, false);
-  assert.strictEqual(validateSettingsPayload({ cronSchedule: '* * *' }).valid, false);
-});
-
-// =========================================================================
-// 4. ERROR HANDLER SANITIZATION (Item 6)
-// =========================================================================
-test('Error Handler: Redacts secrets from message, stack, headers, and URLs', () => {
-  const origEnv = process.env.NODE_ENV;
-  const origKey = process.env.ADMIN_API_KEY;
-
-  try {
-    process.env.NODE_ENV = 'production';
-    process.env.ADMIN_API_KEY = 'super_secret_admin_token_999';
-
-    const rawError = new Error('Failed connecting with token EAABwzSecretFbToken12345 and key AIzaSyDfakeApiKey9876543210123456');
-    rawError.stack = 'Error at /Users/susanta/facebook-auto-poster/server.js:50\nBearer super_secret_admin_token_999';
-
-    let statusSent = 0;
-    let responseData = null;
-    const mockRes = {
-      status(s) { statusSent = s; return this; },
-      json(d) { responseData = d; }
-    };
-
-    errorHandler(rawError, { method: 'POST', originalUrl: '/api/post?token=EAABwzSecretFbToken12345' }, mockRes, () => {});
-
-    assert.strictEqual(statusSent, 500);
-    assert.strictEqual(responseData.success, false);
-    // In production, generic message returned
-    assert.strictEqual(responseData.error, 'Request could not be completed.');
-    assert.ok(responseData.requestId);
-    assert.strictEqual(responseData.stack, undefined);
-  } finally {
-    process.env.NODE_ENV = origEnv;
-    process.env.ADMIN_API_KEY = origKey;
-  }
-});
-
-// =========================================================================
-// 5. CONTENT SAFETY & AUTOPUBLISH GUARD (Items 8, 9, 15)
-// =========================================================================
-test('Content Safety: Mojibake corruption is detected and rejected', () => {
-  assert.strictEqual(containsMojibake('à¦®à¦¹à¦¾à¦•à¦¾à¦¶'), true);
-  assert.strictEqual(containsMojibake('DÃ©jÃ\xa0 vu'), true);
-  assert.strictEqual(containsMojibake('মহাবিশ্বের অপূর্ব রহস্য 🌌✨'), false);
-
-  const check = validateContent({ message: 'à¦…à§à¦¯à¦¾à¦¨à§à¦¡à§à¦°à§‹à¦®à¦¿à¦¡à¦¾ à¦—à§à¦¯à¦¾à¦²à¦¾à¦•à§à¦¸à¦¿ à¦“ à¦®à¦¹à¦¾à¦¬à¦¿à¦¶à§à¦¬à§‡à¦° à¦…à¦ªà§‚à¦°à§à¦¬ à¦°à¦¹à¦¸à§à¦¯' });
-  assert.strictEqual(check.safe, false);
-  assert.ok(check.reasons.some(r => r.includes('mojibake') || r.includes('character encoding')));
-});
-
-test('Content Safety: Length bounds enforced (min 30, max 6000)', () => {
-  assert.strictEqual(validateContent({ message: 'Short' }).safe, false);
-  assert.strictEqual(validateContent({ message: 'This is a sufficiently long valid post message that exceeds thirty chars.' }).safe, true);
-});
-
-test('Content Safety: Unverified news claim blocked in AutoPilot mode', () => {
-  const newsPost = {
-    category: 'trending_news',
-    message: '🚨 ব্রেকিং নিউজ: দেশব্যাপী নতুন আইন জারির বিজ্ঞপ্তি প্রকাশিত হয়েছে। এখনই বিস্তারিত জেনে নিন!'
-  };
-
-  const check = validateContent(newsPost, { isAutoPilot: true });
-  assert.strictEqual(check.safe, false);
-  assert.ok(check.reasons.some(r => r.includes('without verified sources')));
-});
-
-test('Content Safety: Duplicate detection via Jaccard similarity threshold 0.65', () => {
-  const history = [
-    { message: 'মহাকাশের ব্ল্যাক হোল ও ইভেন্ট হরাইজনের মহাকর্ষীয় রহস্য নিয়ে বিজ্ঞানীদের এক নতুন আবিষ্কার।' }
-  ];
-  const duplicateCandidate = 'মহাকাশের ব্ল্যাক হোল ও ইভেন্ট হরাইজনের মহাকর্ষীয় রহস্য নিয়ে বিজ্ঞানীদের নতুন গবেষণা ও আবিষ্কার।';
-
-  const result = checkDuplicate(duplicateCandidate, history, 0.65);
-  assert.strictEqual(result.isDuplicate, true);
-  assert.ok(result.similarity >= 0.65);
-});
-
-test('Category Match: Deterministic category matching on all curated fallbacks', () => {
-  // Verify that sports fallback does not claim to be philosophy
-  const sportsFallback = {
-    category: 'sports_records',
-    badge: 'খেলার খবর',
-    message: 'নীরজ চোপড়ার ঐতিহাসিক অলিম্পিক জয়'
-  };
-  assert.notStrictEqual(sportsFallback.category, 'philosophy_wisdom');
-});
-
-test('Scheduler: Emergency fallback tagged with isFallback=true and held for review', async () => {
-  // Simulate AI provider returning fallback bundle
-  const fakeFallbackBundle = {
-    message: '💎 ৫৫ ক্যানক্রি ই গ্রহ পুরোটাই হীরা দিয়ে তৈরি...',
-    isFallback: true,
-    generationSource: 'curated_fallback',
-    verified: false,
-    sources: []
-  };
-
-  // When scheduler processes fallback, it must not publish to facebook
-  assert.strictEqual(fakeFallbackBundle.isFallback, true);
-  assert.strictEqual(fakeFallbackBundle.verified, false);
-  assert.strictEqual(fakeFallbackBundle.generationSource, 'curated_fallback');
-});
-
-// =========================================================================
-// 6. CORS AND NETWORK CONTROLS (Item 12)
-// =========================================================================
-test('CORS: isValidOriginFormat correctly identifies valid origins', () => {
-  assert.strictEqual(isValidOriginFormat('http://localhost:3000'), true);
-  assert.strictEqual(isValidOriginFormat('https://myapp.com'), true);
-  assert.strictEqual(isValidOriginFormat('https://sub.domain.org:8443'), true);
-
-  // Malformed origins
-  assert.strictEqual(isValidOriginFormat('http://'), false);
-  assert.strictEqual(isValidOriginFormat('https://myapp.com/path'), false);
-  assert.strictEqual(isValidOriginFormat('javascript:alert(1)'), false);
-  assert.strictEqual(isValidOriginFormat('*'), false);
-});
-
-test('CORS: Production with no origins fails closed', () => {
-  const origEnv = process.env.NODE_ENV;
-  const origAllowed = process.env.ALLOWED_ORIGINS;
-
-  try {
-    process.env.NODE_ENV = 'production';
-    delete process.env.ALLOWED_ORIGINS;
-
-    const origins = getAllowedOrigins();
-    assert.strictEqual(origins.length, 0);
-    assert.strictEqual(isOriginAllowed('http://localhost:3000'), false);
-    assert.strictEqual(isOriginAllowed('https://evil.com'), false);
-  } finally {
-    process.env.NODE_ENV = origEnv;
-    process.env.ALLOWED_ORIGINS = origAllowed;
-  }
-});
-
-// =========================================================================
-// 7. AI SERVICE REGRESSION INTEGRITY (Item 10)
-// =========================================================================
-test('AI Service: All public methods exist and match signature', () => {
-  const requiredMethods = [
-    'verifyGeminiKey',
-    'cleanSvgText',
-    'analyzeTemplate',
-    'generateStructuredPost',
-    'fetchSmartBackground',
-    'generateThumbnailCardFromData',
-    'generateFullPostBundle',
-    'regenerateThumbnailOnly',
-    'regenerateCaptionOnly',
-    'generateTopicIdeas',
-    'generatePostText'
-  ];
-
-  for (const m of requiredMethods) {
-    assert.strictEqual(typeof ai[m], 'function', `ai.${m} must be a function`);
-  }
-});
-
-test('AI Service: generateTopicIdeas returns array of ideas with mocked provider', async () => {
-  const ideas = await ai.generateTopicIdeas('science_nature', 3);
-  assert.ok(Array.isArray(ideas));
-  assert.ok(ideas.length >= 1);
-  assert.ok(typeof ideas[0].title === 'string');
-});
-
-test('AI Service: cleanSvgText sanitizes emojis and formatting without throwing', () => {
-  const cleaned = ai.cleanSvgText('Test 🚀✨ *bold* _italic_ text');
-  assert.ok(typeof cleaned === 'string');
-  assert.strictEqual(cleaned, 'Test bold italic text');
-});
-
-test('AI Service: generateFullPostBundle executes cleanly with mocked provider', async () => {
-  const bundle = await ai.generateFullPostBundle({
-    topic: 'মহাকাশ বিজ্ঞান ও নতুন গ্যালাক্সি আবিষ্কার',
-    categoryId: 'science_nature',
-    includeImage: false
+    assert.strictEqual(res.status, 401);
+    const data = await res.json();
+    assert.strictEqual(data.success, false);
+    assert.strictEqual(data.error, 'Invalid email or password.');
   });
 
-  assert.ok(bundle);
-  assert.ok(typeof bundle.message === 'string');
-  assert.ok(bundle.message.length > 20);
-  assert.ok('isFallback' in bundle);
-  assert.ok('generationSource' in bundle);
-});
-
-test('AI Service: regenerateCaptionOnly returns structured Bengali caption with mocked provider', async () => {
-  const result = await ai.regenerateCaptionOnly({
-    currentCaption: 'পুরোনো ক্যাপশন যা পরিবর্তন করা দরকার।',
-    topic: 'মহাকাশ বিজ্ঞান'
-  });
-
-  assert.ok(result);
-  assert.strictEqual(result.success, true);
-  assert.ok(typeof result.message === 'string');
-  assert.ok(result.message.length > 10);
-});
-
-// =========================================================================
-// 8. FACEBOOK PUBLISH GUARD REGRESSION (Item 15)
-// =========================================================================
-test('Publish Guard: facebook.publishPost is NOT called if content safety fails', async () => {
-  let publishCalled = false;
-  const originalPublish = facebook.publishPost;
-
-  facebook.publishPost = async () => {
-    publishCalled = true;
-    return { success: true, postId: 'mock_post_123' };
-  };
-
-  try {
-    const unsafePost = {
-      message: 'Short' // Length failure
-    };
-    const safetyCheck = validateContent(unsafePost);
-
-    if (safetyCheck.safe) {
-      await facebook.publishPost(unsafePost);
+  test('Failed login rate limiter triggers 429 after 5 attempts', async () => {
+    for (let i = 0; i < 4; i++) {
+      await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'susantalohr@gmail.com', password: 'wrong_password_999' })
+      });
     }
 
-    assert.strictEqual(safetyCheck.safe, false);
-    assert.strictEqual(publishCalled, false, 'publishPost must not be called when safetyCheck fails');
-  } finally {
-    facebook.publishPost = originalPublish;
-  }
+    const res = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'susantalohr@gmail.com', password: 'wrong_password_999' })
+    });
+    assert.strictEqual(res.status, 429);
+    const data = await res.json();
+    assert.strictEqual(data.code, 'TOO_MANY_FAILED_LOGINS');
+
+    const { resetFailedLogins } = require('../routes/auth.routes');
+    resetFailedLogins('127.0.0.1');
+    resetFailedLogins('::1');
+  });
+
+  test('POST /api/auth/login succeeds with super admin credentials, sets HttpOnly cookie and returns CSRF token', async () => {
+    const res = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'susantalohr@gmail.com', password: 'admin@123' })
+    });
+    assert.strictEqual(res.status, 200);
+    const data = await res.json();
+    assert.strictEqual(data.success, true);
+    assert.strictEqual(data.authenticated, true);
+    assert.strictEqual(data.user.email, 'susantalohr@gmail.com');
+    assert.strictEqual(data.user.role, 'super_admin');
+    assert.ok(typeof data.csrfToken === 'string' && data.csrfToken.length >= 16);
+
+    const setCookie = res.headers.get('set-cookie');
+    assert.ok(setCookie);
+    assert.ok(setCookie.includes('HttpOnly'));
+    assert.ok(setCookie.includes('SameSite=Strict'));
+    assert.ok(setCookie.includes('auth_session='));
+  });
+
+  test('GET /api/settings requires authentication (401 when unauthenticated)', async () => {
+    const res = await fetch(`${baseUrl}/api/settings`);
+    assert.strictEqual(res.status, 401);
+  });
+
+  test('GET /api/settings succeeds with active session cookie', async () => {
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'susantalohr@gmail.com', password: 'admin@123' })
+    });
+    const cookie = loginRes.headers.get('set-cookie').split(';')[0];
+
+    const res = await fetch(`${baseUrl}/api/settings`, {
+      headers: { Cookie: cookie }
+    });
+    assert.strictEqual(res.status, 200);
+    const data = await res.json();
+    assert.strictEqual(data.accessToken, undefined);
+    assert.strictEqual(data.geminiApiKey, undefined);
+  });
+
+  test('POST /api/auth/logout invalidates session and clears cookie', async () => {
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'susantalohr@gmail.com', password: 'admin@123' })
+    });
+    const cookie = loginRes.headers.get('set-cookie').split(';')[0];
+
+    const logoutRes = await fetch(`${baseUrl}/api/auth/logout`, {
+      method: 'POST',
+      headers: { Cookie: cookie }
+    });
+    assert.strictEqual(logoutRes.status, 200);
+    const setCookie = logoutRes.headers.get('set-cookie');
+    assert.ok(setCookie.includes('Max-Age=0'));
+
+    const checkRes = await fetch(`${baseUrl}/api/auth/session`, {
+      headers: { Cookie: cookie }
+    });
+    const checkData = await checkRes.json();
+    assert.strictEqual(checkData.authenticated, false);
+  });
+});
+
+// =========================================================================
+// SUITE 4: REAL HTTP CSRF & ORIGIN DEFENSE
+// =========================================================================
+describe('4. Real HTTP CSRF & Origin Defense', () => {
+  let validCookie = '';
+  let validCsrfToken = '';
+
+  before(async () => {
+    const res = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'susantalohr@gmail.com', password: 'admin@123' })
+    });
+    const data = await res.json();
+    validCookie = res.headers.get('set-cookie').split(';')[0];
+    validCsrfToken = data.csrfToken;
+  });
+
+  test('Mutating POST /api/settings with cookie but missing X-CSRF-Token is rejected with 403', async () => {
+    const res = await fetch(`${baseUrl}/api/settings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: validCookie
+      },
+      body: JSON.stringify({ autoPostEnabled: false })
+    });
+    assert.strictEqual(res.status, 403);
+    const data = await res.json();
+    assert.strictEqual(data.code, 'CSRF_TOKEN_INVALID');
+  });
+
+  test('Mutating POST /api/settings with invalid X-CSRF-Token is rejected with 403', async () => {
+    const res = await fetch(`${baseUrl}/api/settings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: validCookie,
+        'X-CSRF-Token': 'bogus_csrf_token_value'
+      },
+      body: JSON.stringify({ autoPostEnabled: false })
+    });
+    assert.strictEqual(res.status, 403);
+    const data = await res.json();
+    assert.strictEqual(data.code, 'CSRF_TOKEN_INVALID');
+  });
+
+  test('Mutating POST /api/settings with untrusted Origin is rejected with 403', async () => {
+    const res = await fetch(`${baseUrl}/api/settings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: validCookie,
+        'X-CSRF-Token': validCsrfToken,
+        Origin: 'https://malicious-attacker.com'
+      },
+      body: JSON.stringify({ autoPostEnabled: false })
+    });
+    assert.strictEqual(res.status, 403);
+    const data = await res.json();
+    assert.strictEqual(data.code, 'FORBIDDEN_ORIGIN');
+  });
+
+  test('Mutating POST /api/settings with valid cookie and X-CSRF-Token succeeds', async () => {
+    const res = await fetch(`${baseUrl}/api/settings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: validCookie,
+        'X-CSRF-Token': validCsrfToken
+      },
+      body: JSON.stringify({ autoPostEnabled: true })
+    });
+    assert.strictEqual(res.status, 200);
+    const data = await res.json();
+    assert.strictEqual(data.success, true);
+  });
+
+  test('API Key header authentication is exempt from CSRF token check', async () => {
+    const res = await fetch(`${baseUrl}/api/settings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-key': 'test_admin_api_key_secret_999'
+      },
+      body: JSON.stringify({ autoPostEnabled: true })
+    });
+    assert.strictEqual(res.status, 200);
+  });
+});
+
+// =========================================================================
+// SUITE 5: REAL HTTP SETTINGS & SECRET REDACTION
+// =========================================================================
+describe('5. Settings API Secret Protection', () => {
+  let authHeaders = {};
+
+  before(async () => {
+    const res = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'susantalohr@gmail.com', password: 'admin@123' })
+    });
+    const data = await res.json();
+    authHeaders = {
+      'Content-Type': 'application/json',
+      Cookie: res.headers.get('set-cookie').split(';')[0],
+      'X-CSRF-Token': data.csrfToken
+    };
+  });
+
+  test('POST /api/settings rejects attempts to inject credentials', async () => {
+    const res = await fetch(`${baseUrl}/api/settings`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({ accessToken: 'illegal_secret_attempt' })
+    });
+    assert.strictEqual(res.status, 400);
+    const data = await res.json();
+    assert.strictEqual(data.code, 'INVALID_SETTINGS_PAYLOAD');
+  });
+
+  test('POST /api/settings/verify-gemini does not echo secret key in response', async () => {
+    const res = await fetch(`${baseUrl}/api/settings/verify-gemini`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({ apiKey: 'AIzaSyDtestKey12345' })
+    });
+    assert.strictEqual(res.status, 200);
+    const data = await res.json();
+    assert.strictEqual(data.apiKey, undefined);
+    assert.strictEqual(data.key, undefined);
+  });
+});
+
+// =========================================================================
+// SUITE 6: REAL HTTP META WEBHOOK SIGNATURE VERIFICATION
+// =========================================================================
+describe('6. Real HTTP Meta Webhook Signature Verification', () => {
+  test('GET /api/webhook/facebook verifies token and echoes challenge', async () => {
+    storage.saveSettings({ webhookVerifyToken: 'meta_verify_secret_token_777' });
+
+    const res = await fetch(
+      `${baseUrl}/api/webhook/facebook?hub.mode=subscribe&hub.verify_token=meta_verify_secret_token_777&hub.challenge=challenge_echo_123`
+    );
+    assert.strictEqual(res.status, 200);
+    const text = await res.text();
+    assert.strictEqual(text, 'challenge_echo_123');
+  });
+
+  test('GET /api/webhook/facebook rejects invalid verify token with 403', async () => {
+    const res = await fetch(
+      `${baseUrl}/api/webhook/facebook?hub.mode=subscribe&hub.verify_token=wrong_token&hub.challenge=challenge_echo_123`
+    );
+    assert.strictEqual(res.status, 403);
+  });
+
+  test('POST /api/webhook/facebook accepts valid HMAC-SHA256 signature', async () => {
+    const payload = JSON.stringify({ object: 'page', entry: [{ id: 'p1', time: Date.now() }] });
+    const signature = 'sha256=' + crypto.createHmac('sha256', 'test_meta_app_secret_12345').update(payload).digest('hex');
+
+    const res = await fetch(`${baseUrl}/api/webhook/facebook`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Hub-Signature-256': signature
+      },
+      body: payload
+    });
+    assert.strictEqual(res.status, 200);
+    const text = await res.text();
+    assert.strictEqual(text, 'EVENT_RECEIVED');
+  });
+
+  test('POST /api/webhook/facebook rejects tampered HMAC-SHA256 signature with 401', async () => {
+    const payload = JSON.stringify({ object: 'page', entry: [{ id: 'p1', time: Date.now() }] });
+    const bogusSignature = 'sha256=0000000000000000000000000000000000000000000000000000000000000000';
+
+    const res = await fetch(`${baseUrl}/api/webhook/facebook`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Hub-Signature-256': bogusSignature
+      },
+      body: payload
+    });
+    assert.strictEqual(res.status, 401);
+    const data = await res.json();
+    assert.strictEqual(data.code, 'INVALID_SIGNATURE');
+  });
+
+  test('POST /api/webhook/facebook rejects modified body with old signature with 401', async () => {
+    const originalPayload = JSON.stringify({ object: 'page', entry: [{ id: 'original_entry' }] });
+    const oldSignature = 'sha256=' + crypto.createHmac('sha256', 'test_meta_app_secret_12345').update(originalPayload).digest('hex');
+    const modifiedPayload = JSON.stringify({ object: 'page', entry: [{ id: 'tampered_entry' }] });
+
+    const res = await fetch(`${baseUrl}/api/webhook/facebook`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Hub-Signature-256': oldSignature
+      },
+      body: modifiedPayload
+    });
+    assert.strictEqual(res.status, 401);
+    const data = await res.json();
+    assert.strictEqual(data.code, 'INVALID_SIGNATURE');
+  });
+
+  test('POST /api/webhook/facebook rejects malformed signature format (missing sha256= prefix) with 401', async () => {
+    const payload = JSON.stringify({ object: 'page', entry: [] });
+    const rawHexSignature = crypto.createHmac('sha256', 'test_meta_app_secret_12345').update(payload).digest('hex');
+
+    const res = await fetch(`${baseUrl}/api/webhook/facebook`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Hub-Signature-256': rawHexSignature // Missing "sha256=" prefix
+      },
+      body: payload
+    });
+    assert.strictEqual(res.status, 401);
+    const data = await res.json();
+    assert.strictEqual(data.code, 'INVALID_SIGNATURE_FORMAT');
+  });
+
+  test('POST /api/webhook/facebook rejects signature computed with incorrect app secret with 401', async () => {
+    const payload = JSON.stringify({ object: 'page', entry: [{ id: 'p1' }] });
+    const wrongKeySignature = 'sha256=' + crypto.createHmac('sha256', 'incorrect_wrong_secret_9999').update(payload).digest('hex');
+
+    const res = await fetch(`${baseUrl}/api/webhook/facebook`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Hub-Signature-256': wrongKeySignature
+      },
+      body: payload
+    });
+    assert.strictEqual(res.status, 401);
+    const data = await res.json();
+    assert.strictEqual(data.code, 'INVALID_SIGNATURE');
+  });
+
+  test('POST /api/webhook/facebook rejects missing HMAC-SHA256 header with 401', async () => {
+    const payload = JSON.stringify({ object: 'page', entry: [] });
+    const res = await fetch(`${baseUrl}/api/webhook/facebook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload
+    });
+    assert.strictEqual(res.status, 401);
+    const data = await res.json();
+    assert.strictEqual(data.code, 'SIGNATURE_MISSING');
+  });
+});
+
+// =========================================================================
+// SUITE 7: REAL HTTP ROUTE PUBLISH GUARDS (POST /api/facebook/post)
+// =========================================================================
+describe('7. Real HTTP Route Publish Guards', () => {
+  let authHeaders = {};
+
+  before(async () => {
+    const res = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'susantalohr@gmail.com', password: 'admin@123' })
+    });
+    const data = await res.json();
+    authHeaders = {
+      'Content-Type': 'application/json',
+      Cookie: res.headers.get('set-cookie').split(';')[0],
+      'X-CSRF-Token': data.csrfToken
+    };
+  });
+
+  test('POST /api/facebook/post rejects short captions with 400 and SHORT_CAPTION', async () => {
+    const res = await fetch(`${baseUrl}/api/facebook/post`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({ message: 'Too short' })
+    });
+    assert.strictEqual(res.status, 400);
+    const data = await res.json();
+    assert.strictEqual(data.success, false);
+    assert.ok(data.issueCodes.includes('SHORT_CAPTION'));
+  });
+
+  test('POST /api/facebook/post rejects mojibake captions with 400 and MOJIBAKE_DETECTED', async () => {
+    const res = await fetch(`${baseUrl}/api/facebook/post`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        message: 'à¦…à§à¦¯à¦¾à¦¨à§à¦¡à§à¦°à§‹à¦®à¦¿à¦¡à¦¾ à¦—à§à¦¯à¦¾à¦²à¦¾à¦•à§à¦¸à¦¿ à¦“ à¦®à¦¹à¦¾à¦¬à¦¿à¦¶à§à¦¬à§‡à¦° à¦…à¦ªà§‚à¦°à§à¦¬ à¦°à¦¹à¦¸à§à¦¯'
+      })
+    });
+    assert.strictEqual(res.status, 400);
+    const data = await res.json();
+    assert.strictEqual(data.success, false);
+    assert.ok(data.issueCodes.includes('MOJIBAKE_DETECTED'));
+  });
+
+  test('POST /api/facebook/post rejects unverified news claims with 400 and MISSING_SOURCE', async () => {
+    const res = await fetch(`${baseUrl}/api/facebook/post`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        category: 'trending_news',
+        message: '🚨 ব্রেকিং নিউজ: দেশব্যাপী জরুরি কারফিউ জারি করা হয়েছে অবিলম্বে নির্দেশ অনুযায়ী।',
+        sources: []
+      })
+    });
+    assert.strictEqual(res.status, 400);
+    const data = await res.json();
+    assert.strictEqual(data.success, false);
+    assert.ok(data.issueCodes.includes('MISSING_SOURCE'));
+  });
+
+  test('POST /api/facebook/post rejects non-existent local image paths with 400 and INVALID_IMAGE_PATH', async () => {
+    const res = await fetch(`${baseUrl}/api/facebook/post`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        message: 'মহাকাশ বিজ্ঞানের এক নতুন দিগন্ত উন্মোচিত হয়েছে জেমস ওয়েব স্পেস টেলিস্কোপের মাধ্যমে।',
+        imagePath: '/tmp/nonexistent_fake_image_file_999.jpg'
+      })
+    });
+    assert.strictEqual(res.status, 400);
+    const data = await res.json();
+    assert.strictEqual(data.success, false);
+    assert.ok(data.issueCodes.includes('INVALID_IMAGE_PATH'));
+  });
+
+  test('POST /api/facebook/post executes publisher and succeeds for valid content', async () => {
+    let publisherCalled = false;
+    let publishPayload = null;
+    const originalPublish = facebook.publishPost;
+
+    facebook.publishPost = async (params) => {
+      publisherCalled = true;
+      publishPayload = params;
+      return { success: true, postId: 'test_published_fb_post_888' };
+    };
+
+    try {
+      const validMessage = 'বিজ্ঞান ও প্রযুক্তির নতুন আবিষ্কার: কোয়ান্টাম কম্পিউটিং কীভাবে ভবিষ্যৎ বদলে দিচ্ছে বিস্তারিত জানুন।';
+      const res = await fetch(`${baseUrl}/api/facebook/post`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ message: validMessage })
+      });
+      assert.strictEqual(res.status, 200);
+      const data = await res.json();
+      assert.strictEqual(data.success, true);
+      assert.strictEqual(data.postId, 'test_published_fb_post_888');
+      assert.strictEqual(publisherCalled, true);
+      assert.strictEqual(publishPayload.message, validMessage);
+    } finally {
+      facebook.publishPost = originalPublish;
+    }
+  });
+});
+
+// =========================================================================
+// SUITE 8: SCHEDULER REAL TRIGGER FLOW INTEGRATION (A, B, C, D, E)
+// =========================================================================
+describe('8. Scheduler Trigger Flow Scenarios (A, B, C, D, E)', () => {
+  test('Scenario A: Fallback triggered -> publishPost: 0, queue write: 1, status: review_required', async () => {
+    let publishCalls = 0;
+    scheduler.setDependencies({
+      ai: {
+        generateFullPostBundle: async () => ({
+          message: '💎 ৫৫ ক্যানক্রি ই গ্রহ পুরোটাই হীরা দিয়ে তৈরি এক অদ্ভুত মহাজাগতিক বিস্ময়...',
+          isFallback: true,
+          generationSource: 'curated_fallback',
+          verified: false,
+          sources: []
+        })
+      },
+      facebook: {
+        publishPost: async () => { publishCalls++; return { success: true }; }
+      }
+    });
+
+    const result = await scheduler.triggerAIAutoPilot();
+    assert.strictEqual(publishCalls, 0, 'publishPost must not be called when fallback generated');
+    assert.strictEqual(result.reviewRequired, true);
+
+    const queue = storage.getQueue();
+    const fallbackItem = queue.find(q => q.generationSource === 'curated_fallback');
+    assert.ok(fallbackItem, 'Fallback must be added to queue');
+    assert.strictEqual(fallbackItem.status, 'review_required');
+    assert.strictEqual(fallbackItem.verified, false);
+  });
+
+  test('Scenario B: Unverified trending news -> publishPost: 0, queue write: 1, status: review_required with MISSING_SOURCE', async () => {
+    let publishCalls = 0;
+    scheduler.setDependencies({
+      ai: {
+        generateFullPostBundle: async () => ({
+          message: '🚨 ব্রেকিং নিউজ: দেশব্যাপী নতুন আইন জারির বিজ্ঞপ্তি প্রকাশিত হয়েছে। এখনই বিস্তারিত জেনে নিন!',
+          categoryId: 'trending_news',
+          isFallback: false,
+          generationSource: 'ai_generated',
+          verified: false,
+          sources: []
+        })
+      },
+      facebook: {
+        publishPost: async () => { publishCalls++; return { success: true }; }
+      }
+    });
+
+    storage.saveSettings({ selectedCategories: ['trending_news'] });
+    const result = await scheduler.triggerAIAutoPilot('trending_news');
+    assert.strictEqual(publishCalls, 0, 'publishPost must not be called for unverified news');
+    assert.strictEqual(result.reviewRequired, true);
+
+    const queue = storage.getQueue();
+    const unverifiedItem = queue[queue.length - 1];
+    assert.strictEqual(unverifiedItem.status, 'review_required');
+    assert.ok(unverifiedItem.issues.some(i => i.includes('MISSING_SOURCE') || i.includes('verified sources')));
+  });
+
+  test('Scenario C: Valid low-risk non-news -> publishPost: 1, history write: 1', async () => {
+    let publishCalls = 0;
+    scheduler.setDependencies({
+      ai: {
+        generateFullPostBundle: async () => ({
+          message: 'মহাকাশ বিজ্ঞানের নতুন দিগন্ত: জেমস ওয়েব স্পেস টেলিস্কোপ দূরবর্তী গ্যালাক্সির স্পষ্ট ছবি পাঠিয়েছে।',
+          categoryId: 'science_nature',
+          isFallback: false,
+          generationSource: 'ai_generated',
+          verified: true,
+          sources: [{ url: 'https://nasa.gov/news', publisher: 'NASA', title: 'Webb Discovery' }]
+        })
+      },
+      facebook: {
+        publishPost: async () => {
+          publishCalls++;
+          return { success: true, postId: 'post_scenario_c_123' };
+        }
+      }
+    });
+
+    storage.saveSettings({ selectedCategories: ['science_nature'] });
+    const result = await scheduler.triggerAIAutoPilot('science_nature');
+    assert.strictEqual(publishCalls, 1, 'publishPost must be called exactly once');
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.result.postId, 'post_scenario_c_123');
+
+    const history = storage.getHistory();
+    const published = history.find(h => h.postId === 'post_scenario_c_123');
+    assert.ok(published);
+    assert.strictEqual(published.status, 'published');
+  });
+
+  test('Scenario D: AI generation throws -> publishPost: 0, failure recorded in history', async () => {
+    let publishCalls = 0;
+    scheduler.setDependencies({
+      ai: {
+        generateFullPostBundle: async () => {
+          throw new Error('Gemini API Quota Exceeded 429');
+        }
+      },
+      facebook: {
+        publishPost: async () => { publishCalls++; return { success: true }; }
+      }
+    });
+
+    await assert.rejects(
+      async () => scheduler.triggerAIAutoPilot('science_nature'),
+      /Gemini API Quota Exceeded 429/
+    );
+    assert.strictEqual(publishCalls, 0, 'publishPost must not be called when AI throws');
+
+    const history = storage.getHistory();
+    const failedItem = history.find(h => h.error && h.error.includes('Gemini API Quota Exceeded'));
+    assert.ok(failedItem);
+    assert.strictEqual(failedItem.status, 'failed');
+  });
+
+  test('Scenario E: Queue worker concurrency guard prevents duplicate publishing', async () => {
+    let publishCalls = 0;
+    scheduler.setDependencies({
+      facebook: {
+        publishPost: async () => {
+          publishCalls++;
+          await new Promise((r) => setTimeout(r, 40));
+          return { success: true, postId: 'concurrent_worker_post_777' };
+        }
+      }
+    });
+
+    const item = storage.addToQueue({
+      message: 'একটি সম্পূর্ণ নিরাপদ শিক্ষামূলক পোস্ট যা কিউ এর মাধ্যমে ফেসবুক পেজে পোস্ট করা হবে।',
+      status: 'pending'
+    });
+    const queue = storage.getQueue();
+
+    await Promise.all([
+      scheduler.processManualQueueItem(item, queue),
+      scheduler.processManualQueueItem(item, queue)
+    ]);
+
+    assert.strictEqual(publishCalls, 1, 'publishPost must be called AT MOST ONCE despite concurrent workers');
+  });
+});
+
+// =========================================================================
+// SUITE 9: FALLBACK DATASET AUDIT
+// =========================================================================
+describe('9. Fallback Dataset & Category Audit', () => {
+  test('All curated fallback posts have valid structure, registered categories, and unique IDs', () => {
+    const fallbacks = getFallbacks();
+    assert.ok(Array.isArray(fallbacks));
+    assert.ok(fallbacks.length >= 7, 'Must have fallbacks for all main categories');
+
+    const seenIds = new Set();
+    const registeredCategories = storage.getCategories().map(c => c.id);
+
+    for (const fb of fallbacks) {
+      assert.ok(fb.id && typeof fb.id === 'string', `Item missing valid id: ${JSON.stringify(fb)}`);
+      assert.strictEqual(seenIds.has(fb.id), false, `Duplicate fallback id: ${fb.id}`);
+      seenIds.add(fb.id);
+
+      assert.ok(
+        registeredCategories.includes(fb.category),
+        `Fallback category "${fb.category}" must be registered in DEFAULT_CATEGORIES`
+      );
+      assert.ok(fb.badge && typeof fb.badge === 'string', `Fallback ${fb.id} missing badge`);
+      assert.ok(fb.post_caption && fb.post_caption.length >= 30, `Fallback ${fb.id} caption too short`);
+      assert.strictEqual(containsMojibake(fb.post_caption), false, `Fallback ${fb.id} contains mojibake`);
+      assert.strictEqual(fb.verified, false, `Fallback ${fb.id} must have verified: false`);
+      assert.strictEqual(fb.autoPublish, false, `Fallback ${fb.id} must have autoPublish: false`);
+      assert.strictEqual(fb.generationSource, 'curated_fallback');
+    }
+
+    const neeraj = fallbacks.find(f => f.id === 'fallback_sports_neeraj_chopra');
+    assert.ok(neeraj, 'Neeraj Chopra sports fallback must exist');
+    assert.strictEqual(neeraj.category, 'sports_records');
+    assert.notStrictEqual(neeraj.category, 'philosophy_wisdom');
+  });
+});
+
+// =========================================================================
+// SUITE 10: BASE API COMPATIBILITY (Base commit d1f4f1a vs HEAD)
+// =========================================================================
+describe('10. Base Commit AIService API Return Shapes', () => {
+  test('regenerateCaptionOnly returns object shape { success: true, message: string }', async () => {
+    const res = await ai.regenerateCaptionOnly({
+      currentCaption: 'পুরোনো ফেসবুক পোস্টের ক্যাপশন যা পরিমার্জন করতে হবে।',
+      topic: 'বিজ্ঞান ও প্রযুক্তি'
+    });
+    assert.strictEqual(typeof res, 'object');
+    assert.strictEqual(res.success, true);
+    assert.strictEqual(typeof res.message, 'string');
+    assert.ok(res.message.length >= 10);
+  });
+
+  test('generateFullPostBundle returns all base contract fields', async () => {
+    const bundle = await ai.generateFullPostBundle({
+      topic: 'মহাকাশ বিজ্ঞান',
+      categoryId: 'science_nature',
+      includeImage: false
+    });
+    assert.ok(bundle);
+    assert.strictEqual(typeof bundle.message, 'string');
+    assert.ok('category' in bundle);
+    assert.ok('cardData' in bundle);
+    assert.ok('image' in bundle);
+    // Verified safety metadata extensions
+    assert.ok('isFallback' in bundle);
+    assert.ok('generationSource' in bundle);
+    assert.ok('verified' in bundle);
+    assert.ok('sources' in bundle);
+  });
+
+  test('generateThumbnailCardFromData returns metadata object { success, fileName, localPath, url, layout }', async () => {
+    const cardData = {
+      badge: 'আলোচিত তথ্য',
+      line1_red: 'মহাকাশ অভিযান',
+      line1_white: 'নাসার নতুন ঘোষণা',
+      line2_white: 'চাঁদের বুকে মানুষের পা',
+      line2_yellow: 'আগামী বছরের পরিকল্পনা',
+      search_term: 'moon landing'
+    };
+    const card = await ai.generateThumbnailCardFromData(cardData, 'মহাকাশ অভিযান');
+    try {
+      assert.ok(card);
+      assert.strictEqual(card.success, true);
+      assert.strictEqual(typeof card.fileName, 'string');
+      assert.strictEqual(typeof card.localPath, 'string');
+      assert.strictEqual(typeof card.url, 'string');
+      assert.strictEqual(typeof card.layout, 'string');
+    } finally {
+      if (card && card.localPath && fs.existsSync(card.localPath)) {
+        try { fs.unlinkSync(card.localPath); } catch {}
+      }
+    }
+  });
+
+  test('generateTopicIdeas returns Array with topic objects', async () => {
+    const ideas = await ai.generateTopicIdeas('science_nature', 2);
+    assert.ok(Array.isArray(ideas));
+    assert.ok(ideas.length >= 1);
+    assert.strictEqual(typeof ideas[0].title, 'string');
+  });
+
+  test('generatePostText returns string caption', async () => {
+    const text = await ai.generatePostText('বিজ্ঞান ও মহাবিশ্বের সৃষ্টিরহস্য');
+    assert.strictEqual(typeof text, 'string');
+    assert.ok(text.length >= 20);
+  });
+
+  test('verifyGeminiKey returns { valid: true, model: string, message: string } with mocked key', async () => {
+    const result = await ai.verifyGeminiKey('AIzaSyDmockValidGeminiKey12345');
+    assert.strictEqual(result.valid, true);
+    assert.strictEqual(typeof result.model, 'string');
+    assert.strictEqual(typeof result.message, 'string');
+  });
 });

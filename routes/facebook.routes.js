@@ -14,7 +14,7 @@ router.post('/post', upload.single('image'), async (req, res, next) => {
   const message = req.body.message || '';
   let imageUrl = req.body.imageUrl || '';
   const isDemo = req.body.isDemo === 'true' || req.body.isDemo === true;
-  let imagePath = req.file ? req.file.path : null;
+  let imagePath = req.file ? req.file.path : (req.body.imagePath || null);
 
   // Resolve local uploaded or AI generated thumbnail
   if (!imagePath && imageUrl && imageUrl.startsWith('/uploads/')) {
@@ -25,17 +25,29 @@ router.post('/post', upload.single('image'), async (req, res, next) => {
     }
   }
 
+  let sources = req.body.sources;
+  if (typeof sources === 'string') {
+    try {
+      sources = JSON.parse(sources);
+    } catch {
+      sources = [];
+    }
+  }
+  const categoryId = req.body.categoryId || req.body.category || '';
+
   // Enforce pre-publish content safety guard
   const activePage = storage.getActivePage();
   const safetyCheck = validateContent(
-    { message, imageUrl, imagePath },
+    { message, imageUrl, imagePath, categoryId, sources },
     { history: storage.getHistory(), isAutoPilot: false, pageCategory: activePage?.category }
   );
 
-  if (!safetyCheck.safe && safetyCheck.reasons.length > 0) {
+  if (!safetyCheck.safe || (safetyCheck.issueCodes && safetyCheck.issueCodes.length > 0)) {
     return res.status(400).json({
       success: false,
       error: `Content safety check failed: ${safetyCheck.reasons.join('; ')}`,
+      issueCode: safetyCheck.issueCodes[0] || 'SAFETY_VIOLATION',
+      issueCodes: safetyCheck.issueCodes || [],
       reasons: safetyCheck.reasons,
       warnings: safetyCheck.warnings
     });

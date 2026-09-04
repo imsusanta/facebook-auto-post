@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AutoPost - Facebook Post Automation</title>
   
-  <!-- Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tailwind CSS (Self-Hosted Vendor Asset) -->
+  <script src="/vendor/tailwindcss.js"></script>
   <script>
     tailwind.config = {
       theme: {
@@ -28,8 +28,8 @@
     }
   </script>
 
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Lucide Icons (Self-Hosted Vendor Asset) -->
+  <script src="/vendor/lucide.min.js"></script>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body class="bg-[#F8FAFC] text-slate-900 flex h-screen overflow-hidden font-sans">
@@ -338,7 +338,7 @@
                         <span class="text-[10px] font-semibold text-sky-600">09:30 AM</span>
                         <span class="text-[11px] font-bold text-slate-800 line-clamp-1 leading-tight">Morning Motivation</span>
                         <div class="flex items-center justify-between mt-1">
-                          <img src="https://images.unsplash.com/photo-1470240731273-7821a6eeb6bd?w=100&auto=format&fit=crop&q=80" class="w-4 h-4 rounded-md object-cover">
+                          <img src="/robot.svg" class="w-4 h-4 rounded-md object-cover">
                           <div class="w-3.5 h-3.5 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-[8px] font-bold">f</div>
                         </div>
                       </div>
@@ -349,7 +349,7 @@
                         <span class="text-[10px] font-semibold text-indigo-600">09:15 AM</span>
                         <span class="text-[11px] font-bold text-slate-800 line-clamp-1 leading-tight">New Blog Post</span>
                         <div class="flex items-center justify-between mt-1">
-                          <img src="https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=100&auto=format&fit=crop&q=80" class="w-4 h-4 rounded-md object-cover">
+                          <img src="/robot.svg" class="w-4 h-4 rounded-md object-cover">
                           <div class="w-3.5 h-3.5 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-[8px] font-bold">f</div>
                         </div>
                       </div>
@@ -369,7 +369,7 @@
                         <span class="text-[10px] font-semibold text-emerald-600">12:00 PM</span>
                         <span class="text-[11px] font-bold text-slate-800 line-clamp-1 leading-tight">Tips & Tricks</span>
                         <div class="flex items-center justify-between mt-1">
-                          <img src="https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=100&auto=format&fit=crop&q=80" class="w-4 h-4 rounded-md object-cover">
+                          <img src="/robot.svg" class="w-4 h-4 rounded-md object-cover">
                           <div class="w-3.5 h-3.5 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-[8px] font-bold">f</div>
                         </div>
                       </div>
@@ -382,7 +382,7 @@
                         <span class="text-[10px] font-semibold text-rose-600">12:30 PM</span>
                         <span class="text-[11px] font-bold text-slate-800 line-clamp-1 leading-tight">Weekend Offer</span>
                         <div class="flex items-center justify-between mt-1">
-                          <img src="https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=100&auto=format&fit=crop&q=80" class="w-4 h-4 rounded-md object-cover">
+                          <img src="/robot.svg" class="w-4 h-4 rounded-md object-cover">
                           <div class="w-3.5 h-3.5 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-[8px] font-bold">f</div>
                         </div>
                       </div>
@@ -401,7 +401,7 @@
                         <span class="text-[10px] font-semibold text-amber-600">03:00 PM</span>
                         <span class="text-[11px] font-bold text-slate-800 line-clamp-1 leading-tight">Product Update</span>
                         <div class="flex items-center justify-between mt-1">
-                          <img src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=100&auto=format&fit=crop&q=80" class="w-4 h-4 rounded-md object-cover">
+                          <img src="/robot.svg" class="w-4 h-4 rounded-md object-cover">
                           <div class="w-3.5 h-3.5 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-[8px] font-bold">f</div>
                         </div>
                       </div>
@@ -423,7 +423,7 @@
                         <span class="text-[10px] font-semibold text-sky-600">06:00 PM</span>
                         <span class="text-[11px] font-bold text-slate-800 line-clamp-1 leading-tight">Customer Story</span>
                         <div class="flex items-center justify-between mt-1">
-                          <img src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=100&auto=format&fit=crop&q=80" class="w-4 h-4 rounded-md object-cover">
+                          <img src="/robot.svg" class="w-4 h-4 rounded-md object-cover">
                           <div class="w-3.5 h-3.5 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-[8px] font-bold">f</div>
                         </div>
                       </div>
@@ -1906,7 +1906,6 @@
               type="email"
               id="adminAuthEmailInput"
               placeholder="susantalohr@gmail.com"
-              value="susantalohr@gmail.com"
               class="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
               required
               autocomplete="username"
@@ -1925,7 +1924,6 @@
               type="password"
               id="adminAuthPasswordInput"
               placeholder="Enter password"
-              value="admin@123"
               class="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition font-mono"
               required
               autocomplete="current-password"

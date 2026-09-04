@@ -7,10 +7,21 @@
 const crypto = require('crypto');
 const logger = require('../utils/logger');
 const storage = require('../services/storage');
+const { isOriginAllowed } = require('../utils/cors-validator');
 
-// In-memory session store: Map<sessionId, { createdAt: number, expiresAt: number }>
+// In-memory session store: Map<sessionId, { user, csrfToken, createdAt, expiresAt }>
 const activeSessions = new Map();
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const MAX_ACTIVE_SESSIONS = 500; // Hardened session limit
+
+// Periodic pruning of expired sessions
+const sessionPruneTimer = setInterval(() => {
+  const now = Date.now();
+  for (const [id, s] of activeSessions.entries()) {
+    if (s.expiresAt <= now) activeSessions.delete(id);
+  }
+}, 15 * 60 * 1000);
+if (sessionPruneTimer.unref) sessionPruneTimer.unref();
 
 // Track whether bypass warning has been logged
 let bypassWarningLogged = false;
@@ -104,7 +115,17 @@ function createSession(user = null) {
     if (s.expiresAt <= now) activeSessions.delete(id);
   }
 
+  // Prune oldest session if capacity reached
+  if (activeSessions.size >= MAX_ACTIVE_SESSIONS) {
+    const oldestSessionId = activeSessions.keys().next().value;
+    if (oldestSessionId) {
+      activeSessions.delete(oldestSessionId);
+    }
+  }
+
   const sessionId = crypto.randomBytes(32).toString('hex');
+  const csrfToken = crypto.randomBytes(24).toString('hex');
+
   activeSessions.set(sessionId, {
     user: user ? {
       id: user.id,
@@ -112,6 +133,7 @@ function createSession(user = null) {
       name: user.name,
       role: user.role
     } : null,
+    csrfToken,
     createdAt: now,
     expiresAt: now + SESSION_TTL_MS
   });
@@ -224,15 +246,52 @@ function authMiddleware(req, res, next) {
 
   // 5. Check Session Cookie (authenticated browser sessions)
   const cookies = parseCookies(req.headers.cookie);
-  const sessionId = cookies.auth_session;
+  const sessionId = cookies.auth_session || cookies['__Host-auth_session'];
   const session = getSession(sessionId);
   if (session) {
+    req.authType = 'cookie';
+    req.session = session;
     req.user = session.user || {
       id: 'usr_superadmin',
       email: 'susantalohr@gmail.com',
       name: 'Susanta Lohar',
       role: 'super_admin'
     };
+
+    // CSRF Protection for mutating endpoints when authenticated via browser cookie
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+      // 1. Origin validation: If Origin or Referer header is present, it must be allowed
+      const originHeader = req.headers.origin || req.headers.referer;
+      if (originHeader) {
+        let originDomain = originHeader;
+        try {
+          originDomain = new URL(originHeader).origin;
+        } catch {
+          // ignore parsing error
+        }
+        if (!isOriginAllowed(originDomain)) {
+          logger.warn(`[Security] CSRF blocked: Untrusted request origin "${originHeader}"`);
+          return res.status(403).json({
+            success: false,
+            error: 'Forbidden: Request origin is not allowed.',
+            code: 'FORBIDDEN_ORIGIN'
+          });
+        }
+      }
+
+      // 2. CSRF Token verification
+      const clientCsrfToken = req.headers['x-csrf-token'];
+      const sessionCsrfToken = session.csrfToken;
+      if (!clientCsrfToken || !sessionCsrfToken || !safeCompare(clientCsrfToken, sessionCsrfToken)) {
+        logger.warn('[Security] CSRF blocked: Missing or invalid X-CSRF-Token header.');
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden: Invalid or missing CSRF token.',
+          code: 'CSRF_TOKEN_INVALID'
+        });
+      }
+    }
+
     return next();
   }
 
@@ -343,6 +402,12 @@ function requireRole(allowedRoles = ['admin', 'super_admin']) {
   };
 }
 
+function stopSessionPruneTimer() {
+  if (sessionPruneTimer) {
+    clearInterval(sessionPruneTimer);
+  }
+}
+
 module.exports = {
   authMiddleware,
   safeCompare,
@@ -351,6 +416,7 @@ module.exports = {
   validateSession,
   destroySession,
   clearAllSessions,
+  stopSessionPruneTimer,
   hasQueryCredentials,
   parseCookies,
   hashPassword,

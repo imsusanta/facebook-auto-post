@@ -1,5 +1,4 @@
-/* Modern AutoPost SaaS Theme */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+/* Modern AutoPost SaaS Theme (Using system fonts for complete loopback isolation) */
 
 :root {
   --primary: #4F46E5;

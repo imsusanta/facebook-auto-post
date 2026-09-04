@@ -21,7 +21,8 @@ const IGNORE_PATHS = [
   'scripts/check-encoding.js', // Checker file
   'tests/runner.js', // Test file asserting mojibake detection
   'package-lock.json',
-  '.gemini'
+  '.gemini',
+  'public/vendor'
 ];
 
 const EXTENSIONS = new Set(['.js', '.json', '.html', '.css', '.md']);

@@ -6,7 +6,8 @@ module.exports = [
       'uploads/**',
       'dist/**',
       '.git/**',
-      '.gemini/**'
+      '.gemini/**',
+      'public/vendor/**'
     ]
   },
   // Server-side Node.js files
@@ -44,7 +45,10 @@ module.exports = [
         Object: 'readonly',
         String: 'readonly',
         Number: 'readonly',
-        Boolean: 'readonly'
+        Boolean: 'readonly',
+        fetch: 'readonly',
+        globalThis: 'readonly',
+        AbortController: 'readonly'
       }
     },
     rules: {
@@ -66,6 +70,7 @@ module.exports = [
         window: 'readonly',
         document: 'readonly',
         fetch: 'readonly',
+        Headers: 'readonly',
         EventSource: 'readonly',
         alert: 'readonly',
         confirm: 'readonly',

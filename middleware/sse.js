@@ -39,6 +39,7 @@ function handleSSEConnection(req, res) {
       sseClients.delete(res);
     }
   }, 25000);
+  if (heartbeat.unref) heartbeat.unref();
 
   req.on('close', () => {
     clearInterval(heartbeat);
@@ -61,8 +62,20 @@ function broadcastSSE(event, data) {
   }
 }
 
+function closeAllSseClients() {
+  for (const client of sseClients) {
+    try {
+      client.end();
+    } catch {
+      // ignore
+    }
+  }
+  sseClients.clear();
+}
+
 module.exports = {
   handleSSEConnection,
   broadcastSSE,
-  getConnectedClientsCount: () => sseClients.size
+  getConnectedClientsCount: () => sseClients.size,
+  closeAllSseClients
 };
