@@ -64,7 +64,7 @@ function calculateSimilarity(setA, setB) {
  */
 function containsMojibake(text) {
   if (!text || typeof text !== 'string') return false;
-  return /à[¦§]|Ã[©\xa0\xad\x80-\xbf]|ðŸ|\uFFFD/.test(text);
+  return /\u00E0[\u00A6\u00A7]|\u00C3[\u00A9\u00A0\u00AD\u0080-\u00BF]|\u00F0\u0178|\uFFFD/.test(text);
 }
 
 /**

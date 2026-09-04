@@ -6,10 +6,11 @@
 const fs = require('fs');
 const path = require('path');
 
+// Unicode escaped definitions of mojibake patterns
 const MOJIBAKE_PATTERNS = [
-  { name: 'Corrupted Bengali UTF-8 (à¦ / à§)', regex: /à[¦§]/ },
-  { name: 'Corrupted Accents (Ã©, Ã , etc.)', regex: /Ã[©\xa0\xad\x80-\xbf]/ },
-  { name: 'Corrupted Emojis (ðŸ)', regex: /ðŸ/ },
+  { name: 'Corrupted Bengali UTF-8 (à¦ / à§)', regex: /\u00E0[\u00A6\u00A7]/ },
+  { name: 'Corrupted Accents (Ã©, Ã , etc.)', regex: /\u00C3[\u00A9\u00A0\u00AD\u0080-\u00BF]/ },
+  { name: 'Corrupted Emojis (ðŸ)', regex: /\u00F0\u0178/ },
   { name: 'Unicode Replacement Character (U+FFFD)', regex: /\uFFFD/ }
 ];
 
@@ -17,7 +18,8 @@ const IGNORE_PATHS = [
   'node_modules',
   '.git',
   'docs/phase-1-audit.md', // Audit document quotes original corrupted strings as evidence
-  'scripts/check-encoding.js', // This checker file defines regex patterns
+  'scripts/check-encoding.js', // Checker file
+  'tests/runner.js', // Test file asserting mojibake detection
   'package-lock.json',
   '.gemini'
 ];
