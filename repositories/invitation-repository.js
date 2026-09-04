@@ -85,6 +85,22 @@ class InvitationRepository {
 
     const tokenHash = hashToken(token);
 
+    const { rows: checkRows } = await query(
+      'SELECT id, status, expires_at FROM workspace_invitations WHERE token_hash = $1',
+      [tokenHash]
+    );
+    const candidate = checkRows[0];
+    if (!candidate) {
+      throw new Error('Invitation is invalid or does not exist');
+    }
+    if (candidate.status !== 'pending') {
+      throw new Error(`Invitation has already been ${candidate.status}`);
+    }
+    if (new Date(candidate.expires_at) <= new Date()) {
+      await query("UPDATE workspace_invitations SET status = 'expired' WHERE id = $1", [candidate.id]);
+      throw new Error('Invitation has expired');
+    }
+
     return withTransaction(async (client) => {
       const selectSql = `
         SELECT * FROM workspace_invitations
@@ -94,19 +110,11 @@ class InvitationRepository {
       const { rows } = await client.query(selectSql, [tokenHash]);
       const invite = rows[0];
 
-      if (!invite) {
-        throw new Error('Invitation is invalid or does not exist');
-      }
-
-      if (invite.status !== 'pending') {
-        throw new Error(`Invitation has already been ${invite.status}`);
+      if (!invite || invite.status !== 'pending') {
+        throw new Error('Invitation is invalid or no longer pending');
       }
 
       if (new Date(invite.expires_at) <= new Date()) {
-        await client.query(
-          "UPDATE workspace_invitations SET status = 'expired' WHERE id = $1",
-          [invite.id]
-        );
         throw new Error('Invitation has expired');
       }
 
