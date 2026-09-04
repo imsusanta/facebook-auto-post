@@ -5,6 +5,7 @@ const storage = require('../services/storage');
 const facebook = require('../services/facebook');
 const upload = require('../middleware/upload');
 const { broadcastSSE } = require('../middleware/sse');
+const { validateContent } = require('../services/content-safety');
 
 // GET /api/queue
 router.get('/', (req, res) => {
@@ -20,9 +21,28 @@ router.post('/', upload.single('image'), (req, res) => {
     return res.status(400).json({ error: 'Message or image is required for scheduled post.' });
   }
 
+  const safetyCheck = validateContent(
+    { message, imageUrl },
+    { history: storage.getHistory(), isAutoPilot: false }
+  );
+
+  if (!safetyCheck.safe && safetyCheck.reasons.length > 0) {
+    return res.status(400).json({
+      success: false,
+      error: `Content safety check failed: ${safetyCheck.reasons.join('; ')}`,
+      reasons: safetyCheck.reasons,
+      warnings: safetyCheck.warnings
+    });
+  }
+
   const scheduledAt = req.body.scheduledAt || null;
 
-  const item = storage.addToQueue({ message, imageUrl, scheduledAt });
+  const item = storage.addToQueue({
+    message,
+    imageUrl,
+    scheduledAt,
+    status: safetyCheck.reviewRequired ? 'review_required' : 'pending'
+  });
   broadcastSSE('queue_updated', storage.getQueue());
   res.json({ success: true, item });
 });
@@ -39,6 +59,19 @@ router.post('/:id/publish-now', async (req, res, next) => {
   const queue = storage.getQueue();
   const item = queue.find(q => q.id === req.params.id);
   if (!item) return res.status(404).json({ error: 'Queue item not found' });
+
+  const safetyCheck = validateContent(
+    { message: item.message, imageUrl: item.imageUrl },
+    { history: storage.getHistory(), isAutoPilot: false }
+  );
+
+  if (!safetyCheck.safe && safetyCheck.reasons.length > 0) {
+    return res.status(400).json({
+      success: false,
+      error: `Content safety check failed: ${safetyCheck.reasons.join('; ')}`,
+      reasons: safetyCheck.reasons
+    });
+  }
 
   try {
     let localImagePath = null;

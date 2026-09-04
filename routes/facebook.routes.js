@@ -7,6 +7,7 @@ const storage = require('../services/storage');
 const upload = require('../middleware/upload');
 const { broadcastSSE } = require('../middleware/sse');
 const { serializePage, serializePages } = require('../utils/public-serializer');
+const { validateContent } = require('../services/content-safety');
 
 // POST /api/post (or /api/facebook/post) - Instant Post Publishing
 router.post('/post', upload.single('image'), async (req, res, next) => {
@@ -22,6 +23,22 @@ router.post('/post', upload.single('image'), async (req, res, next) => {
       imagePath = localFile;
       imageUrl = null;
     }
+  }
+
+  // Enforce pre-publish content safety guard
+  const activePage = storage.getActivePage();
+  const safetyCheck = validateContent(
+    { message, imageUrl, imagePath },
+    { history: storage.getHistory(), isAutoPilot: false, pageCategory: activePage?.category }
+  );
+
+  if (!safetyCheck.safe && safetyCheck.reasons.length > 0) {
+    return res.status(400).json({
+      success: false,
+      error: `Content safety check failed: ${safetyCheck.reasons.join('; ')}`,
+      reasons: safetyCheck.reasons,
+      warnings: safetyCheck.warnings
+    });
   }
 
   try {
