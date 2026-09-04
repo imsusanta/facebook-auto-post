@@ -1,7 +1,11 @@
 /**
  * Server-Sent Events (SSE) Hub
- * Manages real-time client subscriptions and event broadcasting
+ * Manages real-time client subscriptions and event broadcasting with automatic secret redaction.
+ * Enforces central CORS policy without wildcards.
  */
+
+const { serializePublic } = require('../utils/public-serializer');
+const { isOriginAllowed } = require('../utils/cors-validator');
 
 const sseClients = new Set();
 
@@ -9,13 +13,20 @@ const sseClients = new Set();
  * Handle new SSE client connection
  */
 function handleSSEConnection(req, res) {
-  res.writeHead(200, {
+  const headers = {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*'
-  });
+    'Connection': 'keep-alive'
+  };
 
+  const origin = req.headers.origin;
+  if (origin && isOriginAllowed(origin)) {
+    headers['Access-Control-Allow-Origin'] = origin;
+    headers['Access-Control-Allow-Credentials'] = 'true';
+    headers['Vary'] = 'Origin';
+  }
+
+  res.writeHead(200, headers);
   res.write('event: connected\ndata: {"status":"connected"}\n\n');
   sseClients.add(res);
 
@@ -28,6 +39,7 @@ function handleSSEConnection(req, res) {
       sseClients.delete(res);
     }
   }, 25000);
+  if (heartbeat.unref) heartbeat.unref();
 
   req.on('close', () => {
     clearInterval(heartbeat);
@@ -36,10 +48,11 @@ function handleSSEConnection(req, res) {
 }
 
 /**
- * Broadcast an event to all connected SSE clients
+ * Broadcast an event to all connected SSE clients (payload sanitized)
  */
 function broadcastSSE(event, data) {
-  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  const sanitizedData = serializePublic(data);
+  const payload = `event: ${event}\ndata: ${JSON.stringify(sanitizedData)}\n\n`;
   for (const client of sseClients) {
     try {
       client.write(payload);
@@ -49,8 +62,20 @@ function broadcastSSE(event, data) {
   }
 }
 
+function closeAllSseClients() {
+  for (const client of sseClients) {
+    try {
+      client.end();
+    } catch {
+      // ignore
+    }
+  }
+  sseClients.clear();
+}
+
 module.exports = {
   handleSSEConnection,
   broadcastSSE,
-  getConnectedClientsCount: () => sseClients.size
+  getConnectedClientsCount: () => sseClients.size,
+  closeAllSseClients
 };

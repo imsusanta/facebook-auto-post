@@ -2,9 +2,18 @@ const path = require('path');
 const fs = require('fs');
 const { EventEmitter } = require('events');
 const cron = require('node-cron');
-const storage = require('./storage');
-const facebook = require('./facebook');
-const ai = require('./ai');
+const defaultStorage = require('./storage');
+const defaultFacebook = require('./facebook');
+const defaultAi = require('./ai');
+const { validateContent } = require('./content-safety');
+
+let currentStorage = defaultStorage;
+let currentFacebook = defaultFacebook;
+let currentAi = defaultAi;
+let currentClock = {
+  now: () => Date.now(),
+  newDate: (...args) => (args.length ? new Date(...args) : new Date())
+};
 
 class SchedulerService extends EventEmitter {
   constructor() {
@@ -16,10 +25,29 @@ class SchedulerService extends EventEmitter {
     this.nextRunTimestamp = null;
     this.isProcessing = false;
     this.lastAutoPostTime = 0;
+    this.processingItemIds = new Set();
+  }
+
+  setDependencies({ ai: mockAi, facebook: mockFacebook, storage: mockStorage, clock: mockClock } = {}) {
+    if (mockAi) currentAi = mockAi;
+    if (mockFacebook) currentFacebook = mockFacebook;
+    if (mockStorage) currentStorage = mockStorage;
+    if (mockClock) currentClock = mockClock;
+  }
+
+  resetDependencies() {
+    currentStorage = defaultStorage;
+    currentFacebook = defaultFacebook;
+    currentAi = defaultAi;
+    currentClock = {
+      now: () => Date.now(),
+      newDate: (...args) => (args.length ? new Date(...args) : new Date())
+    };
+    this.processingItemIds.clear();
   }
 
   init() {
-    const settings = storage.getSettings();
+    const settings = currentStorage.getSettings();
     if (settings.autoPostEnabled || settings.autoPilotEnabled) {
       this.start();
     } else {
@@ -34,7 +62,7 @@ class SchedulerService extends EventEmitter {
     if (!cronPattern) return null;
 
     try {
-      const now = new Date();
+      const now = currentClock.newDate();
       const parts = cronPattern.trim().split(/\s+/);
       if (parts.length !== 5) return null;
 
@@ -63,7 +91,7 @@ class SchedulerService extends EventEmitter {
   }
 
   start() {
-    const settings = storage.getSettings();
+    const settings = currentStorage.getSettings();
     this.stop(); // Clear any existing runners
 
     this.isRunning = true;
@@ -75,7 +103,7 @@ class SchedulerService extends EventEmitter {
         this.nextRunTimestamp = this.computeNextRun(schedulePattern);
 
         this.cronTask = cron.schedule(schedulePattern, async () => {
-          console.log(`[Scheduler] ⏰ Cron trigger activated at ${new Date().toLocaleTimeString()}!`);
+          console.log(`[Scheduler] ⏰ Cron trigger activated at ${currentClock.newDate().toLocaleTimeString()}!`);
           await this.executeAutoPilotTask();
           this.nextRunTimestamp = this.computeNextRun(schedulePattern);
           this.emit('status', this.getStatus());
@@ -97,22 +125,25 @@ class SchedulerService extends EventEmitter {
         }
       }
     }, 60 * 1000);
+    if (this.countdownIntervalId.unref) this.countdownIntervalId.unref();
 
     // 3. Dedicated Manual Queue & Custom Time Scheduler Worker (checks every 15s)
     this.queueIntervalId = setInterval(async () => {
-      const queue = storage.getQueue();
-      const now = new Date();
+      const queue = currentStorage.getQueue();
+      const now = currentClock.newDate();
       // An item is eligible if it has status 'pending' AND (no scheduledAt OR scheduledAt <= now)
       const eligibleItem = queue.find(item => {
         if (item.status !== 'pending') return false;
+        if (this.processingItemIds.has(item.id)) return false;
         if (!item.scheduledAt) return true; // immediate queue
-        return new Date(item.scheduledAt) <= now;
+        return currentClock.newDate(item.scheduledAt) <= now;
       });
 
       if (eligibleItem && !this.isProcessing) {
         await this.processManualQueueItem(eligibleItem, queue);
       }
     }, 15 * 1000);
+    if (this.queueIntervalId.unref) this.queueIntervalId.unref();
 
     this.emit('status', this.getStatus());
   }
@@ -137,8 +168,8 @@ class SchedulerService extends EventEmitter {
   }
 
   getStatus() {
-    const settings = storage.getSettings();
-    const now = Date.now();
+    const settings = currentStorage.getSettings();
+    const now = currentClock.now();
     const remainingSeconds = this.nextRunTimestamp ? Math.max(0, Math.round((this.nextRunTimestamp - now) / 1000)) : null;
 
     return {
@@ -146,10 +177,10 @@ class SchedulerService extends EventEmitter {
       autoPilotEnabled: !!settings.autoPilotEnabled,
       cronSchedule: settings.cronSchedule || '0 9,14,20 * * *',
       cronLabel: settings.cronLabel || 'প্রতিদিন ৩ বার (সকাল ৯টা, দুপুর ২টা, রাত ৮টা)',
-      nextRun: this.nextRunTimestamp ? new Date(this.nextRunTimestamp).toISOString() : null,
+      nextRun: this.nextRunTimestamp ? currentClock.newDate(this.nextRunTimestamp).toISOString() : null,
       secondsRemaining: remainingSeconds,
       isProcessing: this.isProcessing,
-      lastAutoPostTime: this.lastAutoPostTime ? new Date(this.lastAutoPostTime).toISOString() : null
+      lastAutoPostTime: this.lastAutoPostTime ? currentClock.newDate(this.lastAutoPostTime).toISOString() : null
     };
   }
 
@@ -157,14 +188,14 @@ class SchedulerService extends EventEmitter {
    * Execute scheduled Auto-Pilot task strictly according to cron time
    */
   async executeAutoPilotTask() {
-    const settings = storage.getSettings();
+    const settings = currentStorage.getSettings();
     if (!settings.autoPilotEnabled) {
       console.log('[Scheduler] Cron fired, but AI Auto-Pilot is currently turned OFF.');
       return;
     }
 
     // Safety check: Prevent duplicate triggers within 30 minutes
-    const now = Date.now();
+    const now = currentClock.now();
     if (now - this.lastAutoPostTime < 30 * 60 * 1000) {
       console.log('[Scheduler] Cooldown active: An auto-post was published recently. Skipping duplicate trigger.');
       return;
@@ -178,15 +209,43 @@ class SchedulerService extends EventEmitter {
    * Process a single queued manual post
    */
   async processManualQueueItem(item, queue) {
-    if (this.isProcessing) return;
+    if (!item || !item.id) return;
+    if (this.processingItemIds.has(item.id)) return;
+    if (item.status !== 'pending') return;
+
+    // Guard against items requiring human review
+    if (item.status === 'review_required') {
+      console.log(`[Scheduler] Skipping queued item ${item.id}: manual review required.`);
+      return;
+    }
+
+    this.processingItemIds.add(item.id);
     this.isProcessing = true;
     this.emit('status', this.getStatus());
 
     try {
-      console.log(`[Scheduler] Posting queued item ${item.id}...`);
+      console.log(`[Scheduler] Checking and posting queued item ${item.id}...`);
       item.status = 'processing';
-      storage.updateQueue(queue);
+      currentStorage.updateQueue(queue);
       this.emit('queue_updated', queue);
+
+      // Pre-publish safety check on queued post
+      const safetyCheck = validateContent(
+        { message: item.message, imageUrl: item.imageUrl },
+        { history: currentStorage.getHistory(), isAutoPilot: false }
+      );
+
+      if (!safetyCheck.safe && safetyCheck.reasons.length > 0) {
+        console.warn(`[Scheduler] Item ${item.id} failed content safety check: ${safetyCheck.reasons.join('; ')}`);
+        item.status = 'failed';
+        item.error = `Content safety check failed: ${safetyCheck.reasons.join('; ')}`;
+        currentStorage.updateQueue(queue);
+
+        this.emit('post_failed', { item, error: item.error, source: 'scheduler' });
+        this.emit('queue_updated', queue);
+        this.emit('history_updated', currentStorage.getHistory());
+        return;
+      }
 
       let imagePath = null;
       let imageUrl = item.imageUrl;
@@ -198,7 +257,7 @@ class SchedulerService extends EventEmitter {
         }
       }
 
-      const result = await facebook.publishPost({
+      const result = await currentFacebook.publishPost({
         message: item.message,
         imagePath: imagePath,
         imageUrl: imageUrl,
@@ -206,23 +265,24 @@ class SchedulerService extends EventEmitter {
       });
 
       item.status = 'completed';
-      item.completedAt = new Date().toISOString();
+      item.completedAt = currentClock.newDate().toISOString();
       item.postId = result.postId;
-      storage.updateQueue(queue);
+      currentStorage.updateQueue(queue);
 
       this.emit('post_success', { item, result, source: 'scheduler' });
       this.emit('queue_updated', queue);
-      this.emit('history_updated', storage.getHistory());
+      this.emit('history_updated', currentStorage.getHistory());
     } catch (err) {
       console.error(`[Scheduler] Failed to post item ${item.id}:`, err.message);
       item.status = 'failed';
       item.error = err.message;
-      storage.updateQueue(queue);
+      currentStorage.updateQueue(queue);
 
       this.emit('post_failed', { item, error: err.message, source: 'scheduler' });
       this.emit('queue_updated', queue);
-      this.emit('history_updated', storage.getHistory());
+      this.emit('history_updated', currentStorage.getHistory());
     } finally {
+      this.processingItemIds.delete(item.id);
       this.isProcessing = false;
       this.emit('status', this.getStatus());
     }
@@ -235,36 +295,138 @@ class SchedulerService extends EventEmitter {
     if (this.isProcessing) return;
     this.isProcessing = true;
     this.emit('status', this.getStatus());
-    this.emit('autopilot_generating', { timestamp: new Date().toISOString() });
+    this.emit('autopilot_generating', { timestamp: currentClock.newDate().toISOString() });
 
-    const settings = storage.getSettings();
+    const settings = currentStorage.getSettings();
+    const activePage = currentStorage.getActivePage();
+    const pageCategory = activePage?.category || '';
 
     // Select category: Rotate or randomly pick from user's active categories
-    const categories = settings.selectedCategories && settings.selectedCategories.length > 0
+    const allCategories = settings.selectedCategories && settings.selectedCategories.length > 0
       ? settings.selectedCategories
-      : ['trending_news', 'science_nature', 'history_civilization', 'psychology_mind', 'world_geography', 'tech_inventions', 'philosophy_wisdom'];
+      : ['trending_news', 'science_nature', 'history_civilization', 'psychology_mind', 'world_geography', 'tech_inventions', 'philosophy_wisdom', 'sports_records'];
     
-    const selectedCategoryId = categories[Math.floor(Math.random() * categories.length)];
+    // In unattended AutoPilot, prioritize evergreen educational categories over unverified trending news
+    let eligibleCategories = allCategories;
+    if (!customTopic && eligibleCategories.length > 1) {
+      eligibleCategories = eligibleCategories.filter(c => c !== 'trending_news');
+      if (eligibleCategories.length === 0) eligibleCategories = allCategories;
+    }
+
+    const selectedCategoryId = eligibleCategories[Math.floor(Math.random() * eligibleCategories.length)];
 
     try {
-      console.log(`[AI Auto-Pilot] Auto-generating viral post for category: ${selectedCategoryId}...`);
+      console.log(`[AI Auto-Pilot] Auto-generating post for category: ${selectedCategoryId} (Page: "${activePage?.name || 'Default'}", Niche: "${pageCategory}")...`);
       
-      const bundle = await ai.generateFullPostBundle({
+      const bundle = await currentAi.generateFullPostBundle({
         topic: customTopic,
         categoryId: selectedCategoryId,
+        pageId: activePage?.id,
         includeImage: settings.includeAiImage !== false
       });
 
-      console.log('[AI Auto-Pilot] Publishing post to Facebook Page...');
+      // Execute Content Safety Guard
+      const safetyCheck = validateContent(
+        {
+          message: bundle.message,
+          categoryId: selectedCategoryId,
+          imageUrl: bundle.image?.url,
+          imagePath: bundle.image?.localPath,
+          sources: bundle.sources || [],
+          isAiImage: !!bundle.image
+        },
+        {
+          history: currentStorage.getHistory(),
+          isAutoPilot: true,
+          pageCategory: pageCategory
+        }
+      );
+
+      // Fallback policy enforcement:
+      // - curated static fallbacks are NEVER auto-published unattended
+      // - unverified news claims are NEVER auto-published unattended
+      const isFallback = Boolean(bundle.isFallback || bundle.generationSource === 'curated_fallback');
+      const isCurrentAffairs = selectedCategoryId === 'trending_news' || selectedCategoryId === 'news';
+      const isUnverifiedNews = isCurrentAffairs && !bundle.verified;
+      const hasSafetyIssues = !safetyCheck.safe || (safetyCheck.reasons && safetyCheck.reasons.length > 0);
+
+      // BLOCK automatic publication if safety failed OR fallback was generated OR unverified news
+      if (hasSafetyIssues || isFallback || isUnverifiedNews) {
+        let blockReason = '';
+        const issues = [];
+        if (hasSafetyIssues) {
+          blockReason = `Content safety policy block: ${safetyCheck.reasons.join('; ')}`;
+          issues.push(...safetyCheck.reasons);
+        }
+        if (isUnverifiedNews) {
+          blockReason = 'News or sensitive claims cannot be auto-published without verified sources: Missing source citations or unverified claim.';
+          if (!issues.includes('MISSING_SOURCE')) {
+            issues.push('MISSING_SOURCE');
+          }
+        }
+        if (isFallback) {
+          blockReason = 'Curated static fallback generated; held for manual review (unverified fallbacks cannot auto-publish).';
+          if (!issues.includes('CURATED_FALLBACK')) {
+            issues.push('CURATED_FALLBACK');
+          }
+        }
+
+        console.warn(`[AI Auto-Pilot] 🛑 Autopublish BLOCKED: ${blockReason}`);
+
+        const queued = currentStorage.addToQueue({
+          message: bundle.message,
+          imageUrl: bundle.image?.url || null,
+          scheduledAt: null,
+          status: 'review_required',
+          generationSource: isFallback ? 'curated_fallback' : (bundle.generationSource || 'ai_generated'),
+          verified: isFallback ? false : Boolean(bundle.verified),
+          issues: issues.length > 0 ? issues : [blockReason]
+        });
+
+        currentStorage.addHistory({
+          status: 'review_required',
+          message: bundle.message,
+          imageUrl: bundle.image?.url || null,
+          error: blockReason,
+          source: 'ai_autopilot'
+        });
+
+        this.emit('autopilot_held_for_review', {
+          queueItem: queued,
+          reasons: safetyCheck.reasons,
+          warnings: safetyCheck.warnings,
+          isFallback
+        });
+        this.emit('queue_updated', currentStorage.getQueue());
+        this.emit('history_updated', currentStorage.getHistory());
+
+        return {
+          success: false,
+          reviewRequired: true,
+          reason: blockReason,
+          queued
+        };
+      }
+
+      console.log('[AI Auto-Pilot] Content passed safety guard. Publishing post to Facebook Page...');
       
-      const result = await facebook.publishPost({
+      const result = await currentFacebook.publishPost({
         message: bundle.message,
         imagePath: bundle.image?.localPath || null,
         imageUrl: bundle.image?.url || null,
         source: 'ai_autopilot'
       });
 
-      this.lastAutoPostTime = Date.now();
+      this.lastAutoPostTime = currentClock.now();
+
+      currentStorage.addHistory({
+        status: 'published',
+        postId: result.postId,
+        message: bundle.message,
+        imageUrl: bundle.image?.url || null,
+        source: 'ai_autopilot',
+        publishedAt: currentClock.newDate().toISOString()
+      });
 
       this.emit('post_success', {
         result,
@@ -272,13 +434,18 @@ class SchedulerService extends EventEmitter {
         message: bundle.message,
         imageUrl: bundle.image?.url
       });
-      this.emit('history_updated', storage.getHistory());
+      this.emit('history_updated', currentStorage.getHistory());
 
       return { success: true, result, bundle };
     } catch (err) {
       console.error('[AI Auto-Pilot] Error during generation & publish:', err.message);
+      currentStorage.addHistory({
+        status: 'failed',
+        error: err.message,
+        source: 'ai_autopilot'
+      });
       this.emit('post_failed', { error: err.message, source: 'ai_autopilot' });
-      this.emit('history_updated', storage.getHistory());
+      this.emit('history_updated', currentStorage.getHistory());
       throw err;
     } finally {
       this.isProcessing = false;

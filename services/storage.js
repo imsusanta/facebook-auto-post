@@ -1,13 +1,29 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
-const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
-const QUEUE_FILE = path.join(DATA_DIR, 'queue.json');
-const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
-const RULES_FILE = path.join(DATA_DIR, 'automation_rules.json');
-const TEMPLATES_FILE = path.join(DATA_DIR, 'templates.json');
+let DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+let SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+let HISTORY_FILE = path.join(DATA_DIR, 'history.json');
+let QUEUE_FILE = path.join(DATA_DIR, 'queue.json');
+let CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
+let RULES_FILE = path.join(DATA_DIR, 'automation_rules.json');
+let TEMPLATES_FILE = path.join(DATA_DIR, 'templates.json');
+let USERS_FILE = path.join(DATA_DIR, 'users.json');
+
+function updateFilePaths(newDir) {
+  DATA_DIR = newDir || process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+  SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+  HISTORY_FILE = path.join(DATA_DIR, 'history.json');
+  QUEUE_FILE = path.join(DATA_DIR, 'queue.json');
+  CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
+  RULES_FILE = path.join(DATA_DIR, 'automation_rules.json');
+  TEMPLATES_FILE = path.join(DATA_DIR, 'templates.json');
+  USERS_FILE = path.join(DATA_DIR, 'users.json');
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+}
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -20,7 +36,7 @@ const DEFAULT_TEMPLATES = [
     title: 'Breaking / Trending News Analysis',
     badge: '📰 সাম্প্রতিক খবর',
     category: 'trending_news',
-    imageUrl: 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=1080&h=1080&q=85',
+    imageUrl: '/robot.svg',
     desc: 'Catch immediate viral attention with a sensational event breakdown.',
     sample: '🚨 ব্রেকিং নিউজ ও সমসাময়িক আপডেট! 📢✨\n\nআজকের আলোচিত ঘটনার পেছনের মূল তথ্য ও বিস্তারিত বিশ্লেষণ:\n\n📌 গুরুত্বপূর্ণ পয়েন্ট:\n🔹 মূল ঘটনা ও প্রেক্ষাপট...\n🔹 জনসাধারণের ওপর এর প্রভাব...\n🔹 বিশেষজ্ঞদের মতামত...\n\nএই বিষয়ে আপনার ব্যক্তিগত মতামত কি? কমেন্টে জানান! 👇\n\n#TrendingNews #BreakingNews #CurrentAffairs #ViralPost'
   },
@@ -29,7 +45,7 @@ const DEFAULT_TEMPLATES = [
     title: 'Amazing Science & Nature Mystery',
     badge: '🔬 বিজ্ঞানের রহস্য',
     category: 'science_nature',
-    imageUrl: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1080&h=1080&q=85',
+    imageUrl: '/robot.svg',
     desc: 'Fascinating mind-bending facts about the cosmos, ocean or biology.',
     sample: '🌌 মহাবিশ্বের এমন এক রহস্য যা জানলে আপনার চোখ কপালে উঠবে! 🔭✨\n\nবিজ্ঞানীদের সাম্প্রতিক গবেষণায় উঠে এসেছে কিছু অবিশ্বাস্য তথ্য:\n\n📌 বিস্ময়কর ফ্যাক্টস:\n🔹 প্রথম অদ্ভুত সত্য...\n🔹 মানবদেহের ওপর এর চমকপ্রদ প্রভাব...\n🔹 পৃথিবী ও মহাকাশের অদ্ভুত সংযোগ...\n\nবিজ্ঞানের এমন অদ্ভুত সব তথ্য বন্ধুদের সাথে শেয়ার করতে ভুলবেন না! 🚀\n\n#ScienceFacts #AmazingUniverse #Astronomy #NatureMystery'
   },
@@ -38,7 +54,7 @@ const DEFAULT_TEMPLATES = [
     title: 'Historical Heritage & Lost Legends',
     badge: '🏛️ ইতিহাসের রহস্য',
     category: 'history_civilization',
-    imageUrl: 'https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&w=1080&h=1080&q=85',
+    imageUrl: '/robot.svg',
     desc: 'Unveil the forgotten facts about ancient empires and heroic rulers.',
     sample: '🏛️ ইতিহাসের পাতা থেকে: এক অজানা বীরগাথা ও ধ্বংস হওয়া সাম্রাজ্যের গল্প! 📜✨\n\nআজ থেকে শত শত বছর আগের এক অবিস্মরণীয় ঘটনা:\n\n📌 ঐতিহাসিক সত্য:\n🔹 ঘটনার পেছনের আসল রহস্য...\n🔹 যুগান্তকারী যুদ্ধের ফলাফল...\n🔹 কীভাবে বদলে গিয়েছিল ইতিহাস...\n\nআমাদের সমৃদ্ধ ঐতিহ্য ও অতীত জানতে সঙ্গে থাকুন! 🇮🇳\n\n#IndianHistory #Heritage #HistoryFacts #AncientLegends'
   },
@@ -47,7 +63,7 @@ const DEFAULT_TEMPLATES = [
     title: 'Mind Power & Psychology Hacks',
     badge: '🧠 মানব মস্তিষ্ক',
     category: 'psychology_mind',
-    imageUrl: 'https://images.unsplash.com/photo-1507499739999-097706ad8914?auto=format&fit=crop&w=1080&h=1080&q=85',
+    imageUrl: '/robot.svg',
     desc: 'High-engagement behavioral psychology and memory habits.',
     sample: '🧠 প্রতিদিন সকালে এই ১টি ভুল করলেই কমে যায় আপনার ব্রেইনের শক্তি! 💡\n\nমনোবিজ্ঞান ও নিউরোসায়েন্সের গবেষণায় পাওয়া ৩টি দারুণ টিপস:\n\n📌 মস্তিষ্কের গোপন নিয়ম:\n🔹 স্মৃতিশক্তি বাড়ানোর সহজ কৌশল...\n🔹 মানসিক চাপ দ্রুত কমানোর উপায়...\n🔹 অবচেতন মনের অবিশ্বাস্য ক্ষমতা...\n\nনিজেকে প্রতিদিন ১% উন্নত করতে আজই শুরু করুন! 📚✨\n\n#PsychologyTricks #MindPower #SelfImprovement #BrainFacts'
   },
@@ -56,7 +72,7 @@ const DEFAULT_TEMPLATES = [
     title: 'AI Revolution & Future Inventions',
     badge: '💡 ভবিষ্যৎ প্রযুক্তি',
     category: 'tech_inventions',
-    imageUrl: 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1080&h=1080&q=85',
+    imageUrl: '/robot.svg',
     desc: 'Viral discussions on artificial intelligence, robots, and tech jobs.',
     sample: '🤖 কৃত্রিম বুদ্ধিমত্তা (AI) কি সত্যিই প্রযুক্তির ভবিষ্যৎ বদলে দেবে? ⚡\n\nবিশ্বজুড়ে প্রযুক্তির দ্রুত পরিবর্তন নিয়ে যা বলছেন শীর্ষ বিজ্ঞানীরা:\n\n📌 প্রযুক্তির নতুন দিগন্ত:\n🔹 যে কাজগুলো এআই কখনোই করতে পারবে না...\n🔹 নতুন কী ধরণের চাকরির সুযোগ আসছে...\n🔹 সাধারণ মানুষ কীভাবে এতে লাভবান হবে...\n\nপ্রযুক্তির এই বিপ্লবে আপনার অভিমত কি? কমেন্টে জানান! 👇\n\n#ArtificialIntelligence #TechInventions #FutureTech #Innovation'
   },
@@ -65,7 +81,7 @@ const DEFAULT_TEMPLATES = [
     title: 'Inspiring Life Philosophy & Quotes',
     badge: '✨ জীবন ভাবনা',
     category: 'philosophy_wisdom',
-    imageUrl: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1080&h=1080&q=85',
+    imageUrl: '/robot.svg',
     desc: 'Emotional storytelling and moral guidance that drives massive shares.',
     sample: '✨ জীবনের এই ৩টি কঠিন সত্য যত তাড়াতাড়ি বুঝবেন, ততই ভালো থাকবেন! 🌸\n\nঅভিজ্ঞতার চেয়ে বড় কোনো শিক্ষক জীবনে আর নেই:\n\n📌 জীবনের ৩টি শিক্ষা:\n🔹 মানুষের আচরণ ও প্রত্যাশা নিয়ন্ত্রণ...\n🔹 সময়ের মূল্য ও আত্মসম্মান...\n🔹 কঠিন সময়ে নিজেকে শান্ত রাখার কৌশল...\n\nকথাগুলো মনের মতো লাগলে আপনার প্রিয় মানুষের সাথে শেয়ার করুন। ❤️\n\n#LifeQuotes #Inspiration #Philosophy #DailyWisdom #Motivational'
   }
@@ -161,6 +177,14 @@ const DEFAULT_CATEGORIES = [
     icon: 'sparkles',
     badge: '✨ জীবন ভাবনা',
     isDefault: true
+  },
+  {
+    id: 'sports_records',
+    title: '🏆 খেলাধুলা ও বিশ্ব রেকর্ড (Sports & World Records)',
+    promptContext: 'আন্তর্জাতিক ও জাতীয় খেলাধুলার রোমাঞ্চকর রেকর্ড, কিংবদন্তি অ্যাথলেটদের অনুপ্রেরণামূলক গল্প এবং অবিস্মরণীয় ক্রীড়া ইতিহাস।',
+    icon: 'trophy',
+    badge: '🏆 খেলার খবর',
+    isDefault: true
   }
 ];
 
@@ -180,7 +204,14 @@ function readJsonFile(filePath, defaultVal = {}) {
 
 function writeJsonFile(filePath, data) {
   try {
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+    const isSensitive = filePath.endsWith('settings.json') || filePath.endsWith('users.json');
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), {
+      encoding: 'utf8',
+      mode: isSensitive ? 0o600 : 0o644
+    });
+    if (isSensitive) {
+      try { fs.chmodSync(filePath, 0o600); } catch { /* ignore non-posix */ }
+    }
     return true;
   } catch (err) {
     console.error(`Error writing ${filePath}:`, err.message);
@@ -224,6 +255,123 @@ const storage = {
     const updated = { ...current, ...newSettings, updatedAt: new Date().toISOString() };
     writeJsonFile(SETTINGS_FILE, updated);
     return updated;
+  },
+
+  getAdminAuth() {
+    const s = this.getSettings();
+    return {
+      hasPassword: Boolean(s.adminPasswordHash && s.adminPasswordSalt),
+      hash: s.adminPasswordHash || null,
+      salt: s.adminPasswordSalt || null
+    };
+  },
+
+  setAdminPassword(hash, salt) {
+    return this.saveSettings({
+      adminPasswordHash: hash,
+      adminPasswordSalt: salt
+    });
+  },
+
+  // =========================================================================
+  // User Management & SaaS Accounts
+  // =========================================================================
+  initDefaultUsers() {
+    let users = readJsonFile(USERS_FILE, []);
+    if (!Array.isArray(users)) users = [];
+
+    const existingSuperAdmin = users.find(u => u && typeof u.email === 'string' && u.email.toLowerCase() === 'susantalohr@gmail.com');
+    if (!existingSuperAdmin) {
+      // In production or when NODE_ENV is unset, NEVER seed a hardcoded default password.
+      // Require explicit environment variable or allow dev/test fallback
+      const isDevOrTest = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+      const initialPassword = process.env.ADMIN_INITIAL_PASSWORD || process.env.ADMIN_PASSWORD || (isDevOrTest ? 'admin@123' : null);
+      if (initialPassword) {
+        const salt = crypto.randomBytes(16).toString('hex');
+        const hash = crypto.pbkdf2Sync(initialPassword, salt, 100000, 64, 'sha512').toString('hex');
+        const defaultUser = {
+          id: 'usr_superadmin_' + crypto.randomBytes(4).toString('hex'),
+          email: 'susantalohr@gmail.com',
+          name: 'Susanta Lohar',
+          role: 'super_admin',
+          passwordHash: hash,
+          passwordSalt: salt,
+          status: 'active',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        users.unshift(defaultUser);
+        writeJsonFile(USERS_FILE, users);
+      }
+    }
+    return users;
+  },
+
+  getUsers() {
+    return this.initDefaultUsers();
+  },
+
+  findUserByEmail(email) {
+    if (!email || typeof email !== 'string') return null;
+    const users = this.getUsers();
+    const cleanEmail = email.toLowerCase().trim();
+    return users.find(u => u && typeof u.email === 'string' && u.email.toLowerCase().trim() === cleanEmail) || null;
+  },
+
+  findUserById(id) {
+    if (!id || typeof id !== 'string') return null;
+    const users = this.getUsers();
+    return users.find(u => u && u.id === id) || null;
+  },
+
+  createUser({ email, password, name, role = 'user', status = 'active' }) {
+    if (!email || !password) throw new Error('Email and password are required.');
+    const cleanEmail = email.toLowerCase().trim();
+    const existing = this.findUserByEmail(cleanEmail);
+    if (existing) throw new Error('User with this email already exists.');
+
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
+
+    const newUser = {
+      id: 'usr_' + crypto.randomBytes(6).toString('hex'),
+      email: cleanEmail,
+      name: name || cleanEmail.split('@')[0],
+      role,
+      passwordHash: hash,
+      passwordSalt: salt,
+      status,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const users = this.getUsers();
+    users.push(newUser);
+    writeJsonFile(USERS_FILE, users);
+    return newUser;
+  },
+
+  updateUser(id, updates) {
+    const users = this.getUsers();
+    const index = users.findIndex(u => u.id === id);
+    if (index === -1) return null;
+
+    const current = users[index];
+    if (updates.password) {
+      const salt = crypto.randomBytes(16).toString('hex');
+      const hash = crypto.pbkdf2Sync(updates.password, salt, 100000, 64, 'sha512').toString('hex');
+      updates.passwordHash = hash;
+      updates.passwordSalt = salt;
+      delete updates.password;
+    }
+
+    users[index] = {
+      ...current,
+      ...updates,
+      updatedAt: new Date().toISOString()
+    };
+    writeJsonFile(USERS_FILE, users);
+    return users[index];
   },
 
   getConnectedPages() {
@@ -402,7 +550,11 @@ const storage = {
       return DEFAULT_CATEGORIES;
     }
     const data = readJsonFile(CATEGORIES_FILE, null);
-    return Array.isArray(data) ? data : DEFAULT_CATEGORIES;
+    if (Array.isArray(data) && data.length > 0) {
+      return data;
+    }
+    writeJsonFile(CATEGORIES_FILE, DEFAULT_CATEGORIES);
+    return DEFAULT_CATEGORIES;
   },
 
   saveCategories(categories) {
@@ -504,7 +656,10 @@ const storage = {
       imageUrl: item.imageUrl || null,
       createdAt: new Date().toISOString(),
       scheduledAt: item.scheduledAt ? new Date(item.scheduledAt).toISOString() : null,
-      status: 'pending'
+      status: item.status || 'pending',
+      generationSource: item.generationSource || 'manual',
+      verified: item.verified === true,
+      issues: Array.isArray(item.issues) ? item.issues : []
     };
     queue.push(queueItem);
     writeJsonFile(QUEUE_FILE, queue);
@@ -607,7 +762,7 @@ const storage = {
       title: templateData.title || 'Untitled Template',
       badge: templateData.badge || '📌 কাস্টম টেমপ্লেট',
       category: templateData.category || 'trending_news',
-      imageUrl: templateData.imageUrl || 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=1080&h=1080&q=85',
+      imageUrl: templateData.imageUrl || '/robot.svg',
       desc: templateData.desc || 'Custom post template style for Facebook.',
       sample: templateData.sample || '📢 নতুন কাস্টম পোস্ট টেমপ্লেট!\n\nএখানে আপনার পোস্টের মূল বিষয়বস্তু লিখুন...\n\n#Trending #ViralPost #Template',
       learnedStyle: templateData.learnedStyle || null,
@@ -634,7 +789,18 @@ const storage = {
       return templates[idx];
     }
     return null;
-  }
+  },
+
+  getDataDir() {
+    return DATA_DIR;
+  },
+
+  setDataDir(newDir) {
+    updateFilePaths(newDir);
+    return DATA_DIR;
+  },
+
+  DEFAULT_CATEGORIES
 };
 
 module.exports = storage;

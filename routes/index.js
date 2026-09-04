@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { authMiddleware } = require('../middleware/auth');
 
 const systemRoutes = require('./system.routes');
 const aiRoutes = require('./ai.routes');
@@ -11,6 +12,16 @@ const settingsRoutes = require('./settings.routes');
 const webhooksRoutes = require('./webhooks.routes');
 const templatesRoutes = require('./templates.routes');
 
+// Mount Webhook route first (Meta handles its own challenge and verification)
+router.use('/webhook', webhooksRoutes);
+
+// Mount Auth routes (Login, logout, session check)
+const authRoutes = require('./auth.routes');
+router.use('/auth', authRoutes);
+
+// Apply API authentication middleware to all subsequent routes
+router.use(authMiddleware);
+
 // Mount Domain Routes
 router.use('/', systemRoutes);
 router.use('/ai', aiRoutes);
@@ -21,6 +32,5 @@ router.use('/queue', queueRoutes);
 router.use('/media', mediaRoutes);
 router.use('/settings', settingsRoutes);
 router.use('/templates', templatesRoutes);
-router.use('/webhook', webhooksRoutes);
 
 module.exports = router;

@@ -3,33 +3,11 @@
  * Entrypoint & Server Bootstrap
  */
 
-const path = require('path');
-const express = require('express');
-const cors = require('cors');
-
 const { PORT, NODE_ENV } = require('./config/env');
-const { UPLOADS_DIR } = require('./config/constants');
 const { broadcastSSE } = require('./middleware/sse');
-const errorHandler = require('./middleware/errorHandler');
-const apiRoutes = require('./routes');
 const scheduler = require('./services/scheduler');
-
-const app = express();
-
-// Standard SaaS Middlewares
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Serve static assets & uploaded media
-app.use('/uploads', express.static(path.join(__dirname, UPLOADS_DIR)));
-app.use(express.static(path.join(__dirname, 'public')));
-
-// Mount Master API Router
-app.use('/api', apiRoutes);
-
-// Centralized Error Handler
-app.use(errorHandler);
+const logger = require('./utils/logger');
+const { app } = require('./createApp');
 
 // Wire Scheduler Lifecycle Events to SSE Real-time Feed
 scheduler.on('status', status => broadcastSSE('scheduler_status', status));
@@ -39,16 +17,19 @@ scheduler.on('queue_updated', queue => broadcastSSE('queue_updated', queue));
 scheduler.on('history_updated', history => broadcastSSE('history_updated', history));
 scheduler.on('autopilot_generating', data => broadcastSSE('autopilot_generating', data));
 
-// Initialize Background Automation Scheduler
-scheduler.init();
+let server = null;
 
-// Boot HTTP Server
-const server = app.listen(PORT, () => {
-  console.log('=======================================================');
-  console.log(`🚀 AutoPost Facebook Automation SaaS Engine`);
-  console.log(`🌐 Environment: ${NODE_ENV}`);
-  console.log(`📡 Local URL:   http://localhost:${PORT}`);
-  console.log('=======================================================');
-});
+// Initialize Background Automation Scheduler & HTTP Listen (only if not running under tests)
+if (process.env.NODE_ENV !== 'test') {
+  scheduler.init();
 
-module.exports = { app, server };
+  server = app.listen(PORT, () => {
+    logger.info('=======================================================');
+    logger.info(`🚀 AutoPost Facebook Automation SaaS Engine`);
+    logger.info(`🌐 Environment: ${NODE_ENV}`);
+    logger.info(`📡 Local URL:   http://localhost:${PORT}`);
+    logger.info('=======================================================');
+  });
+}
+
+module.exports = { app, server, scheduler };

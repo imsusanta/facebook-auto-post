@@ -6,13 +6,15 @@ const facebook = require('../services/facebook');
 const storage = require('../services/storage');
 const upload = require('../middleware/upload');
 const { broadcastSSE } = require('../middleware/sse');
+const { serializePage, serializePages } = require('../utils/public-serializer');
+const { validateContent } = require('../services/content-safety');
 
 // POST /api/post (or /api/facebook/post) - Instant Post Publishing
 router.post('/post', upload.single('image'), async (req, res, next) => {
   const message = req.body.message || '';
   let imageUrl = req.body.imageUrl || '';
   const isDemo = req.body.isDemo === 'true' || req.body.isDemo === true;
-  let imagePath = req.file ? req.file.path : null;
+  let imagePath = req.file ? req.file.path : (req.body.imagePath || null);
 
   // Resolve local uploaded or AI generated thumbnail
   if (!imagePath && imageUrl && imageUrl.startsWith('/uploads/')) {
@@ -21,6 +23,34 @@ router.post('/post', upload.single('image'), async (req, res, next) => {
       imagePath = localFile;
       imageUrl = null;
     }
+  }
+
+  let sources = req.body.sources;
+  if (typeof sources === 'string') {
+    try {
+      sources = JSON.parse(sources);
+    } catch {
+      sources = [];
+    }
+  }
+  const categoryId = req.body.categoryId || req.body.category || '';
+
+  // Enforce pre-publish content safety guard
+  const activePage = storage.getActivePage();
+  const safetyCheck = validateContent(
+    { message, imageUrl, imagePath, categoryId, sources },
+    { history: storage.getHistory(), isAutoPilot: false, pageCategory: activePage?.category }
+  );
+
+  if (!safetyCheck.safe || (safetyCheck.issueCodes && safetyCheck.issueCodes.length > 0)) {
+    return res.status(400).json({
+      success: false,
+      error: `Content safety check failed: ${safetyCheck.reasons.join('; ')}`,
+      issueCode: safetyCheck.issueCodes[0] || 'SAFETY_VIOLATION',
+      issueCodes: safetyCheck.issueCodes || [],
+      reasons: safetyCheck.reasons,
+      warnings: safetyCheck.warnings
+    });
   }
 
   try {
@@ -67,15 +97,15 @@ router.get('/account', async (req, res, next) => {
 
 // ================= MULTI-PAGE MANAGEMENT APIS =================
 
-// GET /api/facebook/pages - List all connected pages
+// GET /api/facebook/pages - List all connected pages (credentials redacted)
 router.get('/pages', (req, res) => {
   const s = storage.getSettings();
   const pages = storage.getConnectedPages();
   res.json({
     success: true,
     activePageId: s.activePageId || pages[0]?.id,
-    activePage: storage.getActivePage(),
-    pages
+    activePage: serializePage(storage.getActivePage()),
+    pages: serializePages(pages)
   });
 });
 
@@ -112,12 +142,15 @@ router.post('/pages', async (req, res, next) => {
       setAsActive: !!setAsActive
     });
 
-    broadcastSSE('page_switched', { activePage: storage.getActivePage(), pages: storage.getConnectedPages() });
+    broadcastSSE('page_switched', {
+      activePage: serializePage(storage.getActivePage()),
+      pages: serializePages(storage.getConnectedPages())
+    });
 
     res.json({
       success: true,
-      page: addedPage,
-      pages: storage.getConnectedPages(),
+      page: serializePage(addedPage),
+      pages: serializePages(storage.getConnectedPages()),
       activePageId: storage.getActivePage()?.id
     });
   } catch (err) {
@@ -137,12 +170,15 @@ router.post('/pages/switch', (req, res) => {
     return res.status(404).json({ success: false, error: 'Page not found in connected pages.' });
   }
 
-  broadcastSSE('page_switched', { activePage: switched, pages: storage.getConnectedPages() });
+  broadcastSSE('page_switched', {
+    activePage: serializePage(switched),
+    pages: serializePages(storage.getConnectedPages())
+  });
 
   res.json({
     success: true,
-    activePage: switched,
-    pages: storage.getConnectedPages()
+    activePage: serializePage(switched),
+    pages: serializePages(storage.getConnectedPages())
   });
 });
 
@@ -152,12 +188,65 @@ router.get('/pages/:id', (req, res) => {
   if (!page) {
     return res.status(404).json({ success: false, error: 'Page not found.' });
   }
-  res.json({ success: true, page });
+  res.json({ success: true, page: serializePage(page) });
 });
 
-// PUT /api/facebook/pages/:id - Edit connected page info and custom system prompt
+const rateLimit = require('express-rate-limit');
+
+const credentialLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many credential update attempts. Please wait.' }
+});
+
+// PUT /api/facebook/pages/:id/credential - Dedicated endpoint for page access token
+router.put('/pages/:id/credential', credentialLimiter, async (req, res) => {
+  const { accessToken } = req.body || {};
+  if (!accessToken || typeof accessToken !== 'string' || accessToken.trim().length < 15 || accessToken.trim().length > 1000) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid access token format. Must be between 15 and 1000 characters.',
+      code: 'INVALID_CREDENTIAL'
+    });
+  }
+
+  const existing = storage.getPageById(req.params.id);
+  if (!existing) {
+    return res.status(404).json({ success: false, error: 'Page not found.', code: 'PAGE_NOT_FOUND' });
+  }
+
+  const cleanToken = accessToken.trim();
+  storage.updateConnectedPage(req.params.id, { accessToken: cleanToken });
+
+  const activePage = storage.getActivePage();
+  if (activePage && activePage.id === req.params.id) {
+    storage.saveSettings({ accessToken: cleanToken });
+  }
+
+  broadcastSSE('page_switched', {
+    activePage: serializePage(storage.getActivePage()),
+    pages: serializePages(storage.getConnectedPages())
+  });
+
+  return res.json({
+    success: true,
+    configured: true
+  });
+});
+
+// PUT /api/facebook/pages/:id - Edit connected page general info and custom system prompt
 router.put('/pages/:id', async (req, res, next) => {
-  const { name, category, accessToken, systemPrompt, pictureUrl } = req.body;
+  if ('accessToken' in req.body) {
+    return res.status(400).json({
+      success: false,
+      error: 'Access token cannot be updated via general page endpoint. Use PUT /api/facebook/pages/:id/credential.',
+      code: 'CREDENTIAL_UPDATE_FORBIDDEN'
+    });
+  }
+
+  const { name, category, systemPrompt, pictureUrl } = req.body;
   try {
     const existing = storage.getPageById(req.params.id);
     if (!existing) {
@@ -167,18 +256,20 @@ router.put('/pages/:id', async (req, res, next) => {
     const updates = {};
     if (typeof name === 'string' && name.trim()) updates.name = name.trim();
     if (typeof category === 'string' && category.trim()) updates.category = category.trim();
-    if (typeof accessToken === 'string' && accessToken.trim()) updates.accessToken = accessToken.trim();
     if (typeof systemPrompt === 'string') updates.systemPrompt = systemPrompt.trim();
     if (typeof pictureUrl === 'string' && pictureUrl.trim()) updates.pictureUrl = pictureUrl.trim();
 
     const updated = storage.updateConnectedPage(req.params.id, updates);
-    broadcastSSE('page_switched', { activePage: storage.getActivePage(), pages: storage.getConnectedPages() });
+    broadcastSSE('page_switched', {
+      activePage: serializePage(storage.getActivePage()),
+      pages: serializePages(storage.getConnectedPages())
+    });
 
     res.json({
       success: true,
-      page: updated,
-      pages: storage.getConnectedPages(),
-      activePage: storage.getActivePage()
+      page: serializePage(updated),
+      pages: serializePages(storage.getConnectedPages()),
+      activePage: serializePage(storage.getActivePage())
     });
   } catch (err) {
     next(err);
@@ -189,11 +280,14 @@ router.put('/pages/:id', async (req, res, next) => {
 router.delete('/pages/:id', (req, res) => {
   try {
     const remaining = storage.removeConnectedPage(req.params.id);
-    broadcastSSE('page_switched', { activePage: storage.getActivePage(), pages: remaining });
+    broadcastSSE('page_switched', {
+      activePage: serializePage(storage.getActivePage()),
+      pages: serializePages(remaining)
+    });
     res.json({
       success: true,
-      pages: remaining,
-      activePage: storage.getActivePage()
+      pages: serializePages(remaining),
+      activePage: serializePage(storage.getActivePage())
     });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
@@ -208,7 +302,14 @@ router.post('/test-connection', async (req, res) => {
 
   try {
     const info = await facebook.verifyConnection(pageId, accessToken);
-    res.json({ success: true, info });
+    res.json({
+      success: true,
+      info: {
+        pageId: info.pageId,
+        pageName: info.pageName,
+        category: info.category
+      }
+    });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
   }

@@ -1,5 +1,26 @@
 // AutoPost - Complete Modern Facebook Automation UI Engine
 
+let currentCsrfToken = null;
+
+// Wrap window.fetch to automatically include X-CSRF-Token on mutating requests
+const _nativeFetch = window.fetch;
+window.fetch = async function(resource, init = {}) {
+  const method = (init.method || 'GET').toUpperCase();
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && currentCsrfToken) {
+    init.headers = init.headers || {};
+    if (init.headers instanceof Headers) {
+      if (!init.headers.has('X-CSRF-Token')) {
+        init.headers.set('X-CSRF-Token', currentCsrfToken);
+      }
+    } else if (Array.isArray(init.headers)) {
+      init.headers.push(['X-CSRF-Token', currentCsrfToken]);
+    } else {
+      init.headers['X-CSRF-Token'] = currentCsrfToken;
+    }
+  }
+  return _nativeFetch.call(this, resource, init);
+};
+
 document.addEventListener('DOMContentLoaded', () => {
   // Global State
   let state = {
@@ -40,7 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
       title: 'Breaking / Trending News Analysis',
       badge: '📰 সাম্প্রতিক খবর',
       category: 'trending_news',
-      imageUrl: 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=1080&h=1080&q=85',
+      imageUrl: '/robot.svg',
       desc: 'Catch immediate viral attention with a sensational event breakdown.',
       sample: '🚨 ব্রেকিং নিউজ ও সমসাময়িক আপডেট! 📢✨\n\nআজকের আলোচিত ঘটনার পেছনের মূল তথ্য ও বিস্তারিত বিশ্লেষণ:\n\n📌 গুরুত্বপূর্ণ পয়েন্ট:\n🔹 মূল ঘটনা ও প্রেক্ষাপট...\n🔹 জনসাধারণের ওপর এর প্রভাব...\n🔹 বিশেষজ্ঞদের মতামত...\n\nএই বিষয়ে আপনার ব্যক্তিগত মতামত কি? কমেন্টে জানান! 👇\n\n#TrendingNews #BreakingNews #CurrentAffairs #ViralPost'
     },
@@ -49,7 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
       title: 'Amazing Science & Nature Mystery',
       badge: '🔬 বিজ্ঞানের রহস্য',
       category: 'science_nature',
-      imageUrl: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1080&h=1080&q=85',
+      imageUrl: '/robot.svg',
       desc: 'Fascinating mind-bending facts about the cosmos, ocean or biology.',
       sample: '🌌 মহাবিশ্বের এমন এক রহস্য যা জানলে আপনার চোখ কপালে উঠবে! 🔭✨\n\nবিজ্ঞানীদের সাম্প্রতিক গবেষণায় উঠে এসেছে কিছু অবিশ্বাস্য তথ্য:\n\n📌 বিস্ময়কর ফ্যাক্টস:\n🔹 প্রথম অদ্ভুত সত্য...\n🔹 মানবদেহের ওপর এর চমকপ্রদ প্রভাব...\n🔹 পৃথিবী ও মহাকাশের অদ্ভুত সংযোগ...\n\nবিজ্ঞানের এমন অদ্ভুত সব তথ্য বন্ধুদের সাথে শেয়ার করতে ভুলবেন না! 🚀\n\n#ScienceFacts #AmazingUniverse #Astronomy #NatureMystery'
     },
@@ -58,7 +79,7 @@ document.addEventListener('DOMContentLoaded', () => {
       title: 'Historical Heritage & Lost Legends',
       badge: '🏛️ ইতিহাসের রহস্য',
       category: 'history_civilization',
-      imageUrl: 'https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&w=1080&h=1080&q=85',
+      imageUrl: '/robot.svg',
       desc: 'Unveil the forgotten facts about ancient empires and heroic rulers.',
       sample: '🏛️ ইতিহাসের পাতা থেকে: এক অজানা বীরগাথা ও ধ্বংস হওয়া সাম্রাজ্যের গল্প! 📜✨\n\nআজ থেকে শত শত বছর আগের এক অবিস্মরণীয় ঘটনা:\n\n📌 ঐতিহাসিক সত্য:\n🔹 ঘটনার পেছনের আসল রহস্য...\n🔹 যুগান্তকারী যুদ্ধের ফলাফল...\n🔹 কীভাবে বদলে গিয়েছিল ইতিহাস...\n\nআমাদের সমৃদ্ধ ঐতিহ্য ও অতীত জানতে সঙ্গে থাকুন! 🇮🇳\n\n#IndianHistory #Heritage #HistoryFacts #AncientLegends'
     },
@@ -67,7 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
       title: 'Mind Power & Psychology Hacks',
       badge: '🧠 মানব মস্তিষ্ক',
       category: 'psychology_mind',
-      imageUrl: 'https://images.unsplash.com/photo-1507499739999-097706ad8914?auto=format&fit=crop&w=1080&h=1080&q=85',
+      imageUrl: '/robot.svg',
       desc: 'High-engagement behavioral psychology and memory habits.',
       sample: '🧠 প্রতিদিন সকালে এই ১টি ভুল করলেই কমে যায় আপনার ব্রেইনের শক্তি! 💡\n\nমনোবিজ্ঞান ও নিউরোসায়েন্সের গবেষণায় পাওয়া ৩টি দারুণ টিপস:\n\n📌 মস্তিষ্কের গোপন নিয়ম:\n🔹 স্মৃতিশক্তি বাড়ানোর সহজ কৌশল...\n🔹 মানসিক চাপ দ্রুত কমানোর উপায়...\n🔹 অবচেতন মনের অবিশ্বাস্য ক্ষমতা...\n\nনিজেকে প্রতিদিন ১% উন্নত করতে আজই শুরু করুন! 📚✨\n\n#PsychologyTricks #MindPower #SelfImprovement #BrainFacts'
     },
@@ -76,7 +97,7 @@ document.addEventListener('DOMContentLoaded', () => {
       title: 'AI Revolution & Future Inventions',
       badge: '💡 ভবিষ্যৎ প্রযুক্তি',
       category: 'tech_inventions',
-      imageUrl: 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1080&h=1080&q=85',
+      imageUrl: '/robot.svg',
       desc: 'Viral discussions on artificial intelligence, robots, and tech jobs.',
       sample: '🤖 কৃত্রিম বুদ্ধিমত্তা (AI) কি সত্যিই প্রযুক্তির ভবিষ্যৎ বদলে দেবে? ⚡\n\nবিশ্বজুড়ে প্রযুক্তির দ্রুত পরিবর্তন নিয়ে যা বলছেন শীর্ষ বিজ্ঞানীরা:\n\n📌 প্রযুক্তির নতুন দিগন্ত:\n🔹 যে কাজগুলো এআই কখনোই করতে পারবে না...\n🔹 নতুন কী ধরণের চাকরির সুযোগ আসছে...\n🔹 সাধারণ মানুষ কীভাবে এতে লাভবান হবে...\n\nপ্রযুক্তির এই বিপ্লবে আপনার অভিমত কি? কমেন্টে জানান! 👇\n\n#ArtificialIntelligence #TechInventions #FutureTech #Innovation'
     },
@@ -85,7 +106,7 @@ document.addEventListener('DOMContentLoaded', () => {
       title: 'Inspiring Life Philosophy & Quotes',
       badge: '✨ জীবন ভাবনা',
       category: 'philosophy_wisdom',
-      imageUrl: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1080&h=1080&q=85',
+      imageUrl: '/robot.svg',
       desc: 'Emotional storytelling and moral guidance that drives massive shares.',
       sample: '✨ জীবনের এই ৩টি কঠিন সত্য যত তাড়াতাড়ি বুঝবেন, ততই ভালো থাকবেন! 🌸\n\nঅভিজ্ঞতার চেয়ে বড় কোনো শিক্ষক জীবনে আর নেই:\n\n📌 জীবনের ৩টি শিক্ষা:\n🔹 মানুষের আচরণ ও প্রত্যাশা নিয়ন্ত্রণ...\n🔹 সময়ের মূল্য ও আত্মসম্মান...\n🔹 কঠিন সময়ে নিজেকে শান্ত রাখার কৌশল...\n\nকথাগুলো মনের মতো লাগলে আপনার প্রিয় মানুষের সাথে শেয়ার করুন। ❤️\n\n#LifeQuotes #Inspiration #Philosophy #DailyWisdom #Motivational'
     }
@@ -973,7 +994,7 @@ document.addEventListener('DOMContentLoaded', () => {
         snippet: 'Good morning! Make today amazing...',
         date: '28 May 2024',
         time: '09:15 AM',
-        thumb: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=120&auto=format&fit=crop&q=80'
+        thumb: '/robot.svg'
       },
       {
         id: 'mock_2',
@@ -981,7 +1002,7 @@ document.addEventListener('DOMContentLoaded', () => {
         snippet: 'Boost your productivity with these simple...',
         date: '28 May 2024',
         time: '12:00 PM',
-        thumb: 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=120&auto=format&fit=crop&q=80'
+        thumb: '/robot.svg'
       },
       {
         id: 'mock_3',
@@ -989,7 +1010,7 @@ document.addEventListener('DOMContentLoaded', () => {
         snippet: 'We have something great to share...',
         date: '28 May 2024',
         time: '03:00 PM',
-        thumb: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=120&auto=format&fit=crop&q=80'
+        thumb: '/robot.svg'
       },
       {
         id: 'mock_4',
@@ -997,7 +1018,7 @@ document.addEventListener('DOMContentLoaded', () => {
         snippet: 'See how our solution helped...',
         date: '28 May 2024',
         time: '06:00 PM',
-        thumb: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=120&auto=format&fit=crop&q=80'
+        thumb: '/robot.svg'
       }
     ];
 
@@ -2245,11 +2266,44 @@ document.addEventListener('DOMContentLoaded', () => {
       savePageSettingsBtn.textContent = 'Saving...';
 
       try {
+        const geminiKey = pageSettingsGeminiKey ? pageSettingsGeminiKey.value.trim() : '';
+        const accessToken = pageSettingsAccessToken ? pageSettingsAccessToken.value.trim() : '';
+        const pageId = pageSettingsPageId ? pageSettingsPageId.value.trim() : '';
+        const isDemo = pageSettingsDemoMode ? pageSettingsDemoMode.checked : false;
+
+        // 1. Update Gemini key via dedicated endpoint if changed
+        if (geminiKey) {
+          const gemRes = await fetch('/api/settings/gemini-credential', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apiKey: geminiKey })
+          });
+          const gemData = await gemRes.json();
+          if (!gemData.success) {
+            alert('Failed to save Gemini key: ' + (gemData.error || 'Validation error'));
+            return;
+          }
+        }
+
+        // 2. Update Facebook token via dedicated endpoint if changed
+        const targetPageId = pageId || state.settings.pageId || (state.pages && state.pages[0]?.id);
+        if (accessToken && targetPageId) {
+          const fbRes = await fetch(`/api/facebook/pages/${targetPageId}/credential`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ accessToken })
+          });
+          const fbData = await fbRes.json();
+          if (!fbData.success) {
+            alert('Failed to save Facebook token: ' + (fbData.error || 'Validation error'));
+            return;
+          }
+        }
+
+        // 3. Save general non-secret configuration
         const payload = {
-          pageId: pageSettingsPageId.value.trim(),
-          accessToken: pageSettingsAccessToken.value.trim(),
-          geminiApiKey: pageSettingsGeminiKey.value.trim(),
-          isDemoMode: pageSettingsDemoMode.checked
+          pageId: targetPageId,
+          isDemoMode: isDemo
         };
 
         const res = await fetch('/api/settings', {
@@ -2264,9 +2318,11 @@ document.addEventListener('DOMContentLoaded', () => {
           pageSettingsStatusMsg.className = 'p-2.5 rounded-xl text-xs font-medium bg-emerald-50 text-emerald-700';
           pageSettingsStatusMsg.textContent = '✅ Settings saved successfully!';
           fetchStatus();
+        } else {
+          alert('Failed to save settings: ' + (data.error || 'Server error'));
         }
       } catch (err) {
-        alert('Failed to save settings');
+        alert('Failed to save settings: ' + err.message);
       } finally {
         savePageSettingsBtn.disabled = false;
         savePageSettingsBtn.textContent = 'Save Changes';
@@ -2587,8 +2643,20 @@ document.addEventListener('DOMContentLoaded', () => {
       submitEditPageBtn.innerHTML = `<span class="animate-spin mr-1">⌛</span> Saving...`;
 
       try {
+        if (accessToken && accessToken.trim()) {
+          const credRes = await fetch(`/api/facebook/pages/${pageId}/credential`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ accessToken: accessToken.trim() })
+          });
+          const credData = await credRes.json();
+          if (!credData.success) {
+            alert('Failed to update page access token: ' + (credData.error || 'Validation error'));
+            return;
+          }
+        }
+
         const payload = { name, category, systemPrompt };
-        if (accessToken) payload.accessToken = accessToken;
 
         const res = await fetch(`/api/facebook/pages/${pageId}`, {
           method: 'PUT',
@@ -2722,8 +2790,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Update fields
       if (pageSettingsPageId) pageSettingsPageId.value = state.settings.pageId || '';
-      if (pageSettingsAccessToken) pageSettingsAccessToken.value = state.settings.accessToken || '';
-      if (pageSettingsGeminiKey) pageSettingsGeminiKey.value = state.settings.geminiApiKey || '';
+      if (pageSettingsAccessToken) {
+        pageSettingsAccessToken.value = '';
+        pageSettingsAccessToken.placeholder = state.settings.facebookConnected
+          ? '•••••••••••••••• (Configured - leave blank to keep unchanged)'
+          : 'Enter Page Access Token';
+      }
+      if (pageSettingsGeminiKey) {
+        pageSettingsGeminiKey.value = '';
+        pageSettingsGeminiKey.placeholder = state.settings.geminiConfigured
+          ? '•••••••••••••••• (Configured - leave blank to keep unchanged)'
+          : 'Enter Gemini API Key';
+      }
       if (pageSettingsDemoMode) pageSettingsDemoMode.checked = !!state.settings.isDemoMode;
 
       // Update Profile & Accounts view
@@ -2857,11 +2935,335 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Initial Boot
-  fetchStatus();
-  fetchConnectedPages();
-  fetchTemplates();
-  connectSSE();
-  renderDashboardQueue();
-  refreshIcons();
+  // SaaS Email & Password Authentication Modal & Session Flow
+  const adminAuthModal = document.getElementById('adminAuthModal');
+  const adminModalTitle = document.getElementById('adminModalTitle');
+  const adminModalSubtitle = document.getElementById('adminModalSubtitle');
+  const adminAuthForm = document.getElementById('adminAuthForm');
+  const adminAuthEmailInput = document.getElementById('adminAuthEmailInput');
+  const adminAuthPasswordInput = document.getElementById('adminAuthPasswordInput');
+  const adminAuthError = document.getElementById('adminAuthError');
+  const adminAuthSubmitBtn = document.getElementById('adminAuthSubmitBtn');
+  const togglePasswordVisibilityBtn = document.getElementById('togglePasswordVisibilityBtn');
+
+  const adminDevLoginSection = document.getElementById('adminDevLoginSection');
+  const adminDevLoginBtn = document.getElementById('adminDevLoginBtn');
+
+  const adminLogoutBtn = document.getElementById('adminLogoutBtn');
+  const userAvatarLetter = document.getElementById('userAvatarLetter');
+  const displayProfileName = document.getElementById('displayProfileName');
+  const displayProfileRole = document.getElementById('displayProfileRole');
+  const headerAuthActionBtn = document.getElementById('headerAuthActionBtn');
+  const headerAuthActionText = document.getElementById('headerAuthActionText');
+
+  const adminPasswordUpdateForm = document.getElementById('adminPasswordUpdateForm');
+  const adminCurrentPasswordInput = document.getElementById('adminCurrentPasswordInput');
+  const adminNewPasswordInput = document.getElementById('adminNewPasswordInput');
+  const adminConfirmPasswordInput = document.getElementById('adminConfirmPasswordInput');
+  const adminPasswordStatusMsg = document.getElementById('adminPasswordStatusMsg');
+  const adminPasswordSubmitBtn = document.getElementById('adminPasswordSubmitBtn');
+  const adminSettingsLogoutBtn = document.getElementById('adminSettingsLogoutBtn');
+
+  let isUserAuthenticated = false;
+
+  function updateAuthUI(authenticated, user = null) {
+    isUserAuthenticated = authenticated;
+    if (user && typeof user === 'object') {
+      if (displayProfileName) {
+        displayProfileName.textContent = user.name || user.email || 'Susanta Lohar';
+      }
+      if (displayProfileRole) {
+        const roleLabel = user.role === 'super_admin' ? 'Super Admin' : (user.role === 'admin' ? 'Admin' : 'User');
+        displayProfileRole.textContent = roleLabel;
+      }
+      if (userAvatarLetter) {
+        const letter = (user.name || user.email || 'S')[0].toUpperCase();
+        userAvatarLetter.textContent = letter;
+      }
+    }
+    if (headerAuthActionText) {
+      if (authenticated && user && user.role === 'super_admin') {
+        headerAuthActionText.textContent = 'Super Admin';
+      } else if (authenticated) {
+        headerAuthActionText.textContent = 'Admin Active';
+      } else {
+        headerAuthActionText.textContent = 'Login';
+      }
+    }
+    if (headerAuthActionBtn) {
+      if (authenticated) {
+        headerAuthActionBtn.classList.remove('bg-rose-50', 'text-rose-700', 'border-rose-200');
+        headerAuthActionBtn.classList.add('bg-white', 'text-slate-700');
+        headerAuthActionBtn.title = 'Logged in as ' + (user ? (user.name || user.email) : 'Admin');
+      } else {
+        headerAuthActionBtn.classList.add('bg-rose-50', 'text-rose-700', 'border-rose-200');
+        headerAuthActionBtn.classList.remove('bg-white', 'text-slate-700');
+        headerAuthActionBtn.title = 'Click to Log In';
+      }
+    }
+  }
+
+  function showAuthModal(isDev = false) {
+    if (!adminAuthModal) return;
+    adminAuthModal.classList.remove('hidden');
+
+    if (adminModalTitle) adminModalTitle.textContent = 'Facebook AutoPost SaaS Login';
+    if (adminModalSubtitle) adminModalSubtitle.textContent = 'Log in with your administrator email and password.';
+
+    if (adminDevLoginSection) {
+      if (isDev) {
+        adminDevLoginSection.classList.remove('hidden');
+      } else {
+        adminDevLoginSection.classList.add('hidden');
+      }
+    }
+
+    if (adminAuthError) adminAuthError.classList.add('hidden');
+    refreshIcons();
+  }
+
+  function hideAuthModal() {
+    if (adminAuthModal) adminAuthModal.classList.add('hidden');
+    if (adminAuthError) adminAuthError.classList.add('hidden');
+    if (adminAuthPasswordInput) adminAuthPasswordInput.value = '';
+  }
+
+  // Toggle Password Visibility Eye Button
+  if (togglePasswordVisibilityBtn && adminAuthPasswordInput) {
+    togglePasswordVisibilityBtn.addEventListener('click', () => {
+      const isPassword = adminAuthPasswordInput.type === 'password';
+      adminAuthPasswordInput.type = isPassword ? 'text' : 'password';
+      const icon = togglePasswordVisibilityBtn.querySelector('i');
+      if (icon) {
+        icon.setAttribute('data-lucide', isPassword ? 'eye-off' : 'eye');
+        refreshIcons();
+      }
+    });
+  }
+
+  // SaaS Email & Password Login Submission
+  if (adminAuthForm) {
+    adminAuthForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = adminAuthEmailInput ? adminAuthEmailInput.value.trim() : '';
+      const password = adminAuthPasswordInput ? adminAuthPasswordInput.value.trim() : '';
+
+      if (!email || !password) {
+        if (adminAuthError) {
+          adminAuthError.textContent = 'Please enter both email and password.';
+          adminAuthError.classList.remove('hidden');
+        }
+        return;
+      }
+
+      if (adminAuthSubmitBtn) {
+        adminAuthSubmitBtn.disabled = true;
+        adminAuthSubmitBtn.innerHTML = '<span>Verifying...</span>';
+      }
+      if (adminAuthError) adminAuthError.classList.add('hidden');
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (data.success && data.authenticated) {
+          currentCsrfToken = data.csrfToken || null;
+          hideAuthModal();
+          updateAuthUI(true, data.user);
+          initApp();
+        } else {
+          if (adminAuthError) {
+            adminAuthError.textContent = data.error || 'Invalid email or password.';
+            adminAuthError.classList.remove('hidden');
+          }
+        }
+      } catch {
+        if (adminAuthError) {
+          adminAuthError.textContent = 'Connection error. Please try again.';
+          adminAuthError.classList.remove('hidden');
+        }
+      } finally {
+        if (adminAuthSubmitBtn) {
+          adminAuthSubmitBtn.disabled = false;
+          adminAuthSubmitBtn.innerHTML = '<i data-lucide="log-in" class="w-4 h-4"></i><span>Log In to Dashboard</span>';
+          refreshIcons();
+        }
+      }
+    });
+  }
+
+  // Quick Dev Login
+  if (adminDevLoginBtn) {
+    adminDevLoginBtn.addEventListener('click', async () => {
+      adminDevLoginBtn.disabled = true;
+      adminDevLoginBtn.innerHTML = '<span>Logging in...</span>';
+      try {
+        const res = await fetch('/api/auth/dev-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await res.json();
+        if (data.success && data.authenticated) {
+          currentCsrfToken = data.csrfToken || null;
+          hideAuthModal();
+          updateAuthUI(true, data.user);
+          initApp();
+        } else {
+          alert(data.error || 'Dev login unavailable.');
+        }
+      } catch {
+        alert('Could not connect for dev login.');
+      } finally {
+        adminDevLoginBtn.disabled = false;
+        adminDevLoginBtn.innerHTML = '<i data-lucide="zap" class="w-3.5 h-3.5 text-amber-600"></i><span>⚡ One-Click Dev Login (Local Development)</span>';
+        refreshIcons();
+      }
+    });
+  }
+
+  // Logout Handler Function
+  async function performLogout() {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // ignore
+    }
+    currentCsrfToken = null;
+    updateAuthUI(false);
+    showAuthModal(true);
+  }
+
+  if (adminLogoutBtn) {
+    adminLogoutBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      performLogout();
+    });
+  }
+
+  if (adminSettingsLogoutBtn) {
+    adminSettingsLogoutBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      performLogout();
+    });
+  }
+
+  if (headerAuthActionBtn) {
+    headerAuthActionBtn.addEventListener('click', () => {
+      if (isUserAuthenticated) {
+        if (confirm('Do you want to log out of the dashboard?')) {
+          performLogout();
+        }
+      } else {
+        showAuthModal(true);
+      }
+    });
+  }
+
+  // Password Update Form in Settings
+  if (adminPasswordUpdateForm) {
+    adminPasswordUpdateForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const currentPassword = adminCurrentPasswordInput ? adminCurrentPasswordInput.value.trim() : '';
+      const newPassword = adminNewPasswordInput ? adminNewPasswordInput.value.trim() : '';
+      const confirmPassword = adminConfirmPasswordInput ? adminConfirmPasswordInput.value.trim() : '';
+
+      if (newPassword.length < 6) {
+        if (adminPasswordStatusMsg) {
+          adminPasswordStatusMsg.className = 'p-2.5 rounded-xl text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200 block';
+          adminPasswordStatusMsg.textContent = 'New password must be at least 6 characters.';
+        }
+        return;
+      }
+
+      if (newPassword !== confirmPassword) {
+        if (adminPasswordStatusMsg) {
+          adminPasswordStatusMsg.className = 'p-2.5 rounded-xl text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200 block';
+          adminPasswordStatusMsg.textContent = 'Passwords do not match.';
+        }
+        return;
+      }
+
+      if (adminPasswordSubmitBtn) {
+        adminPasswordSubmitBtn.disabled = true;
+        adminPasswordSubmitBtn.innerHTML = '<span>Saving...</span>';
+      }
+
+      try {
+        const res = await fetch('/api/settings/admin-credential', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ currentPassword, newPassword, confirmPassword })
+        });
+        const data = await res.json();
+        if (data.success) {
+          if (adminPasswordStatusMsg) {
+            adminPasswordStatusMsg.className = 'p-2.5 rounded-xl text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 block';
+            adminPasswordStatusMsg.textContent = 'Admin password updated successfully!';
+          }
+          if (adminCurrentPasswordInput) adminCurrentPasswordInput.value = '';
+          if (adminNewPasswordInput) adminNewPasswordInput.value = '';
+          if (adminConfirmPasswordInput) adminConfirmPasswordInput.value = '';
+        } else {
+          if (adminPasswordStatusMsg) {
+            adminPasswordStatusMsg.className = 'p-2.5 rounded-xl text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200 block';
+            adminPasswordStatusMsg.textContent = data.error || 'Failed to update password.';
+          }
+        }
+      } catch {
+        if (adminPasswordStatusMsg) {
+          adminPasswordStatusMsg.className = 'p-2.5 rounded-xl text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200 block';
+          adminPasswordStatusMsg.textContent = 'Connection error updating password.';
+        }
+      } finally {
+        if (adminPasswordSubmitBtn) {
+          adminPasswordSubmitBtn.disabled = false;
+          adminPasswordSubmitBtn.innerHTML = '<i data-lucide="save" class="w-3.5 h-3.5"></i><span>Update Password</span>';
+          refreshIcons();
+        }
+      }
+    });
+  }
+
+  function initApp() {
+    fetchStatus();
+    fetchConnectedPages();
+    fetchTemplates();
+    connectSSE();
+    renderDashboardQueue();
+    refreshIcons();
+  }
+
+  // Session verification on initial load
+  async function checkAuthAndInit() {
+    try {
+      const res = await fetch('/api/auth/session');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.authenticated) {
+          currentCsrfToken = data.csrfToken || null;
+          hideAuthModal();
+          updateAuthUI(true, data.user);
+          initApp();
+          return;
+        } else {
+          currentCsrfToken = null;
+          updateAuthUI(false);
+          showAuthModal(Boolean(data.isDev));
+          return;
+        }
+      }
+      currentCsrfToken = null;
+      updateAuthUI(false);
+      showAuthModal(true);
+    } catch {
+      currentCsrfToken = null;
+      updateAuthUI(false);
+      showAuthModal(true);
+    }
+  }
+
+  checkAuthAndInit();
 });
