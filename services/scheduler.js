@@ -5,6 +5,7 @@ const cron = require('node-cron');
 const storage = require('./storage');
 const facebook = require('./facebook');
 const ai = require('./ai');
+const { validateContent } = require('./content-safety');
 
 class SchedulerService extends EventEmitter {
   constructor() {
@@ -179,14 +180,40 @@ class SchedulerService extends EventEmitter {
    */
   async processManualQueueItem(item, queue) {
     if (this.isProcessing) return;
+    if (!item || item.status !== 'pending') return;
+
+    // Guard against items requiring human review
+    if (item.status === 'review_required') {
+      console.log(`[Scheduler] Skipping queued item ${item.id}: manual review required.`);
+      return;
+    }
+
     this.isProcessing = true;
     this.emit('status', this.getStatus());
 
     try {
-      console.log(`[Scheduler] Posting queued item ${item.id}...`);
+      console.log(`[Scheduler] Checking and posting queued item ${item.id}...`);
       item.status = 'processing';
       storage.updateQueue(queue);
       this.emit('queue_updated', queue);
+
+      // Pre-publish safety check on queued post
+      const safetyCheck = validateContent(
+        { message: item.message, imageUrl: item.imageUrl },
+        { history: storage.getHistory(), isAutoPilot: false }
+      );
+
+      if (!safetyCheck.safe && safetyCheck.reasons.length > 0) {
+        console.warn(`[Scheduler] Item ${item.id} failed content safety check: ${safetyCheck.reasons.join('; ')}`);
+        item.status = 'failed';
+        item.error = `Content safety check failed: ${safetyCheck.reasons.join('; ')}`;
+        storage.updateQueue(queue);
+
+        this.emit('post_failed', { item, error: item.error, source: 'scheduler' });
+        this.emit('queue_updated', queue);
+        this.emit('history_updated', storage.getHistory());
+        return;
+      }
 
       let imagePath = null;
       let imageUrl = item.imageUrl;
@@ -238,24 +265,91 @@ class SchedulerService extends EventEmitter {
     this.emit('autopilot_generating', { timestamp: new Date().toISOString() });
 
     const settings = storage.getSettings();
+    const activePage = storage.getActivePage();
+    const pageCategory = activePage?.category || '';
 
     // Select category: Rotate or randomly pick from user's active categories
-    const categories = settings.selectedCategories && settings.selectedCategories.length > 0
+    const allCategories = settings.selectedCategories && settings.selectedCategories.length > 0
       ? settings.selectedCategories
       : ['trending_news', 'science_nature', 'history_civilization', 'psychology_mind', 'world_geography', 'tech_inventions', 'philosophy_wisdom'];
     
-    const selectedCategoryId = categories[Math.floor(Math.random() * categories.length)];
+    // In unattended AutoPilot, prioritize evergreen educational categories over unverified trending news
+    let eligibleCategories = allCategories;
+    if (!customTopic && eligibleCategories.length > 1) {
+      eligibleCategories = eligibleCategories.filter(c => c !== 'trending_news');
+      if (eligibleCategories.length === 0) eligibleCategories = allCategories;
+    }
+
+    const selectedCategoryId = eligibleCategories[Math.floor(Math.random() * eligibleCategories.length)];
 
     try {
-      console.log(`[AI Auto-Pilot] Auto-generating viral post for category: ${selectedCategoryId}...`);
+      console.log(`[AI Auto-Pilot] Auto-generating post for category: ${selectedCategoryId} (Page: "${activePage?.name || 'Default'}", Niche: "${pageCategory}")...`);
       
       const bundle = await ai.generateFullPostBundle({
         topic: customTopic,
         categoryId: selectedCategoryId,
+        pageId: activePage?.id,
         includeImage: settings.includeAiImage !== false
       });
 
-      console.log('[AI Auto-Pilot] Publishing post to Facebook Page...');
+      // Execute Content Safety Guard
+      const safetyCheck = validateContent(
+        {
+          message: bundle.message,
+          categoryId: selectedCategoryId,
+          imageUrl: bundle.image?.url,
+          imagePath: bundle.image?.localPath,
+          sources: bundle.sources || [],
+          isAiImage: !!bundle.image
+        },
+        {
+          history: storage.getHistory(),
+          isAutoPilot: true,
+          pageCategory: pageCategory
+        }
+      );
+
+      // BLOCK automatic publication if safety failed OR emergency fallback was generated
+      if (!safetyCheck.safe || bundle.isFallback) {
+        const blockReason = !safetyCheck.safe
+          ? `Content safety policy block: ${safetyCheck.reasons.join('; ')}`
+          : 'Emergency static fallback generated due to AI provider outage; automatic publishing halted for quality assurance.';
+
+        console.warn(`[AI Auto-Pilot] 🛑 Autopublish BLOCKED: ${blockReason}`);
+
+        const queued = storage.addToQueue({
+          message: bundle.message,
+          imageUrl: bundle.image?.url || null,
+          scheduledAt: null,
+          status: 'review_required'
+        });
+
+        storage.addHistory({
+          status: 'review_required',
+          message: bundle.message,
+          imageUrl: bundle.image?.url || null,
+          error: blockReason,
+          source: 'ai_autopilot'
+        });
+
+        this.emit('autopilot_held_for_review', {
+          queueItem: queued,
+          reasons: safetyCheck.reasons,
+          warnings: safetyCheck.warnings,
+          isFallback: !!bundle.isFallback
+        });
+        this.emit('queue_updated', storage.getQueue());
+        this.emit('history_updated', storage.getHistory());
+
+        return {
+          success: false,
+          reviewRequired: true,
+          reason: blockReason,
+          queued
+        };
+      }
+
+      console.log('[AI Auto-Pilot] Content passed safety guard. Publishing post to Facebook Page...');
       
       const result = await facebook.publishPost({
         message: bundle.message,

@@ -910,9 +910,12 @@ Respond ONLY with the JSON object.`;
 
     // 3. Fallback to Rich Dynamic Curated Library
     if (!result) {
-      const picked = FALLBACK_VIRAL_POSTS[Math.floor(Math.random() * FALLBACK_VIRAL_POSTS.length)];
+      const categoryMatches = categoryId ? FALLBACK_VIRAL_POSTS.filter(p => p.category === categoryId) : [];
+      const pool = categoryMatches.length > 0 ? categoryMatches : FALLBACK_VIRAL_POSTS;
+      const picked = pool[Math.floor(Math.random() * pool.length)];
       result = JSON.parse(JSON.stringify(picked));
-      console.log(`[AI Service] Using diverse dynamic curated post: "${result.line1_red}"`);
+      result.isFallback = true;
+      console.log(`[AI Service] Using diverse dynamic curated fallback post: "${result.line1_red}" (Category: ${result.category || 'General'})`);
     }
 
     return result;
@@ -1187,6 +1190,7 @@ Respond ONLY with the JSON object.`;
     return {
       message: structuredData.post_caption,
       category: category ? { id: category.id, title: category.title } : null,
+      isFallback: !!structuredData.isFallback,
       cardData: {
         badge: structuredData.badge,
         line1_red: structuredData.line1_red,
