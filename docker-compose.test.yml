@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: facebook-auto-post-postgres-test
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test_password_only
+      POSTGRES_DB: facebook_auto_poster_test
+    ports:
+      # Strictly bound to loopback interface only
+      - "127.0.0.1:5432:5432"
+    tmpfs:
+      # Run entirely in-memory for ephemeral, fast testing without disk persistence
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d facebook_auto_poster_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 10

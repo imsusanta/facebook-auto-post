@@ -1,3 +1,12 @@
+/**
+ * DEPRECATED / LEGACY MODULE: services/db.js
+ *
+ * WARNING: This SQLite implementation is completely unimported, unused, and deprecated.
+ * It is NOT used as the production or testing database.
+ * The production SaaS database is PostgreSQL 16 managed via db/index.js and migrations/postgres/.
+ * This file is retained temporarily solely for legacy compatibility reference.
+ */
+
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
@@ -108,7 +117,7 @@ function seedDefaultAdmin() {
   if (!existingUser) {
     const adminId = 'usr_admin_' + Date.now();
     const defaultPasswordHash = bcrypt.hashSync(initialPassword, 10);
-    
+
     // Read old settings if present
     let oldSettings = {};
     const oldSettingsPath = path.join(__dirname, '..', 'data', 'settings.json');
