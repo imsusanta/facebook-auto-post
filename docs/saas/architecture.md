@@ -1,205 +1,127 @@
-# Target Multi-Tenant SaaS Architecture
+# Multi-Tenant SaaS Target Architecture
 
-## 1. Architectural Principles
+## 1. System Overview
 
-1. **Tenant Isolation as Primary Security Boundary:** Every database query, cache key, background job, file asset, and external API invocation must be strictly partitioned by `workspace_id`.
-2. **Decoupled Asynchronous Processing:** Long-running, external network-dependent, or scheduled tasks must never run within synchronous HTTP request loops.
-3. **Defense-in-Depth Authorization:** Identity authentication (Who are you?) is strictly separated from Workspace Membership and Resource Ownership (What tenant and resource are you authorized to touch?).
-4. **Idempotency by Design:** All publishing events, webhooks, billing notifications, and migrations must execute idempotently without side-effects on replay.
-5. **Zero Secret Exposure:** Raw external tokens (Meta user/page tokens, Gemini keys, Stripe/Razorpay secrets) are never exposed via APIs or logged in plaintext.
+The target SaaS transforms the single-operator automation tool into a multi-tenant, cloud-native content operating system designed specifically for Bengali-speaking businesses, coaching centres, restaurants, boutiques, and digital marketing agencies.
 
----
-
-## 2. High-Level System Architecture
-
-```mermaid
-graph TD
-    subgraph Clients
-        WebBrowser["Web Browser (React/Tailwind/CDP)"]
-        MetaWebhookClient["Meta Webhook Servers"]
-    end
-
-    subgraph IngressLayer["Ingress & Edge Layer"]
-        WAF["WAF & Reverse Proxy / Cloudflare"]
-        ALB["Application Load Balancer"]
-    end
-
-    subgraph AppServices["Application Services (Stateless Pods)"]
-        APIServer["API Server (Express)"]
-        WebhookServer["Webhook Ingestion Server"]
-        SchedulerSvc["Scheduler Service (Cron Poller)"]
-    end
-
-    subgraph AsyncWorkers["Background Worker Cluster (BullMQ)"]
-        PublishWorker["Publishing Worker"]
-        WebhookWorker["Webhook Processor"]
-        AnalyticsWorker["Analytics Worker"]
-    end
-
-    subgraph DataTier["Data & Cache Tier"]
-        Postgres["PostgreSQL Primary (Multi-Tenant RLS / Scoped)"]
-        Redis["Redis Cluster (Sessions, Queues, Redlock)"]
-        S3Storage["S3-Compatible Object Storage (Media / Backups)"]
-        KMS["KMS (Envelope Encryption Key Management)"]
-    end
-
-    subgraph ExternalAPIs["External Services"]
-        MetaGraph["Meta Graph API"]
-        GeminiAPI["Google Gemini 3.1 Flash AI"]
-        RazorpayAPI["Razorpay Payment Gateway"]
-    end
-
-    WebBrowser -->|HTTPS / Session Cookie| WAF
-    MetaWebhookClient -->|HTTPS POST Webhook| WAF
-    WAF --> ALB
-    ALB -->|/api/*| APIServer
-    ALB -->|/api/webhook/*| WebhookServer
-
-    APIServer --> Postgres
-    APIServer --> Redis
-    APIServer --> KMS
-    APIServer --> S3Storage
-
-    WebhookServer -->|Push Raw Event| Redis
-    SchedulerSvc -->|Poll Due Posts| Postgres
-    SchedulerSvc -->|Enqueue Job| Redis
-
-    Redis -->|Consume Jobs| PublishWorker
-    Redis -->|Consume Events| WebhookWorker
-    Redis -->|Consume Metrics| AnalyticsWorker
-
-    PublishWorker --> Postgres
-    PublishWorker --> KMS
-    PublishWorker --> S3Storage
-    PublishWorker --> MetaGraph
-
-    APIServer --> GeminiAPI
-    WebhookWorker --> Postgres
-    AnalyticsWorker --> MetaGraph
-    AnalyticsWorker --> Postgres
-    APIServer --> RazorpayAPI
+```
++-----------------------------------------------------------------------------+
+|                             System Topology                                 |
++--------------------------+--------------------------------------------------+
+| CURRENT (Single-Tenant)  | Flat JSON files in data/, volatile in-memory     |
+|                          | sessions in middleware/auth.js, node-cron and    |
+|                          | setInterval in services/scheduler.js             |
++--------------------------+--------------------------------------------------+
+| TARGET (Multi-Tenant)    | PostgreSQL 16 (Relational/ACID), Redis HA        |
+|                          | (Sessions & Queues), BullMQ worker service,      |
+|                          | S3 object storage, multi-tab request context     |
++--------------------------+--------------------------------------------------+
+| DEFERRED                 | Dedicated worker fleets per domain, Redis        |
+|                          | Cluster sharding, multi-region database replicas |
++--------------------------+--------------------------------------------------+
 ```
 
 ---
 
-## 3. Component Decomposition & Responsibilities
+## 2. Infrastructure Architecture: MVP vs Scale-Up
 
-### 3.1. API Server (Express)
-- **Role:** Synchronous request-response gateway for user authentication, workspace administration, Page DNA configuration, post authoring, and billing.
-- **Responsibilities:**
-  - Authenticates sessions against Redis opaque hashes.
-  - Resolves active workspace membership and enforces RBAC permissions.
-  - Executes tenant-scoped CRUD queries against PostgreSQL.
-  - Performs Gemini AI generation for post drafting.
-  - Uploads media assets to S3 and returns signed presigned URLs.
-  - Emits tenant-scoped Server-Sent Events (SSE) for UI reactivity.
-
-### 3.2. Webhook Ingestion Server
-- **Role:** High-throughput, stateless receiver for Meta and Razorpay webhook events.
-- **Responsibilities:**
-  - Validates cryptographic signatures (`X-Hub-Signature-256` for Meta, `X-Razorpay-Signature` for billing).
-  - Immediately responds with HTTP `200 OK` (within < 150ms).
-  - Enqueues verified raw payloads into Redis BullMQ for asynchronous tenant resolution and processing.
-
-### 3.3. Scheduler Service
-- **Role:** Cron dispatcher evaluating upcoming post schedules across all workspaces.
-- **Responsibilities:**
-  - Queries PostgreSQL every 30 seconds for scheduled posts where `scheduled_at <= NOW()` and `status = 'pending'`.
-  - Dispatches discrete publishing jobs into the `publishing-queue` in BullMQ.
-  - Enforces per-tenant rate caps (`maxPostsPerDay`, `minimumPostGapMinutes`).
-
-### 3.4. Background Worker Cluster (BullMQ)
-- **Publishing Worker:**
-  - Acquires distributed lock on `(workspace_id, facebook_page_id)` via Redlock to serialize page posts.
-  - Checks workspace subscription status and quota entitlements in PostgreSQL.
-  - Decrypts envelope-encrypted Page Access Token via KMS.
-  - Downloads media from S3 and posts to Meta Graph API.
-  - Records `publish_attempts` and transitions post status to `published` or `failed`.
-- **Analytics Worker:**
-  - Periodically polls Meta Graph API for post impressions, reactions, and reach metrics.
-  - Aggregates daily usage counters per workspace.
-- **Webhook Processor:**
-  - Consumes queued webhook payloads.
-  - Resolves target `workspace_id` by looking up the Meta `entry.id` (Page ID) in `facebook_pages`.
-  - Dispatches notifications or updates post delivery statuses.
-
----
-
-## 4. State & Lifecycle Flows
-
-### 4.1. Post Publishing Flow (Draft to Published)
-
-```mermaid
-stateDiagram-v2
-    [*] --> Draft: User generates post (Level 1-7 prompt)
-    Draft --> InReview: Submitted for approval
-    Draft --> Scheduled: Auto-approved (low_risk_auto)
-    InReview --> Scheduled: Reviewer approves
-    InReview --> Rejected: Reviewer rejects
-    Rejected --> Draft: Revised by author
-    Scheduled --> Enqueued: Scheduler pushes to BullMQ
-    Enqueued --> Publishing: Worker acquires lock & checks quota
-    Publishing --> Published: Meta Graph API returns post_id
-    Publishing --> RetryScheduled: Transient network / rate limit error (Code 32)
-    Publishing --> Failed: Fatal error / token revoked (DLQ)
-    RetryScheduled --> Enqueued: Exponential backoff
-    Published --> [*]
-    Failed --> [*]
-```
-
-### 4.2. Synchronous Tenant Request Authorization Flow
+To avoid premature operational overhead, infrastructure is strictly right-sized:
 
 ```mermaid
 flowchart TD
-    Req[Incoming HTTP Request] --> M1[1. Authenticate Session via Redis]
-    M1 -->|Invalid Session| R401[401 Unauthorized]
-    M1 -->|Valid User| M2[2. Resolve Active Workspace from Session Context]
-    M2 -->|No Workspace Selected| R400[400 Select Workspace]
-    M2 -->|Workspace Resolved| M3[3. Query Active Workspace Membership in Postgres]
-    M3 -->|Membership Inactive/Removed| R403[403 Forbidden: Membership Expired]
-    M3 -->|Active Membership| M4[4. Check Role Permission Matrix]
-    M4 -->|Permission Denied| R403P[403 Forbidden: Insufficient Role]
-    M4 -->|Permission Granted| M5[5. Execute Query Scoped by workspace_id AND resource_id]
-    M5 -->|Resource Not Found in Tenant| R404[404 Not Found Non-Enumerating]
-    M5 -->|Resource Matched| M6[6. Perform Action & Record Audit Event]
-    M6 --> Resp[200 OK Response]
+    subgraph ClientLayer [Client Layer]
+        Browser[Client Browser Multi-Tab Safe]
+    end
+
+    subgraph MVP [MVP Production Environment]
+        LB[Load Balancer TLS 1.3]
+        API[1 Containerized API Service Node Express]
+        Worker[1 Unified Worker Service BullMQ Consumer]
+        PG[(1 Managed PostgreSQL 16 RDS / Cloud SQL)]
+        Redis[(1 Managed Redis Persistent HA)]
+        S3[(1 Private S3 Bucket Pre-Signed URLs)]
+        KMS[Managed KMS Key Service]
+    end
+
+    subgraph ScaleUp [Scale-Up Deferred Architecture]
+        RedisC[(Redis Cluster Sharded)]
+        PubFleet[Dedicated Publishing Worker Fleet]
+        AnaFleet[Dedicated Analytics Worker Fleet]
+        WebFleet[Dedicated Webhook Worker Fleet]
+        PGReplicas[(PostgreSQL Read Replicas)]
+    end
+
+    Browser --> LB
+    LB --> API
+    API -->|Write metadata & states| PG
+    API -->|Read/Write session hashes| Redis
+    API -->|Enqueue publishing jobs| Redis
+    API -->|Issue pre-signed media URLs| S3
+
+    Worker -->|Fetch jobs & acquire locks| Redis
+    Worker -->|PostgreSQL idempotency boundary| PG
+    Worker -->|Decrypt tokens via KMS DEK| KMS
+    Worker -->|Publish content| Meta[Meta Graph API]
+
+    MVP -.->|Scale after PMF| ScaleUp
 ```
 
 ---
 
-## 5. Network & Egress Topology
+## 3. Core Component Decomposition
 
-### Production Topology (AWS ap-south-1 Mumbai)
-1. **Public Subnet:**
-   - Application Load Balancers (ALB).
-   - NAT Gateways with static Elastic IP addresses (whitelisted with Meta App security configurations).
-2. **Private Application Subnet:**
-   - API Server pods (auto-scaling 2–10 instances).
-   - Background Worker pods.
-   - Scheduler pod (active/standby).
-3. **Private Isolated Data Subnet:**
-   - PostgreSQL Multi-AZ cluster (Primary + Standby replica).
-   - Redis Cluster (3 shards, primary + replica).
-   - Zero public internet ingress or egress to database subnet.
-4. **Egress Boundary:**
-   - All outgoing requests to Meta (`graph.facebook.com`) and Gemini (`generativelanguage.googleapis.com`) route through NAT Gateways.
-   - Dedicated circuit breaker and rate limiter per Meta App ID to prevent noisy-neighbor throttling.
+### 1. Web & API Service (`api`)
+- Stateless Express application behind an HSTS/TLS 1.3 load balancer.
+- Authenticates users via Redis opaque sessions (SHA-256 token hashing).
+- Resolves workspace context per-request (via URL `/api/v1/workspaces/:wsId/...` or `X-Workspace-Id` header).
+- Validates active membership in `workspace_members` and enforces canonical RBAC roles (`owner`, `admin`, `editor`, `reviewer`, `viewer`).
+- Enforces server-side plan entitlements before generating drafts or adding pages.
 
-### Development & Test Topology
-- Enforces strict network guard: all external network traffic is intercepted and restricted to `127.0.0.1` / `localhost`.
-- Zero live Meta Graph API or Gemini calls permitted during test runs.
+### 2. Scheduler Producer
+- Integrated within the worker service (or leader-elected instance).
+- Polls PostgreSQL `scheduled_posts` table for items due within the upcoming 60-second window.
+- Dispatches jobs to Redis BullMQ with strict job payloads (`workspaceId`, `facebookPageId`, `scheduledPostId`, `idempotencyKey`).
+
+### 3. Unified Worker Service (`worker`)
+- Single containerized process running BullMQ consumers for:
+  - **Publishing Queue**: Manages token decryption, S3 asset retrieval, PostgreSQL idempotency, Graph API rate-limit throttling, and post publication.
+  - **Analytics Queue**: Asynchronously gathers reactions, shares, and comments.
+  - **Webhook Queue**: Processes asynchronous Meta webhooks (feed updates, permission drops) and Razorpay billing webhooks.
+
+### 4. Storage & Secret Services
+- **PostgreSQL 16**: System of record for all entities. Enforces composite foreign keys `(workspace_id, parent_id)` to guarantee tenant isolation at the database layer.
+- **Redis**: Fast volatile store for opaque session hashes, OAuth state hashes, BullMQ queues, and Redlock distributed locks.
+- **S3 Object Storage**: Private storage for uploaded media assets. Access is restricted to 15-minute pre-signed URLs.
+- **Cloud KMS**: Hardware-backed Key Management Service managing master Key Encryption Keys (KEK).
 
 ---
 
-## 6. Current vs. Target vs. Deferred Matrix
+## 4. Multi-Tab-Safe Request Lifecycle
 
-| Architectural Dimension | Current Codebase | Target SaaS Architecture | Deferred / Post-MVP |
-| :--- | :--- | :--- | :--- |
-| **Tenancy Model** | Single-tenant (operator) | Multi-tenant with shared DB + `workspace_id` row scoping | Dedicated DB / Schema per tenant |
-| **Session Storage** | In-memory `Map` (max 500) | Distributed Redis cluster, SHA-256 opaque tokens | Edge-authenticated session cookies |
-| **Database** | Flat JSON files (`settings.json`) | PostgreSQL with foreign keys and strict constraints | Distributed CockroachDB / Spanner |
-| **Scheduling** | In-process `node-cron` & `setInterval` | Decoupled BullMQ workers + Redis Redlock | Temporal / AWS Step Functions |
-| **Secret Storage** | Plaintext JSON on disk | Envelope encryption (AES-256-GCM + KMS) | HashiCorp Vault / Cloud HSM |
-| **File Storage** | Local `/uploads` directory | S3 / Cloudflare R2 presigned URLs | Multi-region CDN edge caching |
-| **OAuth Integration** | Manual access token paste | Automated Meta OAuth 2.0 PKCE connection | Custom agency OAuth apps |
-| **Observability** | Console stdout logging | Structured JSON + OpenTelemetry + Datadog/Grafana | Distributed trace sampling |
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Client Browser (Tab 1: Workspace A)
+    participant API as API Server
+    participant Redis as Redis Session Store
+    participant PG as PostgreSQL
+
+    User->>API: GET /api/v1/workspaces/ws-A/posts (Cookie: app_session=T)
+    API->>API: Compute H = SHA-256(T)
+    API->>Redis: GET session:{H}
+    Redis-->>API: { user_id: usr-1, ... }
+
+    API->>PG: SELECT role, status FROM workspace_members WHERE user_id = 'usr-1' AND workspace_id = 'ws-A'
+    alt Not a Member or Status != 'active'
+        PG-->>API: 0 rows
+        API-->>User: 404 Not Found (Anti-Enumeration)
+    else Active Member Verified (role = 'editor')
+        PG-->>API: role = 'editor', status = 'active'
+        API->>PG: SELECT * FROM content_posts WHERE workspace_id = 'ws-A'
+        PG-->>API: Posts for Workspace A
+        API-->>User: 200 OK { posts: [...] }
+    end
+```
+
+### Multi-Tab Safety Guarantee
+Because workspace authorization is evaluated strictly from the request path (`/api/v1/workspaces/:wsId/...`) or `X-Workspace-Id` header against the database on every request—and never stored as a mutable global field on the user session—users can manage multiple workspaces across separate browser tabs simultaneously without context interference.

@@ -2,7 +2,7 @@
 
 ## 1. Executive Summary
 
-This document specifies the billing architecture, provider selection, subscription state machine, usage dimensions, server-side entitlement enforcement, and idempotent webhook processing for the multi-tenant Bengali-first Facebook Auto-Poster SaaS.
+This document specifies the billing architecture, proposed provider evaluation, subscription state machine, usage dimensions, server-side entitlement enforcement, and idempotent webhook processing for the multi-tenant Bengali-first Facebook Auto-Poster SaaS.
 
 ```
 +-----------------------------------------------------------------------------+
@@ -11,35 +11,44 @@ This document specifies the billing architecture, provider selection, subscripti
 | CURRENT (Single-Tenant)  | Completely unmetered, no billing integration,    |
 |                          | no concept of plans or subscriptions             |
 +--------------------------+--------------------------------------------------+
-| TARGET (Multi-Tenant)    | Razorpay Subscriptions (India-First),            |
-|                          | INR currency, UPI AutoPay & e-Mandates, GST-ready|
-|                          | 6 subscription states, strict server entitlement |
-|                          | gates, idempotent webhook processing             |
+| TARGET (Multi-Tenant)    | Proposed India-First Billing (Razorpay),         |
+|                          | INR currency, recurring mandates, entitlement    |
+|                          | middleware, idempotent webhook deduplication     |
 +--------------------------+--------------------------------------------------+
-| DEFERRED                 | Stripe Billing (Global expansion / USD),         |
-|                          | Invoicing via Wire / PO for enterprise           |
+| DEFERRED                 | Global billing provider (Stripe / USD),          |
+|                          | Enterprise invoicing via wire transfer           |
 +--------------------------+--------------------------------------------------+
 ```
 
 ---
 
-## 2. Launch Provider Decision: Razorpay (India-First)
+## 2. Proposed Launch Provider Evaluation: Razorpay (India-First)
 
-### Strategic Recommendation
-For the initial SaaS launch, **Razorpay is the recommended and exclusive billing provider**. Implementing both Stripe and Razorpay concurrently in Phase 1 is explicitly rejected to avoid duplicate state synchronization and complex cross-gateway reconciliation (see ADR-005).
+### Strategic Context & Proposal
+For the initial multi-tenant SaaS launch targeted at Bengali creators, coaching centres, restaurants, and local businesses in West Bengal and India, **Razorpay is proposed as the primary India-first billing provider**.
 
-### Why Razorpay for Bengali Creators & Indian Local Businesses
-1. **Payment Rail Dominance (UPI AutoPay)**:
-   Over 70% of subscription purchases by Indian creators, coaching centre owners, and local boutique merchants occur over UPI rather than international credit cards. Razorpay provides native support for UPI AutoPay recurring mandates.
-2. **RBI e-Mandate Compliance**:
-   The Reserve Bank of India (RBI) mandates strict Additional Factor of Authentication (AFA) and pre-debit notifications (24 hours prior to charge) for recurring transactions. Razorpay manages this compliance lifecycle natively.
-3. **Domestic Debit Cards & Netbanking**:
-   Supports RuPay cards, local bank netbanking, and domestic debit cards that frequently fail on international gateways like Stripe.
-4. **GST Invoicing**:
-   Automatic generation of B2B GST tax invoices compliant with Indian tax laws.
+Implementing multiple payment gateways concurrently during MVP launch is explicitly rejected to avoid duplicate state synchronization and complex cross-gateway reconciliation (see ADR-005).
+
+### Key Provider Capabilities Proposed
+1. **Domestic Recurring Payment Support**:
+   Supports domestic recurring payment mechanisms popular among Indian creators and merchants, including UPI AutoPay and bank e-mandates.
+2. **Domestic Debit Cards & Netbanking**:
+   Broad support for domestic RuPay cards, commercial debit cards, and local netbanking rails.
+3. **Tax & Invoicing Support**:
+   Provides invoice generation workflows suitable for Indian B2B Goods and Services Tax (GST) reporting.
+
+### Validation Requirements (To Be Validated in Phase 4)
+Prior to writing production billing code, the following aspects must be empirically validated in the Razorpay sandbox and merchant agreement:
+- **Recurring Mandate Reliability**: Real-world success rates for UPI AutoPay versus credit/debit card e-mandates across major Indian banks.
+- **Settlement Fees & Schedules**: Fee structure for recurring auto-debits and payout settlement timing.
+- **GST Invoicing Compliance**: Exact invoice data format and compatibility with Indian tax filing requirements.
+- **Refund & Dispute Flow**: Webhook events and API workflows for customer refunds and chargeback handling.
+- **International Card Acceptance**: Capabilities and fees for accepting cards from the Bengali diaspora outside India (e.g. Bangladesh, UK, US).
+- **Webhook Delivery & Retries**: Webhook delivery SLA, retry policies, and signature verification edge cases.
+- **Subscription Lifecycle Control**: Behavior when pausing, resuming, or cancelling subscriptions mid-cycle.
 
 ### Deferred Provider: Stripe
-Stripe integration is deferred to Phase 4 (Global Expansion) when targeting the Bengali diaspora in Bangladesh, the UK, the US, and Canada.
+Stripe integration is deferred to Phase 4 (Global Expansion) when actively marketing to overseas customers requiring USD, EUR, or GBP billing.
 
 ---
 
@@ -47,23 +56,23 @@ Stripe integration is deferred to Phase 4 (Global Expansion) when targeting the 
 
 ```mermaid
 stateDiagram-v2
-    [*] --> trialing: New Workspace Created (14-day Free Trial)
-    trialing --> active: User Completes Checkout (UPI / Card Mandate)
+    [*] --> trialing: Workspace Created (14-day Evaluation)
+    trialing --> active: User Completes Checkout Mandate
     trialing --> expired: Trial Ends Without Payment
 
-    active --> past_due: Recurring Charge Fails (Insufficient funds)
+    active --> past_due: Recurring Charge Fails
     past_due --> active: Payment Retry Succeeds (within 5-day grace period)
     past_due --> paused: Grace Period Exhausted (5 days)
 
-    paused --> active: Customer Updates Payment Method & Pays
-    paused --> cancelled: User / Admin Cancels Subscription
+    paused --> active: Payment Method Updated & Cleared
+    paused --> cancelled: User Cancels Subscription
 
-    active --> cancelled: User Cancels Subscription (ends at billing period end)
-    cancelled --> expired: Current Period Concludes
+    active --> cancelled: User Cancels Subscription (active until period end)
+    cancelled --> expired: Billing Period Concludes
     expired --> active: User Reactivates Plan
 ```
 
-### State Definitions & System Behaviors
+### State Definitions & Capabilities
 
 | Subscription State | Description | Scheduled Posting | Content Generation | Data Access |
 | :--- | :--- | :---: | :---: | :---: |
@@ -80,7 +89,7 @@ stateDiagram-v2
 
 The SaaS defines three initial pricing tiers tailored to creators and local businesses:
 
-### Plan Matrix
+### Plan Matrix (Pricing Proposed / To Be Validated)
 
 | Dimension / Limit | Starter (₹999/mo) | Pro (₹2,499/mo) | Agency (₹6,999/mo) |
 | :--- | :---: | :---: | :---: |
@@ -91,7 +100,7 @@ The SaaS defines three initial pricing tiers tailored to creators and local busi
 | **Monthly Content Generations** | 50 drafts | 300 drafts | 1,500 drafts |
 | **Page DNA Profiles** | 1 | 5 (1 per page) | 20 (1 per page) |
 | **Cloud Media Storage** | 1 GB | 10 GB | 50 GB |
-| **Approval Workflows** | No (Direct posting) | Yes (Editor -> Approver) | Yes (Custom workflows) |
+| **Approval Workflows** | No (Direct posting) | Yes (Editor -> Reviewer) | Yes (Custom workflows) |
 | **Bengali Dialect Variations** | Standard only | Standard + Regional | Custom Tone Models |
 
 ---
@@ -102,21 +111,21 @@ Client-side UI disabling is purely cosmetic. Every mutating action must pass a s
 
 ```mermaid
 flowchart TD
-    Req[Incoming Request e.g. POST /api/v1/posts/generate] --> EntCheck{Server Entitlement Check}
+    Req[Incoming Request: e.g. POST /workspaces/:wsId/posts/generate] --> EntCheck{Server Entitlement Check}
     EntCheck --> SubStatus{Is Subscription Active or Trialing?}
     SubStatus -- No (paused/expired) --> E402[402 Payment Required: Subscription Inactive]
     SubStatus -- Yes --> QuotaCheck{Is Monthly Generation Usage < Limit?}
-    QuotaCheck -- No --> E403[422 Unprocessable: Monthly Generation Limit Reached]
+    QuotaCheck -- No --> E422[422 Unprocessable: Monthly Generation Limit Reached]
     QuotaCheck -- Yes --> Exec[Execute Generation & Increment Usage Counter]
 ```
 
-### Entitlement Middleware Implementation Pattern
+### Entitlement Middleware Pattern
 ```javascript
 function requireEntitlement(dimension, amount = 1) {
   return async (req, res, next) => {
-    const workspaceId = req.session.active_workspace_id;
+    const workspaceId = req.workspace.id;
 
-    // 1. Fetch active subscription and plan limits
+    // 1. Fetch active subscription
     const subscription = await billingRepo.getActiveSubscription(workspaceId);
     if (!subscription || !['trialing', 'active', 'past_due'].includes(subscription.status)) {
       return res.status(402).json({
@@ -149,40 +158,37 @@ function requireEntitlement(dimension, amount = 1) {
 
 ---
 
-## 6. Idempotent Razorpay Webhook Processing
+## 6. Idempotent Webhook Processing
 
-Razorpay delivers subscription lifecycle events (e.g., `subscription.charged`, `subscription.halted`, `payment.failed`) asynchronously. Webhook processing must be fully idempotent to handle duplicate deliveries and network retries gracefully.
+Billing lifecycle events (e.g. `subscription.charged`, `subscription.halted`, `payment.failed`) are delivered asynchronously via webhooks.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant RZP as Razorpay
+    participant Gateway as Billing Gateway
     participant API as API Server (/api/v1/billing/webhook)
     participant PG as PostgreSQL
 
-    RZP->>API: POST /api/v1/billing/webhook (Headers: X-Razorpay-Signature)
-    API->>API: Verify HMAC-SHA256 signature using RAZORPAY_WEBHOOK_SECRET
+    Gateway->>API: POST /api/v1/billing/webhook (Headers: Signature)
+    API->>API: Verify HMAC-SHA256 signature using WEBHOOK_SECRET
     alt Signature Invalid
-        API-->>RZP: 400 Bad Request
+        API-->>Gateway: 400 Bad Request
     else Signature Valid
         API->>PG: INSERT INTO webhook_events (event_id, provider, payload, status) VALUES (...) ON CONFLICT (event_id) DO NOTHING RETURNING id
         alt Row already exists (Duplicate event)
-            API-->>RZP: 200 OK (Already Processed)
+            API-->>Gateway: 200 OK (Already Processed)
         else Row inserted (New event)
             API->>PG: BEGIN TRANSACTION
-            API->>PG: Update subscriptions record based on event type
+            API->>PG: Update subscriptions record based on event
             API->>PG: Record usage / invoice record
             API->>PG: Update webhook_events status = 'processed'
             API->>PG: COMMIT
-            API-->>RZP: 200 OK
+            API-->>Gateway: 200 OK
         end
     end
 ```
 
 ### Critical Webhook Security Controls
-1. **Signature Verification**:
-   The incoming raw request body is verified against `X-Razorpay-Signature` using `crypto.createHmac('sha256', RAZORPAY_WEBHOOK_SECRET)`.
-2. **Deduplication Key**:
-   The unique `event_id` provided by Razorpay is stored with a `UNIQUE` database constraint in `webhook_events`. If a duplicate is received, the server responds `200 OK` immediately without re-executing state transitions.
-3. **Out-of-Order Protection**:
-   Events carry an `event_timestamp`. The database updates subscription status only if the webhook timestamp is newer than `subscriptions.updated_at`.
+1. **Signature Verification**: Verified against the raw request body using HMAC-SHA256 and the gateway secret.
+2. **Deduplication Key**: Unique `event_id` stored with a `UNIQUE` constraint in `webhook_events`. Duplicates receive an immediate `200 OK` without re-executing business logic.
+3. **Out-of-Order Protection**: Webhook timestamp is compared against `subscriptions.updated_at` to prevent stale payloads from overwriting newer state.

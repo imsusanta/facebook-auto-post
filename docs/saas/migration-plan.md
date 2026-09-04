@@ -2,16 +2,16 @@
 
 ## 1. Executive Summary
 
-This document specifies the safe migration strategy from the single-tenant file-based architecture to the multi-tenant PostgreSQL, Redis, and Object Storage SaaS architecture. It provides an exhaustive audit of legacy storage, defines a two-phase CLI migration runner (preflight, dry-run, apply, rollback), outlines legacy workspace seeding, and evaluates the SaaS architectural impact on Page DNA (PR #2).
+This document specifies the migration strategy from the single-tenant file-based architecture to the multi-tenant PostgreSQL, Redis, and Object Storage SaaS architecture. It provides an exhaustive audit of legacy storage, defines a two-phase CLI migration runner, details legacy workspace seeding, establishes the PR review sequence, and evaluates the SaaS architectural impact on Page DNA (PR #2).
 
 ```
 +-----------------------------------------------------------------------------+
 |                              Migration Status                               |
 +--------------------------+--------------------------------------------------+
 | CURRENT (Single-Tenant)  | Flat JSON files in data/, local files in uploads/|
-|                          | Abandoned SQLite in services/db.js               |
+|                          | Unused SQLite in services/db.js                  |
 +--------------------------+--------------------------------------------------+
-| TARGET (Multi-Tenant)    | PostgreSQL 16 (Relational/ACID), Redis Cluster   |
+| TARGET (Multi-Tenant)    | PostgreSQL 16 (Relational/ACID), Redis HA        |
 |                          | (Queues & Sessions), S3 (Media), Zero JSON data  |
 +--------------------------+--------------------------------------------------+
 | DEFERRED                 | Live zero-downtime dual-write replication        |
@@ -20,41 +20,40 @@ This document specifies the safe migration strategy from the single-tenant file-
 
 ---
 
-## 2. Legacy Single-Tenant Data Audit
+## 2. Legacy Single-Tenant Data Audit (Base Verification)
 
-An exhaustive audit of the existing codebase reveals 7 legacy storage locations:
+An exhaustive audit of the base branch (`fix/security-and-content-safety`) reveals the exact legacy storage implementation:
 
-| Storage Artifact | Format & Location | Contents & Structure | SaaS Target Entity |
+| Storage Artifact | Format & Location | Codebase Evidence & Structure | SaaS Target Entity |
 | :--- | :--- | :--- | :--- |
-| **User Store** | `data/users.json` | Array of `{ id, username, passwordHash, role, createdAt }` | `users` + `workspace_members` |
-| **Settings Store** | `data/settings.json` | Global object `{ facebook: { pageId, ... }, ai: { ... }, schedule: { ... } }` | `facebook_pages` + `workspace_settings` |
-| **Queue Store** | `data/queue.json` | Array of scheduled post objects `{ id, topic, caption, scheduledTime, status }` | `content_posts` + `scheduled_posts` |
-| **History Store** | `data/history.json` | Array of published post logs `{ id, topic, caption, publishedAt, fbPostId }` | `content_posts` + `published_posts` |
-| **Page Profile** | `data/profile.json` (PR #2) | Single Page DNA object `{ brandName, tone, primaryGoal, audience, ... }` | `page_dna_profiles` |
-| **Profile Backups** | `data/profile-backups/*.json` (PR #2) | Plaintext JSON timestamped snapshots | `page_dna_versions` (in PostgreSQL) |
-| **Media Assets** | `uploads/*` | Local disk files (JPEG, PNG) | Private S3 Bucket + `media_assets` |
-| **Abandoned DB** | `services/db.js` (`data/saas.db`) | Unused, unimported SQLite database schema | **Discard / Do Not Migrate** |
+| **User Store** | `data/users.json` | Array of `{ id, username, passwordHash, salt, role, createdAt }`. Hashed via `crypto.pbkdf2Sync` (100k iterations, HMAC-SHA512) in `middleware/auth.js`. | `users` + `workspace_members` (migrated with `pbkdf2_sha512` prefix; auto-rehashed to Argon2id on login) |
+| **Settings Store** | `data/settings.json` | Global object containing `pages` array (`[{ id, name, accessToken, systemPrompt, ... }]`) and `activePageId`. Managed by `services/storage.js`. | `facebook_pages` + `workspace_settings` |
+| **Queue Store** | `data/queue.json` | Array of scheduled post objects processed by `setInterval` in `services/scheduler.js`. | `content_posts` + `scheduled_posts` |
+| **History Store** | `data/history.json` | Array of published post logs with `fbUrl` and `publishedAt`. | `content_posts` + `published_posts` |
+| **Template Store**| `data/templates.json` | Pre-configured post formatting templates. | Seeded system templates / workspace templates |
+| **Rules & Categories** | `data/automation_rules.json`, `data/categories.json` | Static automation schedules and post categories. | Seed data / relational lookup tables |
+| **Page Profile** | `data/profile.json` (PR #2) | Single Page DNA object `{ brandName, tone, primaryGoal, audience, ... }` in PR #2. | `page_dna_profiles` |
+| **Profile Backups** | `data/profile-backups/*.json` (PR #2) | Plaintext JSON timestamped snapshots. | `page_dna_versions` (in PostgreSQL) |
+| **Media Assets** | `uploads/*` | Local disk files (JPEG, PNG). | Private S3 Bucket + `media_assets` |
+| **Abandoned DB** | `services/db.js` (`data/saas.db`) | Unused, unimported SQLite database schema. | **Discard / Do Not Migrate** |
 
 ### Abandoned Database Notice (`services/db.js`)
-Code inspection shows `services/db.js` sets up a SQLite database with `users` and `user_settings` tables. However, this file is **completely unused and unimported** across the application. The running application relies exclusively on `services/storage.js` and flat JSON files. The abandoned SQLite file must be ignored during migration.
+Inspection of `services/db.js` shows a SQLite schema creating `data/saas.db`. However, this file is **completely unused and unimported** across all routes and services. The running application relies exclusively on `services/storage.js` and flat JSON files. The abandoned SQLite file must be discarded during migration.
 
 ---
 
-## 3. Migration Principles & Strict Operator Controls
+## 3. Migration Principles & Operator Controls
 
-To prevent data corruption, partial state loss, or accidental credential leaks:
-1. **No Automatic Migration on Startup**: The server must **never** auto-migrate data on application boot.
-2. **Explicit Operator Command Required**: Migration must be executed explicitly via CLI by an authorized systems engineer:
+1. **No Automatic Migration on Boot**: The application server must **never** run automated migrations on boot.
+2. **Explicit Operator Execution**: Migration is executed exclusively via CLI by an authorized operator:
    `node scripts/migrate-to-saas.js --dry-run`
-3. **Mandatory Preflight & Snapshot**: Migration aborts immediately if database connections fail or if preflight checksums do not match.
-4. **All Operations Transactional**: All database inserts execute within a single PostgreSQL transaction (`BEGIN ... COMMIT`). If an error occurs, the transaction rolls back completely.
-5. **Secret Redaction**: Migration logs must redact all Facebook tokens, passwords, and API keys.
+3. **Mandatory Preflight Validation**: Aborts immediately if database connectivity fails or file checksums do not match.
+4. **All Operations Transactional**: All inserts execute within a single PostgreSQL transaction (`BEGIN ... COMMIT`).
+5. **Secret Redaction**: Migration logs redact all tokens, passwords, and API keys.
 
 ---
 
 ## 4. The Two-Phase Migration Runner CLI
-
-The migration CLI (`scripts/migrate-to-saas.js`) operates in four sequential modes:
 
 ```mermaid
 flowchart TD
@@ -81,39 +80,34 @@ flowchart TD
 ```
 
 ### Mode 1: Preflight Validation
-- Validates PostgreSQL connectivity, schema migrations, and KMS encryption service reachability.
-- Inspects `data/` directory: checks read permissions, parses every JSON file, validates schema sanity.
-- Inspects `uploads/`: verifies file integrity and readability.
+- Validates PostgreSQL connectivity, schema migrations, and KMS reachability.
+- Parses all JSON files in `data/` and verifies readability of `uploads/`.
 
 ### Mode 2: Dry-Run Mode (`--dry-run`)
-- Executes all mapping logic in memory without writing to PostgreSQL or S3.
-- Generates a detailed **Migration Mapping Report**:
-  - Total users to migrate.
+- Executes in-memory mapping without database writes.
+- Produces a **Migration Mapping Report**:
+  - Legacy user count and mapped IDs.
   - Legacy post ID -> Target UUID mappings.
-  - Legacy page ID -> Target Facebook Page entity.
-  - File size and count of media assets.
-  - Warnings for invalid or orphaned records.
+  - File size and count of media assets to migrate to S3.
 
 ### Mode 3: Apply Mode (`--apply`)
-- Creates a timestamped tarball backup of `data/` and `uploads/` (`backup_pre_saas_<timestamp>.tar.gz`) with SHA-256 manifest.
+- Creates a timestamped tarball backup (`backup_pre_saas_<timestamp>.tar.gz`) with SHA-256 manifest.
 - Opens a PostgreSQL transaction.
 - Seeds the initial Default Legacy Workspace (see Section 5).
 - Inserts mapped entities.
 - Uploads local media files to S3 bucket under `workspaces/{workspace_id}/...`.
-- Verifies record counts against the preflight report.
+- Verifies record counts against preflight manifest.
 - Commits transaction.
 
 ### Mode 4: Rollback Mode (`--rollback`)
-- If verification fails or post-migration testing uncovers issues:
-  - Truncates newly populated tables for the legacy workspace.
-  - Restores flat files from the pre-migration snapshot tarball.
-  - Resets application config to file-based mode.
+- Truncates newly populated tables for the legacy workspace.
+- Restores flat files from the pre-migration snapshot tarball.
 
 ---
 
 ## 5. Legacy Single-Tenant Workspace Seeding
 
-Because legacy data lacks tenant context, the migration maps all existing single-tenant assets into **one canonical default workspace**:
+Because legacy data lacks tenant scoping, all assets are mapped into **one canonical default workspace**:
 
 ```mermaid
 flowchart LR
@@ -146,50 +140,48 @@ flowchart LR
 
 ### Seeding Rules
 1. **Workspace Entity**:
-   - Name: `"Primary Workspace"` (or configured via `--workspace-name`).
-   - Slug: `"primary-workspace"`.
-   - Subscription: Assigned `Pro` plan with 30-day grace period.
+   - Name: `"Primary Workspace"`.
+   - Plan Tier: Assigned `pro` with 30-day evaluation period.
 2. **User & Membership**:
-   - Legacy `admin` user migrated to `users` table (argon2id password hash preserved).
+   - Legacy `admin` user migrated to `users` with `pbkdf2_sha512` prefix.
    - Inserted into `workspace_members` with `role = 'owner'`.
-   - Any secondary legacy users mapped to `role = 'editor'`.
-3. **Facebook Page & Tokens**:
-   - `settings.facebook.pageId` mapped to `facebook_pages`.
-   - `PAGE_ACCESS_TOKEN` from environment/settings encrypted using KMS AES-256-GCM.
+   - Secondary users mapped to `role = 'editor'`.
+3. **Facebook Pages & Tokens**:
+   - `pages` array from `settings.json` mapped to `facebook_pages`.
+   - Tokens encrypted via AES-256-GCM + KMS.
 4. **Page DNA Profile**:
-   - `data/profile.json` migrated to `page_dna_profiles` associated with the new `facebook_pages.id` and `workspace_id`.
-   - Profile backups in `data/profile-backups/` migrated into `page_dna_versions`.
+   - `data/profile.json` migrated to `page_dna_profiles`.
+   - Plaintext profile backups migrated into `page_dna_versions`.
 
 ---
 
-## 6. Page DNA (PR #2) SaaS Impact Analysis
+## 6. PR Review Statuses and Implementation Sequence
 
-A comprehensive architectural review of PR #2 (`feat/page-dna`) reveals 11 critical areas that require modification before Page DNA can safely operate in a multi-tenant SaaS environment:
+To ensure rigorous quality control, PRs must transition through formal statuses:
+- `Draft`
+- `Reviewed`
+- `Staging validated`
+- `Approved for merge`
+- `Merged`
 
-| PR #2 Component / Assumption | Current Single-Tenant Implementation | Required SaaS Multi-Tenant Modification |
-| :--- | :--- | :--- |
-| **1. Profile Workspace Scoping** | Stored in global `data/profile.json`. | Must store `workspace_id` foreign key in `page_dna_profiles`. |
-| **2. Facebook Page Scoping** | Assumes 1 active page per server. | Must associate each Page DNA profile with specific `facebook_page_id`. |
-| **3. Multi-Page Support** | Only one global profile exists. | Workspaces with multiple pages must maintain separate profiles per page. |
-| **4. Backups Isolation** | Stored in unencrypted local directory `data/profile-backups/`. | Plaintext file backups must be eliminated. Store encrypted snapshots in `page_dna_versions` table in PostgreSQL. |
-| **5. Active Page ID in UI** | `activePageId` stored in global browser variable. | Scoped to active user session and validated on every API request. |
-| **6. Profile Version Tracking** | Versions lack user attribution. | Must record `updated_by` (User UUID) and store diffs in `audit_logs`. |
-| **7. Browser SessionStorage** | Uses global keys e.g. `page_dna_draft`. | Keys must be namespaced: `ws_${workspaceId}_page_${pageId}_draft`. |
-| **8. Profile Audit Logging** | Logs to general server console. | Mutating events recorded in tenant `audit_logs` table. |
-| **9. Profile Reset Authorization** | Any authenticated user can trigger reset. | Profile reset restricted strictly to `owner` and `admin` roles. |
-| **10. Low-Risk Auto Mode** | Toggleable without permission check. | Auto-publishing mode requires explicit `approvals:decide` permission. |
-| **11. URL Page ID Parameter** | Implicitly trusts page ID from URL. | URL page ID must be validated against `(workspace_id, page_id)` in database. |
+### Correct Implementation Order
+1. **Step 1: Human review PR #1** (`fix/security-and-content-safety`).
+2. **Step 2: Staging validation of PR #1**.
+3. **Step 3: Approve and merge PR #1**.
+4. **Step 4: Review and merge architecture documentation** (`docs/saas-architecture` -> PR #3).
+5. **Step 5: Implement tenancy and PostgreSQL foundation** (`feat/saas-postgres-storage`).
+6. **Step 6: Implement persistent sessions** (`feat/saas-persistent-sessions`).
+7. **Step 7: Implement Facebook OAuth and encrypted tokens** (`feat/facebook-oauth`).
+8. **Step 8: Port Page DNA into tenant-aware repositories** (`feat/page-dna-saas-integration`).
+9. **Step 9: Implement durable scheduling and worker** (`feat/durable-scheduling`).
+10. **Step 10: Implement billing and entitlements** (`feat/subscriptions`).
+11. **Step 11: Migrate legacy data** via CLI runner.
+12. **Step 12: Production readiness gate evaluation**.
 
 ---
 
-## 7. PR #2 Branch Strategy Recommendation
+## 7. Page DNA (PR #2) SaaS Integration Strategy
 
-### Question: Keep, Rebase, or Cherry-Pick?
-- **Recommendation**: **Keep PR #2 as a reference implementation, and selectively cherry-pick / adapt safe components into a new feature branch (`feat/page-dna-saas-integration`) once the multi-tenant foundation is merged.**
-- **Rationale**:
-  Directly rebasing PR #2 onto the target multi-tenant branch would cause massive merge conflicts and require rewriting almost every storage call in `services/page-profile.js`.
-  PR #2 contains valuable domain logic (Bengali enum validators, preset templates, content safety checks) that should be preserved. However, the storage layer in PR #2 was designed for flat JSON files.
-- **Action Plan**:
-  1. Complete PR #1 (`fix/security-and-content-safety`).
-  2. Implement Phase 1 multi-tenancy (`feat/saas-postgres-storage`).
-  3. Create `feat/page-dna-saas-integration`: Port PR #2's UI components and validation schemas, while wiring the backend to the `page_dna_profiles` PostgreSQL repository.
+### Recommendation: Cherry-Pick & Adapt into New Branch
+- **Strategy**: Keep PR #2 (`feat/page-dna`) as an immutable reference implementation.
+- **Rationale**: Direct rebasing would cause massive merge conflicts with the new PostgreSQL repository layer. PR #2's domain models (Bengali enums, validation rules, preset templates) should be cherry-picked into `feat/page-dna-saas-integration` and rewired to the `page_dna_profiles` and `page_dna_versions` tables.

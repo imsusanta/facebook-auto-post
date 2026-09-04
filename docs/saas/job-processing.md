@@ -2,92 +2,164 @@
 
 ## 1. Executive Summary
 
-This document specifies the distributed background job architecture, worker decomposition, retry policies, distributed locking, and Facebook Graph API rate-limiting strategies for the multi-tenant Bengali-first Facebook Auto-Poster SaaS.
+This document specifies the distributed background job architecture, worker decomposition, PostgreSQL idempotency boundaries, retry policies, distributed locking, safe telemetry logging, and Facebook Graph API rate-limiting strategies for the multi-tenant Bengali-first Facebook Auto-Poster SaaS.
 
 ```
 +-----------------------------------------------------------------------------+
 |                          Job Processing Status                              |
 +--------------------------+--------------------------------------------------+
-| CURRENT (Single-Tenant)  | In-process Node.js setTimeout / node-cron timer, |
-|                          | Lost entirely on process crash or restart,       |
-|                          | No retry backoff, no DLQ, no distributed locking |
+| CURRENT (Single-Tenant)  | In-process node-cron and setInterval timers in   |
+|                          | services/scheduler.js, lost on process restart,  |
+|                          | no retry backoff, no DLQ, no distributed locking |
 +--------------------------+--------------------------------------------------+
-| TARGET (Multi-Tenant)    | Separate process topology, Redis + BullMQ,       |
-|                          | Redlock distributed locking per page/post,       |
-|                          | Exponential backoff with jitter, DLQ alerting,   |
-|                          | Multi-tenant fair queuing & Graph API throttling |
+| TARGET (Multi-Tenant)    | PostgreSQL idempotency correctness boundary,     |
+|                          | Redis + BullMQ worker service, Redlock lock      |
+|                          | optimization, safe attempt redaction, Graph API  |
+|                          | rate-limit throttling, dead-letter queues        |
 +--------------------------+--------------------------------------------------+
-| DEFERRED                 | Cross-region active-active queue replication,    |
-|                          | Dynamic AI model auto-scaling worker pools       |
+| DEFERRED                 | Dedicated multi-fleet worker autoscaling,        |
+|                          | sharded Redis Cluster, cross-region queue sync   |
 +--------------------------+--------------------------------------------------+
 ```
 
 ---
 
-## 2. Process Decomposition & Topologies
+## 2. Infrastructure Right-Sizing: MVP vs Scale-Up
 
-To guarantee reliability, resource isolation, and horizontal scalability, the system divides workloads across 5 distinct process types:
+To avoid unnecessary operational complexity during early validation, the background architecture is right-sized for MVP launch and scaled horizontally only as volume demands:
 
 ```mermaid
 flowchart TD
-    subgraph Edge [Edge & Web Traffic]
-        LB[Load Balancer]
+    subgraph MVP [MVP Launch Topology: Lean & Resilient]
+        API1[1 API Express Service]
+        Worker1[1 Unified Worker Service BullMQ Consumers]
+        Sched1[1 Scheduler Leader / Producer]
+        RedisM[(1 Managed Redis Persistent HA)]
+        PGM[(1 Managed PostgreSQL 16)]
     end
 
-    subgraph APIProcess [Process 1: API Server Node instances]
-        API[API Express Servers]
+    subgraph ScaleUp [Scale-Up Topology: High Volume / Deferred]
+        PubPool[Dedicated Publishing Worker Fleet]
+        AnaPool[Dedicated Analytics Worker Fleet]
+        WebPool[Dedicated Webhook Worker Fleet]
+        RedisC[(Redis Cluster Sharded)]
+        PGRep[(PostgreSQL Read Replicas)]
     end
 
-    subgraph SchedulerProcess [Process 2: Scheduler Service]
-        Cron[Durable Cron / Tick Producer]
-    end
-
-    subgraph Workers [Worker Fleet: BullMQ Consumers]
-        PubWorker[Process 3: Publishing Worker]
-        AnalyticsWorker[Process 4: Analytics Worker]
-        WebhookWorker[Process 5: Webhook Processor]
-    end
-
-    subgraph State [Persistent Infrastructure]
-        PG[(PostgreSQL 16)]
-        Redis[(Redis Cluster)]
-        S3[(S3 Object Storage)]
-        Meta[Meta Graph API]
-    end
-
-    LB --> API
-    API -->|Write metadata| PG
-    API -->|Enqueue immediate jobs| Redis
-    API -->|Upload media| S3
-
-    SchedulerProcess -->|Poll scheduled_posts every 10s| PG
-    SchedulerProcess -->|Enqueue publishing jobs| Redis
-
-    Redis -->|Publishing Queue| PubWorker
-    Redis -->|Analytics Queue| AnalyticsWorker
-    Redis -->|Webhook Queue| WebhookWorker
-
-    PubWorker -->|Fetch encrypted token & content| PG
-    PubWorker -->|Publish Post| Meta
-    PubWorker -->|Update post status & attempts| PG
-
-    AnalyticsWorker -->|Fetch post metrics| Meta
-    AnalyticsWorker -->|Update stats| PG
+    MVP -.->|Scale after product-market fit| ScaleUp
 ```
 
-### Process Descriptions
+### MVP Worker Topology
+- **Unified Worker Service**: A single containerized Node.js service running BullMQ consumers for all three queues: `publishing-queue`, `analytics-queue`, and `webhook-queue`.
+- **Concurrency**: Configured with a worker concurrency limit (e.g. 5 concurrent jobs) and tenant concurrency caps.
+- **Persistence**: Single managed Redis instance with persistence (AOF/RDB) and high-availability automated failover.
 
-1. **API Server (`web`)**: Stateless Express instances. Handles HTTP authentication, UI requests, content creation, manual approval triggers, and file uploads. Enqueues background tasks; never executes heavy publishing or external polling synchronously.
-2. **Scheduler Service (`scheduler`)**: A single lightweight leader-elected instance (or cron-based producer). Scans `scheduled_posts` in PostgreSQL for items due within the next 60 seconds and pushes them into the Redis BullMQ queue with exact execution timestamps.
-3. **Publishing Worker (`worker-publishing`)**: Dedicated consumer pool for publishing content to Facebook. Manages token decryption, media asset fetching from S3, Facebook Graph API requests, rate-limit backoff, and state transitions.
-4. **Analytics Worker (`worker-analytics`)**: Batched consumer for fetching engagement metrics (reactions, shares, comments) from Facebook Graph API without blocking publishing queues.
-5. **Webhook Processor (`worker-webhooks`)**: Dedicated consumer processing incoming Meta webhooks (page feed updates, comments, permission drops) asynchronously.
+### Scale-Up Fleet Topology (Deferred)
+- Separate container pools for publishing, analytics, and webhooks.
+- Multi-node Redis Cluster with queue partitioning.
 
 ---
 
-## 3. Publishing Job Payload Schema
+## 3. Database Idempotency as Correctness Boundary
 
-Every job dispatched to the publishing queue must carry a strictly typed, immutable payload:
+While Redis distributed locks (Redlock) are utilized to minimize concurrent worker contention, **PostgreSQL is the definitive source of truth and correctness boundary for duplicate prevention**.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Worker as Publishing Worker
+    participant PG as PostgreSQL
+    participant Meta as Meta Graph API
+
+    Worker->>PG: BEGIN TRANSACTION
+    Worker->>PG: SELECT * FROM scheduled_posts WHERE id = $1 AND workspace_id = $2 FOR UPDATE
+    alt Status != 'scheduled' AND Status != 'queued'
+        Worker->>PG: ROLLBACK
+        Note over Worker: Abort: Post is already publishing or finished
+    else Status is Valid
+        Worker->>PG: INSERT INTO publish_idempotency (workspace_id, scheduled_post_id, idempotency_key, status) VALUES ($1, $2, $3, 'in_progress')
+        Worker->>PG: UPDATE scheduled_posts SET status = 'publishing' WHERE id = $1 AND workspace_id = $2
+        Worker->>PG: COMMIT
+
+        Note over Worker: Correctness boundary locked in PostgreSQL!
+        Worker->>Meta: POST /{page_id}/feed (caption, media)
+
+        alt Success (HTTP 200 - Facebook Post ID: 987654)
+            Worker->>PG: BEGIN TRANSACTION
+            Worker->>PG: INSERT INTO published_posts (workspace_id, post_id, fb_post_id) VALUES ($1, $2, '987654')
+            Worker->>PG: UPDATE scheduled_posts SET status = 'published' WHERE id = $1 AND workspace_id = $2
+            Worker->>PG: UPDATE publish_idempotency SET status = 'completed' WHERE idempotency_key = $3
+            Worker->>PG: COMMIT
+        else Network Timeout / Worker Crash
+            Note over Worker: Network disconnect or process crash!
+            Note over Worker: Reconciliation monitor checks Facebook Page feed before retry
+        end
+    end
+```
+
+### Database Idempotency Protocol
+1. **Row-Level Lock**: Worker opens a transaction and executes `SELECT * FROM scheduled_posts WHERE id = $1 AND workspace_id = $2 FOR UPDATE`.
+2. **State Guard**: If `status` is not `scheduled` or `queued`, the transaction rolls back immediately.
+3. **Idempotency Record Claim**: The worker inserts a claim into `publish_idempotency`:
+   `CONSTRAINT uq_publish_idempotency UNIQUE (workspace_id, idempotency_key)`.
+   If a row already exists, the insert fails with a unique constraint violation.
+4. **Transition to `publishing`**: `scheduled_posts.status` transitions to `publishing` and the transaction commits.
+5. **Facebook Call**: Worker performs the Graph API call.
+6. **Outcome Persistence**: In a closing transaction, `published_posts` is created, `scheduled_posts.status` becomes `published`, and `publish_idempotency.status` becomes `completed`.
+
+### Worker Crash Reconciliation
+If a worker crashes between the Facebook call and database update:
+1. The post remains in `publishing` state.
+2. A periodic reconciliation worker identifies posts stuck in `publishing` for longer than 5 minutes.
+3. The reconciliation worker queries the Facebook Page feed: `GET /{page_id}/feed?limit=5&fields=id,message,created_time`.
+4. If a published post matches the post caption and timestamp window:
+   - The monitor marks `published_posts` and updates `scheduled_posts.status = 'published'`.
+5. If no matching post exists on Facebook:
+   - The monitor safely resets `scheduled_posts.status = 'queued'` to allow the scheduler to re-dispatch the job.
+
+---
+
+## 4. Safe Telemetry and Publish Attempt Logging
+
+### Security & Privacy Rules
+To protect credentials and customer confidentiality, storing raw HTTP payloads or tokens in attempt logs is strictly prohibited:
+
+| Prohibited Data | Prevention & Sanitization Strategy |
+| :--- | :--- |
+| **`Authorization` headers & tokens** | Completely stripped by telemetry filter prior to logging. |
+| **Facebook Page / User Access Tokens** | URL query parameters sanitized; tokens replaced with `[REDACTED]`. |
+| **Session cookies** | Excluded from worker telemetry models entirely. |
+| **Raw request / response bodies** | Discarded; only structured error codes (`fb_error_code`, `fb_error_subcode`) and high-level messages are kept. |
+| **Internal exception dumps** | Stack traces containing local environment variables or secrets are intercepted and sanitized. |
+
+### Canonical `publish_attempts` Telemetry Schema
+```sql
+CREATE TABLE publish_attempts (
+    id UUID PRIMARY KEY,
+    workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    scheduled_post_id UUID NOT NULL REFERENCES scheduled_posts(id) ON DELETE CASCADE,
+    post_version_id UUID NOT NULL REFERENCES post_versions(id) ON DELETE CASCADE,
+    attempt_number INT NOT NULL,
+    endpoint VARCHAR(128) NOT NULL, -- e.g. "POST /{page_id}/feed"
+    http_status INT,                -- e.g. 200, 400, 429
+    fb_error_code INT,             -- e.g. 190, 32
+    fb_error_subcode INT,          -- e.g. 463
+    error_category VARCHAR(64),    -- e.g. "TOKEN_EXPIRED", "RATE_LIMIT", "TIMEOUT"
+    duration_ms INT NOT NULL,
+    retry_decision VARCHAR(32) NOT NULL, -- "RETRY_SCHEDULED", "MOVED_TO_DLQ", "ABORTED"
+    trace_id VARCHAR(64) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT fk_publish_attempts_workspace
+        FOREIGN KEY (workspace_id, scheduled_post_id)
+        REFERENCES scheduled_posts(workspace_id, id)
+);
+```
+
+---
+
+## 5. Publishing Job Payload Schema
+
+Every job dispatched to BullMQ carries a strictly validated payload:
 
 ```json
 {
@@ -106,36 +178,29 @@ Every job dispatched to the publishing queue must carry a strictly typed, immuta
   "properties": {
     "workspaceId": {
       "type": "string",
-      "format": "uuid",
-      "description": "Tenant workspace owning this publishing action."
+      "format": "uuid"
     },
     "facebookPageId": {
       "type": "string",
-      "format": "uuid",
-      "description": "Internal database UUID of the target facebook_pages record."
+      "format": "uuid"
     },
     "scheduledPostId": {
       "type": "string",
-      "format": "uuid",
-      "description": "Primary key of the scheduled_posts record."
+      "format": "uuid"
     },
     "postVersionId": {
       "type": "string",
-      "format": "uuid",
-      "description": "Exact immutable snapshot version of post content being published."
+      "format": "uuid"
     },
     "idempotencyKey": {
-      "type": "string",
-      "description": "Unique key (e.g., pub_ws123_sched456_attempt1) preventing duplicate Facebook posts."
+      "type": "string"
     },
     "attemptNumber": {
       "type": "integer",
-      "minimum": 1,
-      "description": "Current attempt counter (1, 2, 3...)."
+      "minimum": 1
     },
     "traceId": {
-      "type": "string",
-      "description": "Distributed tracing ID propagated from originating user action."
+      "type": "string"
     }
   },
   "additionalProperties": false
@@ -144,145 +209,35 @@ Every job dispatched to the publishing queue must carry a strictly typed, immuta
 
 ---
 
-## 4. Job Lifecycle & State Machine
+## 6. Graph API Rate-Limit Throttling and Backoff
 
-```mermaid
-stateDiagram-v2
-    [*] --> queued: Enqueued by Scheduler or User
-    queued --> active: Claimed by Publishing Worker
-    active --> completed: Facebook returns Post ID (200 OK)
-
-    active --> delayed: Transient Facebook Error (Rate limit, 5xx)
-    delayed --> active: Retry Delay Expired
-
-    active --> failed: Non-retryable Error (Permissions revoked, Invalid media)
-    active --> failed: Max Retries (5) Exhausted
-
-    failed --> dlq: Moved to Dead-Letter Queue
-    dlq --> queued: Operator Manual Retry
-    completed --> [*]
-```
-
-### State Definitions
-- `queued`: Job resides in Redis BullMQ awaiting available worker concurrency.
-- `active`: Worker has acquired distributed lock and is decrypting token / calling Facebook.
-- `completed`: Successfully published. `published_posts` record created; `scheduled_posts.status = 'published'`.
-- `delayed`: Post encountered transient network failure or rate limit; waiting exponential backoff.
-- `failed`: Terminal failure recorded in `publish_attempts`. Alerts triggered.
-- `dlq`: Sits in Dead-Letter Queue for operator investigation.
-
----
-
-## 5. Distributed Locking (Redlock)
-
-To prevent duplicate Facebook posts caused by network hiccups, overlapping cron schedules, or simultaneous worker claims, the publishing worker must acquire two distributed locks:
-
-1. **Page-Level Lock**: `lock:fb_page:{facebookPageId}`
-   - Prevents posting multiple updates simultaneously to the same Facebook Page (avoids triggering Meta's spam/burst filters).
-   - TTL: 30 seconds.
-2. **Post-Level Lock**: `lock:scheduled_post:{scheduledPostId}`
-   - Guarantees that only one worker can process a specific scheduled post at any given second.
-   - TTL: 60 seconds.
-
-### Lock Acquisition Protocol
-```javascript
-const pageLock = await redlock.acquire([`lock:fb_page:${job.facebookPageId}`], 30000);
-try {
-  const postLock = await redlock.acquire([`lock:scheduled_post:${job.scheduledPostId}`], 60000);
-  try {
-    await executePublish(job);
-  } finally {
-    await postLock.release();
-  }
-} finally {
-  await pageLock.release();
-}
-```
-
----
-
-## 6. Graph API Rate Limit Throttling and Backoff
-
-Meta enforces rate limits per App and per Page. Workers must actively monitor rate limit headers returned on every Graph API response.
+Meta enforces rate limits per App and per Page. Workers actively monitor rate limit headers returned on every Graph API call:
 
 ### Meta Rate Limit Headers
 - `X-App-Usage`: `{"call_count": 85, "total_cputime": 40, "total_time": 50}`
 - `X-Page-Usage`: `{"call_count": 92, "total_cputime": 30, "total_time": 75}`
 
-### Throttling Rules
-1. If any metric in `X-Page-Usage` or `X-App-Usage` exceeds **80%**:
-   - The worker enters proactive throttling: pauses new jobs for that page for 5 minutes.
-2. If Graph API returns error codes:
-   - Error `4` (Application request limit reached): Backoff application-wide publishing by 15 minutes.
-   - Error `17` (User request limit reached): Pause jobs for this user connection by 15 minutes.
-   - Error `32` (Page request limit reached): Pause jobs for this specific Facebook Page by 30 minutes.
-   - Error `613` (Calls have exceeded rate limits): Pause jobs for this page by 15 minutes.
-
-### Retry Backoff Schedule
-For retryable network errors (HTTP 500, 502, 503, 504, timeout):
-- **Attempt 1**: Retry after 1 minute + random jitter (0-30s)
-- **Attempt 2**: Retry after 5 minutes + random jitter (0-60s)
-- **Attempt 3**: Retry after 15 minutes + random jitter (0-120s)
-- **Attempt 4**: Retry after 30 minutes + random jitter (0-300s)
-- **Attempt 5**: Retry after 60 minutes.
-- **After 5 Attempts**: Mark post `failed`, push to Dead-Letter Queue (DLQ), notify workspace admins.
+### Throttling & Backoff Rules
+1. **Proactive Throttling**: If any percentage in `X-Page-Usage` exceeds **80%**, pause subsequent jobs for that page by 5 minutes.
+2. **Error Code Handling**:
+   - Error `4` (App rate limit): Backoff application-wide publishing by 15 minutes.
+   - Error `17` (User rate limit): Backoff user connection by 15 minutes.
+   - Error `32` (Page rate limit): Backoff page jobs by 30 minutes.
+   - Error `613` (Calls exceeded limit): Backoff page jobs by 15 minutes.
+3. **Exponential Backoff Schedule with Jitter**:
+   - Attempt 1: 1 min + jitter (0-30s)
+   - Attempt 2: 5 min + jitter (0-60s)
+   - Attempt 3: 15 min + jitter (0-120s)
+   - Attempt 4: 30 min + jitter (0-300s)
+   - Attempt 5: 60 min.
+   - After 5 Attempts: Move job to Dead-Letter Queue (DLQ), notify workspace reviewer/admin.
 
 ---
 
-## 7. Multi-Tenant Fair Queuing
+## 7. Graceful Worker Shutdown
 
-In a shared queue, a large agency tenant scheduling 500 posts at 9:00 AM must not starve a small boutique tenant scheduling 1 post at 9:01 AM.
-
-### Isolation Strategies
-1. **Tenant Concurrency Limits**:
-   - BullMQ Group / Child Queues: Max concurrent publishing jobs per `workspaceId` = 2.
-2. **Priority Tiers by Plan**:
-   - Pro and Agency plans get priority weighting (`priority: 1` vs Starter `priority: 5`).
-3. **Queue Separation**:
-   - High-priority interactive manual publishing queue (`publish-interactive`).
-   - Normal scheduled posting queue (`publish-scheduled`).
-   - Bulk / agency queue (`publish-bulk`).
-
----
-
-## 8. Network Timeout, Reconciliation, and Partial Failure
-
-### The "Zombie Post" Problem
-A network timeout occurs after Meta successfully writes the post to Facebook but before the worker receives the HTTP 200 response. If the worker simply retries, a duplicate post is created on Facebook.
-
-### Reconciliation Sequence
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Worker as Publishing Worker
-    participant Meta as Meta Graph API
-    participant PG as PostgreSQL
-
-    Worker->>Meta: POST /{page_id}/feed (caption, media)
-    Note over Worker,Meta: Network timeout / connection reset!
-    Worker->>Worker: Catch ETIMEDOUT or ECONNRESET
-
-    Note over Worker: Reconcile before retrying!
-    Worker->>Meta: GET /{page_id}/feed?limit=5&fields=id,message,created_time
-    alt Post message matches within 5 minutes
-        Meta-->>Worker: Found matching published post (ID: 1029384756)
-        Worker->>PG: Record published_posts with post ID 1029384756
-        Worker->>PG: Update scheduled_posts status = 'published'
-        Worker-->>Worker: Mark job completed (reconciled successfully)
-    else Post NOT found on feed
-        Worker-->>Worker: Re-enqueue with exponential backoff
-    end
-```
-
----
-
-## 9. Graceful Worker Shutdown
-
-Workers must support zero-downtime rolling deployments without dropping active publishing tasks.
-
-### Shutdown Protocol
-1. Listen for `SIGTERM` and `SIGINT` signals.
-2. Stop accepting new jobs: `await queue.pause()`.
-3. Allow active jobs up to **30 seconds** to complete publishing and database state persistence.
-4. If active jobs finish within timeout: release distributed locks and exit with code 0.
-5. If timeout expires before job completion: log error alert, discard lock safely, and exit with code 1 so container orchestrator restarts instance.
+Workers must support rolling deployments without interrupting active publishing jobs:
+1. Listen for `SIGTERM` and `SIGINT`.
+2. Pause queues immediately: `await worker.pause()`.
+3. Allow active jobs up to **30 seconds** to complete Facebook publishing and PostgreSQL status commits.
+4. Release distributed locks and exit cleanly with code 0.
