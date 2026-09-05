@@ -5,6 +5,7 @@
 const PUBLIC_ERRORS = Object.freeze({
   AUTH_REQUIRED: [401, 'AuthRequired', 'Authentication required.'],
   WORKSPACE_NOT_FOUND: [404, 'WorkspaceNotFound', 'Workspace not found or access denied.'],
+  RESOURCE_NOT_FOUND: [404, 'ResourceNotFound', 'Requested resource not found or access denied.'],
   PERMISSION_DENIED: [403, 'PermissionDenied', 'You do not have permission to perform this action.'],
   VALIDATION_FAILED: [400, 'ValidationFailed', 'The supplied input is invalid.'],
   INVITATION_INVALID: [400, 'InvitationInvalid', 'The invitation is invalid or unavailable.'],

@@ -333,11 +333,18 @@ module.exports = function register({ request, query, getPool, baseUrl }) {
     it('Migration 009 rollback invalidates sessions; reapplying it restores the schema without cookie resurrection', async () => {
       const a = await verified(); const auth = await login(a);
       const { rollbackLatestMigration, runMigrations } = require('../db/migrator');
+      const latest = (await query('SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1')).rows[0]?.version;
+      if (latest === '010') {
+        await rollbackLatestMigration();
+      }
       await rollbackLatestMigration();
-      const columns = await query("SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = 'auth_version'");
-      assert.equal(columns.rowCount, 0);
-      assert.equal((await query('SELECT token_hash FROM auth_sessions')).rowCount, 0);
-      await runMigrations();
+      try {
+        const columns = await query("SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = 'auth_version'");
+        assert.equal(columns.rowCount, 0);
+        assert.equal((await query('SELECT token_hash FROM auth_sessions')).rowCount, 0);
+      } finally {
+        await runMigrations();
+      }
       assert.equal(await authenticated(auth), false);
       const fresh = await login(a); assert.equal(await authenticated(fresh), true);
     });

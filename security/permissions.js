@@ -39,6 +39,16 @@ const ALL_PERMISSIONS = [
   'publish:trigger',
   'publish:retry',
 
+  'templates:read',
+  'templates:manage',
+
+  'settings:read',
+  'settings:update',
+
+  'media:read',
+  'media:upload',
+  'media:delete',
+
   'billing:read',
   'billing:manage'
 ];
@@ -72,6 +82,13 @@ const ROLE_PERMISSIONS = {
     'schedule:cancel',
     'publish:trigger',
     'publish:retry',
+    'templates:read',
+    'templates:manage',
+    'settings:read',
+    'settings:update',
+    'media:read',
+    'media:upload',
+    'media:delete',
     'billing:read'
   ]),
 
@@ -92,7 +109,10 @@ const ROLE_PERMISSIONS = {
     'schedule:create',
     'schedule:update',
     'schedule:cancel',
-    'publish:trigger'
+    'publish:trigger',
+    'templates:read',
+    'settings:read',
+    'media:read'
   ]),
 
   editor: new Set([
@@ -107,7 +127,11 @@ const ROLE_PERMISSIONS = {
     'approvals:read',
     'approvals:submit',
     'schedule:read',
-    'publish:trigger'
+    'publish:trigger',
+    'templates:read',
+    'settings:read',
+    'media:read',
+    'media:upload'
   ]),
 
   viewer: new Set([
@@ -117,7 +141,10 @@ const ROLE_PERMISSIONS = {
     'page_dna:read',
     'drafts:read',
     'approvals:read',
-    'schedule:read'
+    'schedule:read',
+    'templates:read',
+    'settings:read',
+    'media:read'
   ])
 };
 
