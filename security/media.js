@@ -5,7 +5,7 @@ const dns = require('node:dns/promises');
 const ipaddr = require('ipaddr.js');
 const sharp = require('sharp');
 const axios = require('axios');
-const { randomUUID } = require('node:crypto');
+const { randomUUID, createHash } = require('node:crypto');
 const db = require('../services/db');
 const context = require('./context');
 const { DATA_ROOT } = require('../config/env');
@@ -148,13 +148,14 @@ async function store(buffer) {
     await fs.writeFile(localPath, normalized, { mode: 0o600, flag: 'wx' });
     try {
       await db.query(
-        'INSERT INTO media_assets(workspace_id,id,filename,content_type,size) VALUES($1,$2,$3,$4,$5)',
+        'INSERT INTO media_assets(workspace_id,id,filename,content_type,size,content_sha256) VALUES($1,$2,$3,$4,$5,$6)',
         [
           context.current().workspaceId,
           id,
           filename,
           'image/jpeg',
-          normalized.length
+          normalized.length,
+          createHash('sha256').update(normalized).digest('hex')
         ]
       );
     } catch (error) {

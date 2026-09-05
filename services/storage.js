@@ -61,13 +61,14 @@ async function put(table, value) {
     );
   else if (table === 'post_history')
     await db.query(
-      `INSERT INTO post_history(workspace_id,id,facebook_page_id,occurred_at,data) VALUES($1,$2,$3,$4,$5)`,
+      `INSERT INTO post_history(workspace_id,id,facebook_page_id,occurred_at,data,job_id) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(workspace_id,job_id) DO NOTHING`,
       [
         workspace(),
         value.id,
         value.facebookPageId,
         value.timestamp,
-        secrets.seal(value)
+        secrets.seal(value),
+        value.jobId || null
       ]
     );
   else
@@ -118,6 +119,7 @@ const storage = {
       autoPilotEnabled: false,
       isDemoMode: false,
       cronSchedule: '0 9,14,20 * * *',
+      timeZone: 'UTC',
       customSystemPrompt: DEFAULT_SYSTEM_PROMPT,
       ...(await document('workspace_settings'))
     };
@@ -304,19 +306,13 @@ const storage = {
   async getQueue() {
     return (
       await db.query(
-        'SELECT data FROM scheduled_posts WHERE workspace_id=$1 ORDER BY created_at,id',
+        'SELECT * FROM scheduled_posts WHERE workspace_id=$1 ORDER BY created_at,id',
         [workspace()]
       )
-    ).rows.map((row) => secrets.open(row.data));
+    ).rows.map(require('./jobs').hydrate);
   },
   async getNextDueQueueItem() {
-    const row = (
-      await db.query(
-        "SELECT data FROM scheduled_posts WHERE workspace_id=$1 AND status='pending' AND (scheduled_at IS NULL OR scheduled_at<=now()) ORDER BY scheduled_at NULLS FIRST,created_at,id LIMIT 1",
-        [workspace()]
-      )
-    ).rows[0];
-    return row ? secrets.open(row.data) : null;
+    return require('./jobs').due();
   },
   async hasProcessingJobs() {
     return !!(
@@ -331,18 +327,26 @@ const storage = {
       ? await this.getPageById(data.facebookPageId)
       : await this.getActivePage();
     if (!page) fail('Connect a Facebook page first');
-    const item = {
-      id: 'queue_' + randomUUID(),
-      facebookPageId: page.id,
-      message: data.message || '',
-      imageUrl: data.imageUrl || null,
-      scheduledAt: data.scheduledAt
-        ? new Date(data.scheduledAt).toISOString()
-        : null,
-      createdAt: new Date().toISOString(),
-      status: 'pending'
-    };
-    return put('scheduled_posts', item);
+    const settings = await this.getSettings(),
+      timeZone = require('./scheduling').validateZone(
+        data.timeZone || settings.timeZone || 'UTC'
+      );
+    const scheduledAt = require('./scheduling').instant({ ...data, timeZone });
+    return require('./jobs').create(
+      {
+        facebookPageId: page.id,
+        message: data.message || '',
+        imageUrl: data.imageUrl || null,
+        scheduledAt,
+        timeZone,
+        topic: data.topic || '',
+        categoryId: data.categoryId || '',
+        includeImage: data.includeImage !== false,
+        source: data.source || 'scheduler',
+        isDemo: data.isDemo === true || data.isDemo === 'true'
+      },
+      { operationKey: data.operationKey, kind: data.kind || 'publish' }
+    );
   },
   async updateQueueItem(id, updates) {
     const item = await getRecord('scheduled_posts', id);
@@ -355,12 +359,7 @@ const storage = {
     });
   },
   async claimQueueItem(id) {
-    const item = await getRecord('scheduled_posts', id);
-    if (!item || item.status !== 'pending') return null;
-    return this.updateQueueItem(id, {
-      status: 'processing',
-      processingAt: new Date().toISOString()
-    });
+    return require('./jobs').claim(id);
   },
   async removeFromQueue(id) {
     const item = await getRecord('scheduled_posts', id);

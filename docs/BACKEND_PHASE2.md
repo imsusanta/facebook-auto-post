@@ -15,7 +15,7 @@ Repository implementation checklist. Deployment/live data migration is separate 
 1. Back up the existing PostgreSQL database (if phase 1 was deployed), legacy JSON files/media, and encryption key. Stop automation while upgrading.
 2. Configure the new environment variables from `.env.example`. Production requires `DATABASE_SSL=require`; configure a trusted `DATABASE_CA_FILE` when your provider requires one. Remove SSL settings from the database URL so they cannot override certificate validation.
 3. Run `npm ci`, then `npm run db:status`. A pending migration makes this command exit nonzero intentionally.
-4. Run `npm run db:migrate`, then `npm run db:status`. Both migrations must report `applied`; never edit an applied migration to fix production data.
+4. Run `npm run db:migrate`, then `npm run db:status`. All migrations present on the branch must report `applied`; never edit an applied migration to fix production data.
 5. Build/start the application. `/healthz` reports process liveness; `/readyz` reports schema/database readiness and returns 503 when migrations are pending, unknown or changed.
 6. If importing legacy JSON, follow `SECURITY_SETUP.md`. Supply the reviewed destination for **both history and queue entries** that lack an explicit Page ID. Existing `facebookPageId` values are checked, not silently overwritten. Import preserves supplied history timestamps and leaves automation disabled.
 7. Verify tenant isolation, page connections, publishing and backup restore in staging before enabling automation or merging/deploying to production.
@@ -54,3 +54,7 @@ npm audit --omit=dev
 ```
 
 Live database migration, real Meta/Gemini/email delivery and production operational acceptance are not performed by committing this code.
+
+## Phase 3 follow-up
+
+The publishing reliability changes supersede the scheduler limitations above. Read [Phase 3](PUBLISHING_PHASE3.md) before enabling workers or upgrading to migration 003. Production hosting/shared media/provider validation is still required.

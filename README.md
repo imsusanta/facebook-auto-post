@@ -47,7 +47,7 @@ npm start
 
 Create an account, verify the email, then log in. Connect each customer's Facebook Page and Gemini key inside that customer's authenticated workspace. Automation and webhooks are disabled by default pending staging checks.
 
-For the database/backend implementation checklist and upgrade steps, see [Phase 2](docs/BACKEND_PHASE2.md).
+For the database/backend implementation checklist and upgrade steps, see [Phase 2](docs/BACKEND_PHASE2.md). For durable jobs, retries, idempotency, timezone scheduling and worker deployment prerequisites, see [Phase 3](docs/PUBLISHING_PHASE3.md).
 
 ## Development checks
 
@@ -58,7 +58,7 @@ TEST_DATABASE_URL=postgresql://user:password@localhost:5432/autopost_test npm te
 npm audit --omit=dev
 ```
 
-See [SECURITY.md](SECURITY.md) and [the setup guide](docs/SECURITY_SETUP.md) for role permissions, migration steps, test coverage and known limitations. Billing, OAuth onboarding, production job recovery and operational readiness remain later SaaS phases.
+See [SECURITY.md](SECURITY.md) and [the setup guide](docs/SECURITY_SETUP.md) for role permissions, migration steps, test coverage and known limitations. Publishing jobs now have persisted recovery and conservative delivery handling; see [Phase 3](docs/PUBLISHING_PHASE3.md). Billing, OAuth onboarding, live provider acceptance and production operational readiness remain later SaaS work.
 
 ---
 

@@ -1,186 +1,217 @@
-const cron = require('node-cron');
-const storage = require('./storage');
 const db = require('./db');
+const storage = require('./storage');
+const jobs = require('./jobs');
 const context = require('../security/context');
 const { ENABLE_AUTOMATION } = require('../config/env');
-const { broadcastSSE } = require('../middleware/sse');
-const runners = new Map();
-let poller;
-async function getStatus() {
+const { nextCron } = require('./scheduling');
+let timer,
+  busy = false,
+  stopping = false;
+async function sync() {
+  const id = context.current().workspaceId;
+  return db.transaction(async () => {
+    const s = await storage.getSettings();
+    const old = (
+      await db.query(
+        'SELECT * FROM autopilot_schedules WHERE workspace_id=$1',
+        [id]
+      )
+    ).rows[0];
+    if (!s.autoPilotEnabled) {
+      if (old)
+        await db.query(
+          'UPDATE autopilot_schedules SET enabled=false WHERE workspace_id=$1',
+          [id]
+        );
+      return null;
+    }
+    const pageId =
+      s.autoPilotPageId ||
+      old?.facebook_page_id ||
+      (await storage.getActivePage())?.id;
+    if (!pageId || !(await storage.getPageById(pageId))) {
+      if (old)
+        await db.query(
+          'UPDATE autopilot_schedules SET enabled=false WHERE workspace_id=$1',
+          [id]
+        );
+      return null;
+    }
+    const cron = s.cronSchedule || '0 9,14,20 * * *',
+      zone = s.timeZone || 'UTC';
+    const changed =
+      !old ||
+      !old.enabled ||
+      old.facebook_page_id !== pageId ||
+      old.cron_expression !== cron ||
+      old.time_zone !== zone;
+    if (changed)
+      await db.query(
+        `INSERT INTO autopilot_schedules(workspace_id,facebook_page_id,cron_expression,time_zone,next_run_at) VALUES($1,$2,$3,$4,$5)
+   ON CONFLICT(workspace_id) DO UPDATE SET facebook_page_id=excluded.facebook_page_id,cron_expression=excluded.cron_expression,time_zone=excluded.time_zone,next_run_at=excluded.next_run_at,enabled=true,revision=autopilot_schedules.revision+1`,
+        [id, pageId, cron, zone, nextCron(cron, zone)]
+      );
+    if (!s.autoPilotPageId)
+      await storage.saveSettings({ autoPilotPageId: pageId });
+    return (
+      await db.query(
+        'SELECT * FROM autopilot_schedules WHERE workspace_id=$1',
+        [id]
+      )
+    ).rows[0];
+  }, id);
+}
+async function enqueueAuto(topic = '', operationKey) {
   const s = await storage.getSettings(),
-    runner = runners.get(context.current().workspaceId);
+    page = await storage.getPageById(
+      s.autoPilotPageId || (await storage.getActivePage())?.id
+    );
+  if (!page)
+    throw Object.assign(new Error('Connect an autopilot page first'), {
+      statusCode: 400,
+      expose: true
+    });
+  const categories = s.selectedCategories || [];
+  // Explicit user triggers are idempotent; do not re-randomize their payload on HTTP retry.
+  const categoryId = categories[0] || '';
+  return require('./publishing').enqueue({
+    facebookPageId: page.id,
+    topic,
+    categoryId,
+    includeImage: s.includeAiImage !== false,
+    timeZone: s.timeZone || 'UTC',
+    kind: 'autopilot',
+    source: 'manual_autopilot',
+    operationKey
+  });
+}
+async function materializeDue() {
+  const id = context.current().workspaceId;
+  return db.transaction(async () => {
+    await sync();
+    const row = (
+      await db.query(
+        'SELECT * FROM autopilot_schedules WHERE workspace_id=$1 AND enabled AND next_run_at<=now() FOR UPDATE',
+        [id]
+      )
+    ).rows[0];
+    if (!row) return null;
+    const s = await storage.getSettings(),
+      categories = s.selectedCategories || [];
+    const key = `cron:${row.facebook_page_id}:${row.revision}:${row.next_run_at.toISOString()}`;
+    const job = await require('./publishing').enqueue({
+      facebookPageId: row.facebook_page_id,
+      topic: '',
+      categoryId:
+        categories[
+          Math.abs(Math.floor(row.next_run_at.getTime() / 1000)) %
+            Math.max(1, categories.length)
+        ] || '',
+      includeImage: s.includeAiImage !== false,
+      timeZone: row.time_zone,
+      kind: 'autopilot',
+      source: 'ai_autopilot',
+      operationKey: key
+    });
+    // Coalesce missed cron slots into one catch-up job, never a flood of old posts.
+    await db.query(
+      'UPDATE autopilot_schedules SET next_run_at=$2 WHERE workspace_id=$1',
+      [id, nextCron(row.cron_expression, row.time_zone)]
+    );
+    return job;
+  }, id);
+}
+async function getStatus() {
+  const s = await storage.getSettings();
+  const row = (
+    await db.query(
+      'SELECT * FROM autopilot_schedules WHERE workspace_id=$1 AND enabled',
+      [context.current().workspaceId]
+    )
+  ).rows[0];
   return {
-    isRunning: ENABLE_AUTOMATION && !!(s.autoPostEnabled || s.autoPilotEnabled),
+    isRunning: ENABLE_AUTOMATION && !stopping,
     autoPilotEnabled: !!s.autoPilotEnabled,
+    autoPostEnabled: !!s.autoPostEnabled,
+    timeZone: s.timeZone || 'UTC',
     cronSchedule: s.cronSchedule,
     cronLabel: s.cronLabel || '',
-    nextRun: runner?.getNextRun()?.toISOString() || null,
+    nextRun: row?.next_run_at.toISOString() || null,
+    secondsRemaining: row
+      ? Math.max(0, Math.ceil((row.next_run_at.getTime() - Date.now()) / 1000))
+      : null,
     isProcessing: await storage.hasProcessingJobs()
   };
 }
-async function processManualQueueItem(item) {
-  const claimed = await storage.claimQueueItem(item.id);
-  if (!claimed) return null;
-  const workspaceId = context.current().workspaceId;
-  return context.run(
-    workspaceId,
-    async () => {
+async function tick() {
+  if (busy || stopping) return;
+  busy = true;
+  try {
+    await jobs.recover();
+    const { rows } = await db.query('SELECT id FROM workspaces');
+    for (const row of rows) {
+      if (stopping) break;
       try {
-        const facebook = require('./facebook'),
-          media = require('../security/media');
-        const imagePath = claimed.imageUrl?.startsWith('/uploads/')
-          ? await media.resolve(claimed.imageUrl)
-          : null;
-        const result = await facebook.publishPost({
-          message: claimed.message,
-          imagePath,
-          imageUrl: imagePath ? null : claimed.imageUrl,
-          source: 'scheduler'
+        await context.run(row.id, async () => {
+          await materializeDue();
+          const s = await storage.getSettings();
+          const due = (
+            await db.query(
+              `SELECT * FROM scheduled_posts WHERE workspace_id=$1 AND status IN ('pending','retry_wait') AND attempt_count<max_attempts
+    AND (scheduled_at IS NULL OR scheduled_at<=now() OR data->>'publishNowRequested'='true') AND (next_attempt_at IS NULL OR next_attempt_at<=now())
+    AND (data->>'publishNowRequested'='true' OR (kind='autopilot' AND ($2 OR data->>'source'='manual_autopilot')) OR (kind='publish' AND ($3 OR data->>'source'='manual')))
+    ORDER BY coalesce(next_attempt_at,scheduled_at,created_at),id LIMIT 1`,
+              [row.id, !!s.autoPilotEnabled, !!s.autoPostEnabled]
+            )
+          ).rows[0];
+          if (due) await require('./publishing').processJob(due.id);
         });
-        await storage.updateQueueItem(item.id, {
-          status: 'completed',
-          completedAt: new Date().toISOString(),
-          postId: result.postId
-        });
-        await broadcastSSE('post_success', { result, source: 'scheduler' });
-        return result;
-      } catch (error) {
-        // Timeouts can hide a successful Meta publish. Do not blindly retry an ambiguous result.
-        await storage.updateQueueItem(item.id, {
-          status: 'needs_review',
-          error:
-            'Publishing failed or outcome is uncertain. Check Facebook before retrying.'
-        });
-        await broadcastSSE('post_failed', {
-          error: 'Queued post needs review'
-        });
-        throw error;
-      } finally {
-        await broadcastSSE('queue_updated', await storage.getQueue());
+      } catch {
+        console.warn(
+          '[Scheduler] Workspace tick failed; other workspaces continue'
+        );
       }
-    },
-    { targetPageId: claimed.facebookPageId }
-  );
-}
-async function triggerAIAutoPilot(topic = '') {
-  const id = context.current().workspaceId;
-  return db.transaction(async () => {
-    const s = await storage.getSettings(),
-      page = await storage.getActivePage();
-    if (!page)
-      throw Object.assign(new Error('Connect a page first'), {
-        statusCode: 400,
-        expose: true
-      });
-    if (
-      s.lastAutoPostTime &&
-      Date.now() - Date.parse(s.lastAutoPostTime) < 30 * 60 * 1000
-    )
-      return { skipped: true, reason: 'Cooldown active' };
-    return context.run(
-      id,
-      async () => {
-        const ai = require('./ai'),
-          facebook = require('./facebook');
-        const categories = s.selectedCategories || [];
-        const bundle = await ai.generateFullPostBundle({
-          topic,
-          pageId: page.id,
-          categoryId:
-            categories[Math.floor(Math.random() * categories.length)] || '',
-          includeImage: s.includeAiImage !== false
-        });
-        const result = await facebook.publishPost({
-          message: bundle.message,
-          imagePath: bundle.image?.localPath || null,
-          source: 'ai_autopilot'
-        });
-        await storage.saveSettings({
-          lastAutoPostTime: new Date().toISOString()
-        });
-        await broadcastSSE('post_success', { result, source: 'ai_autopilot' });
-        return { success: true, result, bundle };
-      },
-      { targetPageId: page.id }
-    );
-  }, id);
-}
-async function stop() {
-  const id = context.current().workspaceId;
-  const old = runners.get(id);
-  if (old) {
-    await old.destroy();
-    runners.delete(id);
+    }
+  } catch {
+    console.warn('[Scheduler] Tick failed; persistent jobs will be revisited');
+  } finally {
+    busy = false;
   }
-}
-async function start() {
-  await stop();
-  if (!ENABLE_AUTOMATION) return;
-  const s = await storage.getSettings(),
-    id = context.current().workspaceId;
-  if (s.autoPilotEnabled && cron.validate(s.cronSchedule))
-    runners.set(
-      id,
-      cron.schedule(
-        s.cronSchedule,
-        () =>
-          context.run(id, async () => {
-            try {
-              await triggerAIAutoPilot();
-            } catch {
-              console.warn('[Scheduler] Auto-pilot failed');
-            }
-          }),
-        { timezone: 'UTC', noOverlap: true }
-      )
-    );
 }
 async function init() {
   if (!ENABLE_AUTOMATION) return;
-  const { rows } = await db.query('SELECT id FROM workspaces');
-  for (const row of rows) await context.run(row.id, start);
-  // Preserve uncertain jobs for human reconciliation instead of publishing duplicates after a restart.
-  await db.query(
-    `UPDATE scheduled_posts SET status='needs_review',data=jsonb_set(data,'{status}','"needs_review"') WHERE status='processing' AND processing_at<now()-interval '15 minutes'`
-  );
-  let busy = false;
-  poller = setInterval(async () => {
-    if (busy) return;
-    busy = true;
-    try {
-      const { rows } = await db.query('SELECT id FROM workspaces');
-      for (const w of rows)
-        await context.run(w.id, async () => {
-          const s = await storage.getSettings();
-          if (!s.autoPostEnabled) return;
-          const item = await storage.getNextDueQueueItem();
-          if (item)
-            try {
-              await processManualQueueItem(item);
-            } catch {
-              console.warn('[Scheduler] Queued post requires review');
-            }
-        });
-    } catch {
-      console.warn('[Scheduler] Poll failed');
-    } finally {
-      busy = false;
-    }
-  }, 15000);
-  poller.unref();
+  stopping = false;
+  await jobs.recover();
+  timer = setInterval(tick, 15000);
+  timer.unref();
+  void tick();
 }
 async function shutdown() {
-  if (poller) clearInterval(poller);
-  for (const job of runners.values()) await job.destroy();
-  runners.clear();
+  stopping = true;
+  if (timer) clearInterval(timer);
+  timer = null;
+  const deadline = Date.now() + 30000;
+  while (busy && Date.now() < deadline)
+    await new Promise((resolve) => setTimeout(resolve, 100));
+}
+async function runNow(topic = '', key) {
+  const job = await enqueueAuto(topic, key);
+  return job.id
+    ? require('./publishing').processJob(job.id, { forceDue: true })
+    : job;
 }
 module.exports = {
-  getStatus,
-  processManualQueueItem,
-  triggerAIAutoPilot,
-  runNow: triggerAIAutoPilot,
-  start,
-  stop,
+  sync,
+  start: sync,
+  stop: sync,
   init,
-  shutdown
+  shutdown,
+  tick,
+  materializeDue,
+  getStatus,
+  enqueueAuto,
+  triggerAIAutoPilot: runNow,
+  runNow,
+  processManualQueueItem: async (item) =>
+    require('./publishing').processJob(item.id, { forceDue: true })
 };

@@ -54,11 +54,11 @@ router.post('/generate', async (req, res, next) => {
 });
 
 // POST /api/ai/autopilot/trigger
-router.post('/autopilot/trigger', async (req, res, next) => {
+router.post('/autopilot/trigger', require('../middleware/idempotency'), async (req, res, next) => {
   const { topic = '' } = req.body;
   try {
-    const result = await scheduler.triggerAIAutoPilot(topic);
-    res.json({ success: true, result });
+    const result = await scheduler.triggerAIAutoPilot(topic,req.operationKey);
+    require('../services/publishing').respond(res,result);
   } catch (err) {
     next(err);
   }

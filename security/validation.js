@@ -26,6 +26,8 @@ const settings = z
     autoPilotEnabled: bool.optional(),
     isDemoMode: bool.optional(),
     cronSchedule: z.string().max(100).optional(),
+    timeZone: short.optional(),
+    autoPilotPageId: short.optional(),
     cronLabel: short.optional(),
     intervalMinutes: z.number().int().min(1).max(1440).optional(),
     selectedCategories: z.array(short).max(30).optional(),
@@ -164,12 +166,20 @@ async function validate(req, res, next) {
   if (!parsed.success)
     return res.status(400).json({ error: 'Invalid request fields or values' });
   req.body = parsed.data;
+  if (req.body.timeZone)
+    require('../services/scheduling').validateZone(req.body.timeZone);
   if (
-    path === '/settings' &&
-    req.body.cronSchedule &&
-    !require('node-cron').validate(req.body.cronSchedule)
+    req.body.autoPilotPageId &&
+    !(await storage.getPageById(req.body.autoPilotPageId))
   )
-    return res.status(400).json({ error: 'Invalid cron schedule' });
+    return res.status(404).json({ error: 'Autopilot page not found' });
+  if (path === '/settings' && (req.body.cronSchedule || req.body.timeZone)) {
+    const current = await storage.getSettings();
+    require('../services/scheduling').nextCron(
+      req.body.cronSchedule || current.cronSchedule || '0 9,14,20 * * *',
+      req.body.timeZone || current.timeZone || 'UTC'
+    );
+  }
   if (req.body.isDemoMode && process.env.NODE_ENV === 'production')
     return res
       .status(400)
@@ -189,6 +199,8 @@ const post = z
     imageUrl: image.nullable().optional(),
     isDemo: z.union([bool, z.enum(['true', 'false'])]).optional(),
     scheduledAt: z.string().max(64).nullable().optional(),
+    scheduledLocal: z.string().max(64).optional(),
+    timeZone: short.optional(),
     facebookPageId: z
       .string()
       .regex(/^\d{1,40}$/)
@@ -206,6 +218,7 @@ async function validatePost(req, res, next) {
   )
     return res.status(400).json({ error: 'Demo mode is disabled' });
   req.body = p.data;
+  require('../services/scheduling').instant(req.body);
   await validateReferences(req.body);
   next();
 }

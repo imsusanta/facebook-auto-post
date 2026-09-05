@@ -9,16 +9,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     history: [],
     queue: [],
     media: [],
-    notifications: [
-      { id: 'notif_1', text: 'Auto-pilot scheduler initialized successfully.', time: 'Just now', type: 'info' },
-      { id: 'notif_2', text: 'Facebook Page automation module initialized.', time: '5m ago', type: 'success' },
-      { id: 'notif_3', text: 'Google Gemini 3.1 Flash AI engine ready for content generation.', time: '10m ago', type: 'success' }
-    ],
+    notifications: [],
     selectedFile: null,
     generatedAiImage: null,
     currentView: 'dashboard',
     calendarViewMode: 'week',
-    calendarDate: new Date(2024, 4, 28), // May 28, 2024 default matching reference design
+    calendarDate: new Date(),
     pages: [],
     activePageId: null,
     activeTemplate: null,
@@ -718,7 +714,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       try {
         const formData = new FormData();
         formData.append('message', text);
-        formData.append('category', composerCategorySelect ? composerCategorySelect.value : 'general');
+        formData.append('facebookPageId', state.activePageId || state.settings.pageId || '');
 
         if (state.selectedFile) {
           formData.append('image', state.selectedFile);
@@ -726,14 +722,17 @@ document.addEventListener('DOMContentLoaded', async () => {
           formData.append('imageUrl', state.generatedAiImage);
         }
 
+        const operationKey=await window.publicationUI.key('/api/post',formData);
         const res = await fetch('/api/post', {
           method: 'POST',
+          headers: {'Idempotency-Key': operationKey},
           body: formData
         });
 
         const result = await res.json();
-        if (result.success) {
-          alert('🎉 Post published successfully to Facebook Page!');
+        window.publicationUI.settled(operationKey,result);
+        if (result.published === true) {
+          alert(window.publicationUI.message(result));
           postMessage.value = '';
           state.selectedFile = null;
           state.generatedAiImage = null;
@@ -750,11 +749,12 @@ document.addEventListener('DOMContentLoaded', async () => {
           fetchStatus();
           switchView('dashboard');
         } else {
-          alert('Publish Failed: ' + (result.error || 'Facebook Graph API error'));
+          alert(window.publicationUI.message(result));
+          await fetchStatus();
         }
       } catch (err) {
         console.error('Publish error:', err);
-        alert('Error publishing post.');
+        alert('Response unavailable. Check the queue first; retrying unchanged content uses the same operation key.');
       } finally {
         publishNowBtn.disabled = false;
         setSafeHTML(publishNowBtn, `<i data-lucide="send" class="w-3.5 h-3.5"></i><span>Publish Now</span>`);
@@ -779,7 +779,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const formData = new FormData();
         formData.append('message', text);
         if (enableScheduleCheck.checked && composerScheduleDateTime.value) {
-          formData.append('scheduledAt', new Date(composerScheduleDateTime.value).toISOString());
+          formData.append('scheduledLocal', composerScheduleDateTime.value);
         }
         if (state.selectedFile) {
           formData.append('image', state.selectedFile);
@@ -787,14 +787,19 @@ document.addEventListener('DOMContentLoaded', async () => {
           formData.append('imageUrl', state.generatedAiImage);
         }
 
+        formData.append('facebookPageId', state.activePageId || state.settings.pageId || '');
+        formData.append('timeZone', state.settings.timeZone || 'UTC');
+        const operationKey=await window.publicationUI.key('/api/queue',formData);
         const res = await fetch('/api/queue', {
           method: 'POST',
+          headers: {'Idempotency-Key': operationKey},
           body: formData
         });
 
         const result = await res.json();
+        window.publicationUI.settled(operationKey,{accepted:result.success===true});
         if (result.success) {
-          alert('✅ Post successfully scheduled and added to queue!');
+          alert(result.replayed ? 'This operation already exists. Check its current status in the queue.' : 'Saved to queue, not yet published. Scheduled delivery requires an active worker and queue automation.');
           postMessage.value = '';
           state.selectedFile = null;
           state.generatedAiImage = null;
@@ -869,7 +874,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Days 1 to totalDays
     for (let day = 1; day <= totalDays; day++) {
       const cell = document.createElement('div');
-      const isToday = day === 28 && month === 4; // May 28 reference day
+      const today=new Date(); const isToday=day===today.getDate()&&month===today.getMonth()&&year===today.getFullYear();
       cell.className = `cal-month-cell ${isToday ? 'bg-indigo-50/40 ring-1 ring-indigo-500' : ''}`;
       
       const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -877,24 +882,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       let contentHtml = `<span class="text-xs font-bold ${isToday ? 'text-indigo-600' : 'text-slate-700'}">${day}</span>`;
 
-      // Check if scheduled posts fall on this day
-      if (day === 28) {
-        contentHtml += `
-          <div class="mt-1.5 p-1 bg-indigo-100 text-indigo-700 text-[10px] font-semibold rounded leading-tight truncate">
-            09:15 AM - New Blog Post
-          </div>
-          <div class="mt-1 p-1 bg-emerald-100 text-emerald-700 text-[10px] font-semibold rounded leading-tight truncate">
-            12:00 PM - Tips & Tricks
-          </div>
-        `;
-      } else if (day === 26) {
-        contentHtml += `<div class="mt-1.5 p-1 bg-sky-100 text-sky-700 text-[10px] font-semibold rounded leading-tight truncate">09:30 AM - Motivation</div>`;
-      } else if (day === 29) {
-        contentHtml += `<div class="mt-1.5 p-1 bg-amber-100 text-amber-700 text-[10px] font-semibold rounded leading-tight truncate">03:00 PM - Product Update</div>`;
-      } else if (day === 30) {
-        contentHtml += `<div class="mt-1.5 p-1 bg-sky-100 text-sky-700 text-[10px] font-semibold rounded leading-tight truncate">06:00 PM - Customer Story</div>`;
-      } else if (day === 31) {
-        contentHtml += `<div class="mt-1.5 p-1 bg-rose-100 text-rose-700 text-[10px] font-semibold rounded leading-tight truncate">12:30 PM - Weekend Offer</div>`;
+      const zone=state.settings.timeZone||'UTC';
+      for(const item of state.queue.filter(q=>q.scheduledAt)){
+        const parts=new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(item.scheduledAt));
+        const get=t=>parts.find(p=>p.type===t).value;
+        if(`${get('year')}-${get('month')}-${get('day')}`===dateStr)contentHtml+=`<div class="mt-1 p-1 text-[10px] rounded truncate">${window.publicationUI.date(item.scheduledAt,zone)} · ${item.status} · ${item.message||'AI post'}</div>`;
       }
 
       setSafeHTML(cell, contentHtml);
@@ -925,7 +917,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         alert(`📅 Scheduled Event: "${cardTitle}"\nStatus: Scheduled to post automatically.`);
         return;
       }
-      const d = cell.getAttribute('data-date') || '2024-05-28';
+      const d = cell.getAttribute('data-date') || new Date().toISOString().slice(0,10);
       const t = cell.getAttribute('data-time') || '09:00';
       openComposer(`${d}T${t}`);
     });
@@ -950,7 +942,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Quick Schedule Form Click
   if (quickScheduleBtn) {
     quickScheduleBtn.addEventListener('click', () => {
-      const d = quickScheduleDateInput.value || '2024-05-28';
+      const d = quickScheduleDateInput.value || new Date().toISOString().slice(0,10);
       const t = quickScheduleTimeInput.value || '09:00';
       openComposer(`${d}T${t}`);
     });
@@ -967,59 +959,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!container) return;
 
     // Sample default items matching the screenshot
-    const defaultItems = [
-      {
-        id: 'mock_1',
-        title: 'Start Your Day with Positive Vibes ☕',
-        snippet: 'Good morning! Make today amazing...',
-        date: '28 May 2024',
-        time: '09:15 AM',
-        thumb: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=120&auto=format&fit=crop&q=80'
-      },
-      {
-        id: 'mock_2',
-        title: '5 Productivity Tips That Actually Work',
-        snippet: 'Boost your productivity with these simple...',
-        date: '28 May 2024',
-        time: '12:00 PM',
-        thumb: 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=120&auto=format&fit=crop&q=80'
-      },
-      {
-        id: 'mock_3',
-        title: 'Exciting News! 🎉',
-        snippet: 'We have something great to share...',
-        date: '28 May 2024',
-        time: '03:00 PM',
-        thumb: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=120&auto=format&fit=crop&q=80'
-      },
-      {
-        id: 'mock_4',
-        title: 'Customer Success Story',
-        snippet: 'See how our solution helped...',
-        date: '28 May 2024',
-        time: '06:00 PM',
-        thumb: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=120&auto=format&fit=crop&q=80'
-      }
-    ];
-
     setSafeHTML(container, '');
-    const pendingItems = state.queue.filter(q => q.status === 'pending');
-    const itemsToDisplay = pendingItems.length > 0 ? pendingItems.slice(0, 4) : defaultItems;
-
-    itemsToDisplay.forEach((item, idx) => {
-      const isReal = !!item.scheduledAt;
-      const title = isReal ? (item.message.slice(0, 36) + (item.message.length > 36 ? '...' : '')) : item.title;
-      const snippet = isReal ? (item.message.slice(36, 80) + '...') : item.snippet;
-      const thumb = (isReal && item.imageUrl) ? item.imageUrl : (item.thumb || '/pariksha_notes_logo.jpg');
-      
-      let dateText = item.date || '28 May 2024';
-      let timeText = item.time || '09:15 AM';
-      if (isReal && item.scheduledAt) {
-        const d = new Date(item.scheduledAt);
-        dateText = `${d.getDate()} ${monthShort[d.getMonth()]} ${d.getFullYear()}`;
-        const h = d.getHours();
-        timeText = `${String(h % 12 || 12).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
-      }
+    const itemsToDisplay=state.queue.filter(q=>q.status!=='completed').slice(0,4);
+    if(!itemsToDisplay.length){container.textContent='No pending publications.';return;}
+    itemsToDisplay.forEach(item=>{
+      const title=(item.message||item.topic||'AI post pending generation').slice(0,60);
+      const snippet='Page: '+item.facebookPageId+' · '+item.status;
+      const thumb=item.imageUrl||'/pariksha_notes_logo.jpg';
+      const dateText=window.publicationUI.date(item.scheduledAt,item.timeZone||state.settings.timeZone||'UTC');
+      const timeText=item.error||'';
 
       const row = document.createElement('div');
       row.className = 'py-3.5 flex items-center justify-between gap-4 group';
@@ -1036,9 +984,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             <div class="text-xs font-medium text-slate-800">${dateText}</div>
             <div class="text-[11px] text-slate-400 mt-0.5">${timeText}</div>
           </div>
-          <span class="bg-blue-50 text-blue-600 border border-blue-100 font-semibold px-3 py-1 rounded-full text-xs">Scheduled</span>
+          <span class="bg-blue-50 text-blue-600 border border-blue-100 font-semibold px-3 py-1 rounded-full text-xs">${item.status}</span>
           <div class="flex items-center gap-1.5 text-slate-400">
-            <button class="queue-edit-btn p-1 hover:text-slate-700 transition" title="Edit Post" data-id="${item.id}"><i data-lucide="edit-2" class="w-4 h-4"></i></button>
+
             <button class="queue-delete-btn p-1 hover:text-rose-600 transition" title="Delete Post" data-id="${item.id}"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
             <button class="queue-publish-btn p-1 hover:text-indigo-600 transition" title="Publish Right Now" data-id="${item.id}"><i data-lucide="send" class="w-4 h-4"></i></button>
           </div>
@@ -1047,34 +995,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       container.appendChild(row);
     });
 
-    // Attach actions
     container.querySelectorAll('.queue-delete-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        const id = btn.getAttribute('data-id');
-        if (confirm('Are you sure you want to remove this scheduled post?')) {
-          if (!id.startsWith('mock_')) {
-            await fetch(`/api/queue/${id}`, { method: 'DELETE' });
-            fetchStatus();
-          } else {
-            btn.closest('.py-3\\.5').remove();
-          }
-        }
+        if (!confirm('Remove this queued post? This does not delete a post already on Facebook.')) return;
+        try { const res=await fetch(`/api/queue/${btn.dataset.id}`,{method:'DELETE'});const result=await res.json();if(!res.ok)alert(result.error||'Could not remove job');await fetchStatus(); }
+        catch { alert('Response unavailable. Refresh the queue.'); }
       });
     });
-
     container.querySelectorAll('.queue-publish-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        const id = btn.getAttribute('data-id');
-        if (confirm('Publish this post immediately to Facebook?')) {
-          if (!id.startsWith('mock_')) {
-            btn.disabled = true;
-            await fetch(`/api/queue/${id}/publish-now`, { method: 'POST' });
-            alert('🚀 Post published immediately to Facebook!');
-            fetchStatus();
-          } else {
-            alert('🚀 Post simulated and published to Facebook!');
-          }
-        }
+        if (!confirm('Publish this post to its recorded Facebook Page now?')) return;
+        btn.disabled=true;
+        try {const res=await fetch(`/api/queue/${btn.dataset.id}/publish-now`,{method:'POST'});alert(window.publicationUI.message(await res.json()));await fetchStatus();}
+        catch {alert('Response unavailable. Check the queue before retrying.');}
+        finally {btn.disabled=false;}
       });
     });
 
@@ -1099,7 +1033,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     state.queue.forEach(item => {
       const isPending = item.status === 'pending';
-      const d = item.scheduledAt ? new Date(item.scheduledAt).toLocaleString() : 'Autopilot Queue';
+      const d = window.publicationUI.date(item.scheduledAt,item.timeZone||state.settings.timeZone||'UTC');
       const card = document.createElement('div');
       card.className = 'py-4 flex flex-wrap items-center justify-between gap-4';
       setSafeHTML(card, `
@@ -1109,10 +1043,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             <h4 class="text-sm font-semibold text-slate-900 line-clamp-1">${item.message || 'Post without text'}</h4>
             <p class="text-xs text-slate-400 mt-1 flex items-center gap-2">
               <span>📅 ${d}</span>
-              <span class="${isPending ? 'text-blue-600 bg-blue-50' : 'text-emerald-600 bg-emerald-50'} px-2 py-0.5 rounded-full font-bold text-[10px]">
+              <span class="${item.status === 'completed' ? 'text-emerald-600 bg-emerald-50' : 'text-blue-600 bg-blue-50'} px-2 py-0.5 rounded-full font-bold text-[10px]">
                 ${(item.status || 'pending').toUpperCase()}
               </span>
             </p>
+            <p class="text-xs text-slate-500 mt-1">Page: ${item.facebookPageId} · Attempts: ${item.attemptCount || 0}/${item.maxAttempts || 5}</p>
+            ${item.error ? `<p class="text-xs text-rose-600 mt-1">${item.errorCode}: ${item.error}</p>` : ''}
+            ${item.nextAttemptAt ? `<p class="text-xs mt-1">Retry: ${window.publicationUI.date(item.nextAttemptAt,item.timeZone||'UTC')}</p>` : ''}
+            ${item.status==='needs_review' ? '<p class="text-xs text-rose-600 mt-1">Check Facebook manually. Do not create a replacement until you confirm whether this was published.</p>' : ''}
           </div>
         </div>
         <div class="flex items-center gap-2">
@@ -1122,6 +1060,7 @@ document.addEventListener('DOMContentLoaded', async () => {
               <span>Publish Now</span>
             </button>
           ` : ''}
+          ${item.status==='failed' && item.attemptCount<item.maxAttempts ? `<button class="fullqueue-retry-btn px-3 py-2 text-xs" data-id="${item.id}">Retry after fixing issue</button>` : ''}
           <button class="fullqueue-delete-btn p-2 text-rose-600 hover:bg-rose-50 rounded-xl transition" data-id="${item.id}" title="Delete">
             <i data-lucide="trash-2" class="w-4 h-4"></i>
           </button>
@@ -1141,13 +1080,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
     });
 
+    container.querySelectorAll('.fullqueue-retry-btn').forEach(btn => btn.addEventListener('click', async () => {
+      btn.disabled=true;
+      try { const r=await fetch(`/api/queue/${btn.dataset.id}/retry`,{method:'POST'}); alert(window.publicationUI.message(await r.json())); await fetchStatus(); }
+      catch { alert('Retry response unavailable. Check the queue.'); } finally {btn.disabled=false;}
+    }));
+
     container.querySelectorAll('.fullqueue-publish-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const id = btn.getAttribute('data-id');
         btn.disabled = true;
         btn.textContent = 'Publishing...';
-        await fetch(`/api/queue/${id}/publish-now`, { method: 'POST' });
-        alert('🚀 Post published directly to Facebook!');
+        try { const r=await fetch(`/api/queue/${id}/publish-now`, { method: 'POST' }); alert(window.publicationUI.message(await r.json())); } catch { alert('Response unavailable. Check the queue before retrying.'); } finally { btn.disabled=false; btn.textContent='Publish Now'; }
         fetchStatus();
         renderFullQueueView();
       });
@@ -1252,7 +1196,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           <div class="relative h-44 w-full bg-slate-900 overflow-hidden">
             <img src="${t.imageUrl}" alt="${t.title}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500 opacity-90">
             <div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent"></div>
-            
+
             <!-- Category Badge -->
             <div class="absolute top-3 left-3 flex items-center gap-2">
               <span class="text-[11px] font-bold px-2.5 py-1 bg-black/70 text-amber-300 rounded-full border border-amber-400/30 backdrop-blur-sm shadow-sm">${t.badge || '📌 টেমপ্লেট'}</span>
@@ -2140,18 +2084,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       triggerAutoPilotNowBtn.textContent = 'Generating & Posting...';
 
       try {
+        const operationKey=await window.publicationUI.key('/api/ai/autopilot/trigger',{topic:'',page:state.settings.autoPilotPageId||state.activePageId});
         const res = await fetch('/api/ai/autopilot/trigger', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': operationKey },
           body: JSON.stringify({ topic: '' })
         });
         const data = await res.json();
-        if (data.success) {
-          alert('🚀 Auto-Pilot Post generated and published to Facebook successfully!');
-          fetchStatus();
-        } else {
-          alert('Auto-Pilot error: ' + (data.error || 'Check settings'));
-        }
+        window.publicationUI.settled(operationKey,data);
+        alert(window.publicationUI.message(data));
+        await fetchStatus();
       } catch (e) {
         alert('Network error triggering Auto-Pilot.');
       } finally {
@@ -2165,7 +2107,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (automationToggleSwitch) {
     automationToggleSwitch.addEventListener('change', async () => {
       try {
-        const res = await fetch('/api/scheduler/toggle', { method: 'POST' });
+        const res = await fetch('/api/automation/toggle', { method: 'POST' });
         const data = await res.json();
         updateAutomationUI(data.autoPostEnabled);
       } catch (err) {
@@ -2240,6 +2182,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  if (pageSettingsPageId) {
+    const label=document.createElement('label'); label.textContent='Scheduling timezone (IANA, e.g. Asia/Kolkata)'; label.className='block text-xs mt-3';
+    const input=document.createElement('input'); input.id='workspaceTimeZone'; input.value='UTC'; input.className='w-full p-2 border rounded-xl';
+    label.appendChild(input); pageSettingsPageId.parentElement.appendChild(label);
+    const targetLabel=document.createElement('label');targetLabel.textContent='Autopilot destination Page ID (independent of page switcher)';targetLabel.className='block text-xs mt-3';const target=document.createElement('input');target.id='autopilotTargetPage';target.className='w-full p-2 border rounded-xl';targetLabel.appendChild(target);pageSettingsPageId.parentElement.appendChild(targetLabel);
+    const hint=document.createElement('p'); hint.id='scheduleZoneHint'; hint.className='text-xs text-slate-500'; composerScheduleDateTime?.parentElement.appendChild(hint);
+  }
+
   if (savePageSettingsBtn) {
     savePageSettingsBtn.addEventListener('click', async () => {
       savePageSettingsBtn.disabled = true;
@@ -2250,7 +2200,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           pageId: pageSettingsPageId.value.trim(),
           accessToken: pageSettingsAccessToken.value.trim(),
           geminiApiKey: pageSettingsGeminiKey.value.trim(),
-          isDemoMode: pageSettingsDemoMode.checked
+          isDemoMode: pageSettingsDemoMode.checked,
+          timeZone: document.getElementById('workspaceTimeZone').value.trim(),
+          ...(document.getElementById('autopilotTargetPage').value.trim()?{autoPilotPageId:document.getElementById('autopilotTargetPage').value.trim()}:{})
         };
 
         const res = await fetch('/api/settings', {
@@ -2265,7 +2217,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           pageSettingsStatusMsg.className = 'p-2.5 rounded-xl text-xs font-medium bg-emerald-50 text-emerald-700';
           pageSettingsStatusMsg.textContent = '✅ Settings saved successfully!';
           fetchStatus();
-        }
+        } else { alert(data.error||'Settings were not saved'); }
       } catch (err) {
         alert('Failed to save settings');
       } finally {
@@ -2718,6 +2670,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       ]);
 
       state.settings = settingsRes || {};
+      const zoneInput=document.getElementById('workspaceTimeZone'); if(zoneInput && document.activeElement!==zoneInput)zoneInput.value=state.settings.timeZone||'UTC';
+      const targetInput=document.getElementById('autopilotTargetPage');if(targetInput&&document.activeElement!==targetInput)targetInput.value=state.settings.autoPilotPageId||state.settings.pageId||'';
+      const zoneHint=document.getElementById('scheduleZoneHint'); if(zoneHint)zoneHint.textContent='Time in '+(state.settings.timeZone||'UTC')+'. Existing jobs keep their original page and time.';
       state.queue = queueRes || [];
       state.history = historyRes || [];
 
@@ -2757,8 +2712,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Update automation switch
       updateAutomationUI(state.settings.autoPostEnabled);
 
-      // Render upcoming queue on dashboard
+      // Render current durable state, not optimistic publication success.
       renderDashboardQueue();
+      if(state.currentView==='queue')renderFullQueueView();
+      renderFullMonthCalendar();
+      if(dashboardWeekContainer){setSafeHTML(dashboardWeekContainer,'');const upcoming=state.queue.filter(q=>q.scheduledAt&&Date.parse(q.scheduledAt)>=Date.now()&&Date.parse(q.scheduledAt)<Date.now()+7*86400000);if(!upcoming.length)dashboardWeekContainer.textContent='No posts scheduled in the next 7 days.';for(const job of upcoming){const row=document.createElement('p');row.className='p-2 border-b';row.textContent=window.publicationUI.date(job.scheduledAt,job.timeZone||'UTC')+' · '+job.status+' · '+(job.message||'AI post');dashboardWeekContainer.appendChild(row);}}
+      if(state.calendarViewMode==='month')renderMonthGrid(monthGridCells);
 
     } catch (err) {
       console.warn('Status sync notice:', err);

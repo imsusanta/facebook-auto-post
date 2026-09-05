@@ -12,10 +12,13 @@
     "db:import-legacy": "node scripts/import-legacy.js",
     "build:css": "tailwindcss -i public/tailwind.input.css -o public/tailwind.css --minify",
     "check": "node scripts/check.js",
-    "db:status": "node scripts/migrate.js --status"
+    "db:status": "node scripts/migrate.js --status",
+    "worker": "node worker.js"
   },
   "dependencies": {
+    "@js-temporal/polyfill": "^0.5.1",
     "axios": "^1.7.9",
+    "cron-parser": "^5.10.0",
     "dompurify": "^3.2.7",
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
@@ -24,7 +27,6 @@
     "ipaddr.js": "^2.2.0",
     "lucide": "^0.468.0",
     "multer": "^2.0.2",
-    "node-cron": "^4.2.1",
     "nodemailer": "^10.0.0",
     "pg": "^8.16.3",
     "sharp": "^0.35.4",

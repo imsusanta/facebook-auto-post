@@ -31,7 +31,7 @@ async function request(
     headers = {}
   } = {}
 ) {
-  const h = { Origin: origin, ...headers };
+  const h = { Origin: origin, ...(method==='POST'&&['/api/post','/api/queue','/api/ai/autopilot/trigger','/api/automation/run-now'].includes(endpoint)?{'Idempotency-Key':crypto.randomUUID()}:{}), ...headers };
   if (cookie) h.Cookie = cookie;
   if (csrf) h['X-CSRF-Token'] = csrf;
   if (body !== undefined && !(body instanceof FormData)) {
@@ -919,6 +919,7 @@ test('security and database integration', async (t) => {
       );
     }
   );
+  await require('./reliability-cases')(t,{account,request,db,storage,context});
   await t.test(
     'request limits work across database-backed counters',
     async () => {
