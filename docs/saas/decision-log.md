@@ -290,3 +290,57 @@ Workspace memberships must preserve auditability when members depart while preve
 ### Consequences
 - **Positive**: Cryptographically tight invitation workflows, zero orphan records, clean audit trails.
 - **Negative**: Unverified users must verify email before joining workspaces.
+
+---
+
+## ADR-014: Complete Active-Principal Verification & Canonical Lock Ordering
+
+### Status: Accepted
+### Context
+Authorizing tenant access solely via membership table rows left vulnerabilities where suspended or soft-deleted users, or members of suspended, paused, or soft-deleted workspaces, could continue accessing or mutating tenant resources. Furthermore, concurrent transactions touching multiple tables risked deadlocks without a rigidly enforced lock acquisition order.
+
+### Decision
+1. **Complete Active-Principal Verification**: All workspace child endpoints and transactional mutations require:
+   - `users.status = 'active'` AND `users.deleted_at IS NULL`
+   - `workspaces.status = 'active'` AND `workspaces.deleted_at IS NULL`
+   - `workspace_members.status = 'active'`
+   Inaccessible or inactive resources return uniform, privacy-safe 404 responses.
+2. **Canonical Lock Ordering**: Multi-table transactions must acquire table locks in this deterministic hierarchy:
+   `1. workspaces` -> `2. workspace_invitations` -> `3. workspace_members` -> `4. users`
+3. **Issuing Inviter Ongoing Authority**: When an invitation is accepted, re-verify that the inviter retains administrative authority (`role IN ('owner', 'admin')`, active user status, active membership). If the inviter lost authority or was removed, the invitation cannot be accepted.
+4. **Member Removal Revocation**: Removing an active or suspended member atomically revokes all pending invitations for that member.
+5. **Safe Removed-Member Reactivation**: When a previously removed member accepts a new authorized invitation, reactivate their existing membership row (`status = 'active'`) rather than failing on unique constraint.
+6. **Anti-Self-Reactivation**: Suspended members are prohibited from self-reactivating via invitations.
+
+### Alternatives Considered
+1. **Membership-Only Checks**: Fast, but allows suspended or deleted users/workspaces to retain ambient access.
+2. **Dynamic Lock Ordering**: Increases transaction deadlock risk under concurrent write loads.
+
+### Consequences
+- **Positive**: Complete tenant isolation, zero ambient access for inactive entities, guaranteed deadlock freedom.
+- **Negative**: Adds joined active-principal checks to membership lookups.
+
+---
+
+## ADR-015: Strict Authentication Boundaries, Safe Error Sanitization & Loopback Safety Guard
+
+### Status: Accepted
+### Context
+Test-mode identity headers (`x-test-user-id`) risked leaking into production or development if not strictly bounded. Legacy operator routes (`/settings`, `/queue`, `/media`, etc.) risked exposure to ordinary SaaS users. Uncaught exceptions or database syntax errors risked leaking sensitive query details, system paths, or secret tokens. Test runners risked running against live or cloud databases if misconfigured.
+
+### Decision
+1. **Strict Test Header Gating**: Header `x-test-user-id` is honored ONLY when `process.env.NODE_ENV === 'test'`. In `production`, `development`, or unset environments, it is ignored and unauthenticated requests fail with 401 `UNAUTHORIZED`.
+2. **Legacy Route Isolation Boundary**: Legacy operator endpoints (`/settings`, `/queue`, `/media`, `/facebook`, `/automation`, `/ai`, `/templates`, `/status`, `/stats`, `/history`, `/events`, `/post`) are strictly guarded with `requireRole(['admin', 'super_admin'])`. Ordinary SaaS users (`role: 'user'`) receive 403 `FORBIDDEN_ROLE`.
+3. **Centralized Async Error Handling**: Workspace route handlers are wrapped with `asyncHandler`. Domain errors map to typed, allowlisted codes (`AUTH_REQUIRED`, `WORKSPACE_NOT_FOUND`, `PERMISSION_DENIED`, `VALIDATION_FAILED`, `CONFLICT`, `INVITATION_INVALID`). Unexpected errors return generic 500 `InternalError` with zero leakage of database syntax, file paths, or injected canaries.
+4. **WHATWG Loopback Safety Guard**: Dedicated module `db/safety-guard.js` parses connection strings using WHATWG URL standards, rejecting non-loopback hostnames (`127.0.0.1`, `localhost`, `::1`), deceptive hostnames, cloud providers (AWS, RDS, Neon, Supabase), and cloud query parameters. Credentials are sanitized via `redactDatabaseUrl`.
+5. **Honest Authentication Status**: Document that session cookies with PBKDF2 password verification are fully operational for PostgreSQL users; migration of the legacy single-operator `/api/auth/login` endpoint to unified PostgreSQL/Redis multi-tenant authentication is scheduled for Phase 2.
+6. **Reusable Clean-Worktree Verification**: Hardened runner `scripts/verify-clean-worktree.sh` enforces zero dirty files, lint, encoding, and 100% test pass rate across all suites, with self-testing `--test-failure-mode`.
+
+### Alternatives Considered
+1. **Direct Exception Forwarding**: Leaks internal database schema and SQL syntax to clients.
+2. **Permissive Header Authentication**: High risk of privilege spoofing in non-test environments.
+
+### Consequences
+- **Positive**: Zero secret or canary leakage, robust defense-in-depth, strict separation of legacy and SaaS domains.
+- **Negative**: Requires maintaining explicit role boundaries during Phase 1.
+

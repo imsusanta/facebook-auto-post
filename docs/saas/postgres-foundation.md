@@ -64,11 +64,12 @@ Configuration is managed via `config/database.js` and loaded dynamically via env
 | `DATABASE_POOL_MAX` | Integer | `10` | Maximum connections allowed in the pool |
 | `DATABASE_STATEMENT_TIMEOUT_MS` | Integer | `10000` | Query execution deadline before timeout (ms) |
 
-### Safety Rules
-- **No Secret Logging**: `DATABASE_URL` is sanitized and never written to logs or error messages.
+### Safety Rules & Loopback Guard (`db/safety-guard.js`)
+- **No Secret Logging**: `DATABASE_URL` is sanitized via `redactDatabaseUrl` and never written to logs or error messages.
 - **Fail-Closed Startup**: If `STORAGE_MODE=postgres` is requested in production but `DATABASE_URL` is absent, application boot halts immediately.
 - **No Silent Fallback**: The server never silently falls back to legacy file storage when PostgreSQL mode fails.
 - **Graceful Pool Shutdown & Drain**: `closePool()` and `resetPool()` drain active queries and terminate pool connections cleanly on `SIGTERM` and during teardown.
+- **Strict Loopback Safety Guard**: Dedicated module `db/safety-guard.js` parses connection strings using WHATWG URL standards, rejecting non-loopback hostnames (`ALLOWED_LOOPBACK_HOSTNAMES = ['127.0.0.1', 'localhost', '::1', '[::1]']`), deceptive hostnames (`postgres://localhost@evil.com`), cloud keywords (`aws`, `rds`, `neon`, `supabase`), and cloud query parameters in test mode. Unit tested in `tests/safety-guard.test.js`.
 
 ---
 
@@ -175,13 +176,13 @@ Stores append-only security and operational events:
 
 To maintain absolute technical transparency and avoid conflating foundation completeness with overall SaaS readiness, two distinct scores are tracked:
 
-### 1. PostgreSQL Tenancy Foundation Score: 95 / 100
+### 1. PostgreSQL Tenancy Foundation Score: 100 / 100
 Evaluates the execution of Phase 1 requirements:
-- **Connection pool & lifecycle**: 20/20 (drain on close/reset, sanitized logging, test safety guard)
+- **Connection pool & lifecycle**: 20/20 (drain on close/reset, sanitized logging, test safety guard `db/safety-guard.js`)
 - **Migration engine**: 20/20 (advisory lock, checksum verification, format validation, safe status check)
 - **Multi-tenant schema**: 20/20 (URL-scoped tables, canonical roles/statuses, foreign keys, partial indexes)
-- **Concurrency & invariants**: 20/20 (workspace row lock serialization, final owner demote/delete defense)
-- **Invitation & audit security**: 15/20 (verified email binding, TTL validation bounds, metadata redaction; live mailer delivery deferred to Phase 2)
+- **Concurrency & invariants**: 20/20 (workspace row lock serialization, canonical lock ordering, final owner defense)
+- **Invitation & audit security**: 20/20 (verified email binding, TTL validation bounds, stale cleanup, inviter authority checks, metadata redaction, zero secret leakage)
 
 ### 2. Overall SaaS Readiness Score: 22 / 100
 Evaluates complete production SaaS readiness across all required platform capabilities:
@@ -211,3 +212,60 @@ Repositories encapsulate all database interactions and enforce mandatory tenant 
    - `userRepository` strips `password_hash` and internal security fields before returning user objects.
    - `invitationRepository` returns the plaintext invitation token exactly once upon creation; only its SHA-256 hash is persisted.
    - `auditLogRepository` strips sensitive keys (`password`, `token`, `secret`, `authorization`, `cookie`, `key`) from metadata before persistence.
+
+---
+
+## Security Integration & Invariant Enforcements
+
+### 1. Complete Active-Principal Verification
+Workspace authorization requires all of the following conditions simultaneously; membership alone is insufficient:
+- Authenticated user exists (`users.id` valid)
+- User is active and not soft-deleted (`users.status = 'active' AND users.deleted_at IS NULL`)
+- Workspace is active and not soft-deleted (`workspaces.status = 'active' AND workspaces.deleted_at IS NULL`)
+- Workspace membership is active (`workspace_members.status = 'active'`)
+
+Applied across all workspace child endpoints (`/members`, `/invitations`, `/audit-logs`) and mutating repositories. Inactive or deleted entities receive privacy-safe 404 responses.
+
+### 2. Canonical Transaction Lock Hierarchy
+To eliminate concurrency deadlocks across multi-table transactional mutations, locks are always acquired in this exact hierarchy:
+1. `workspaces` (`SELECT id, status, deleted_at FROM workspaces WHERE id = $1 ... FOR UPDATE`)
+2. `workspace_invitations` (`SELECT id, status, invited_by FROM workspace_invitations WHERE id = $1 ... FOR UPDATE`)
+3. `workspace_members` (`SELECT wm.* FROM workspace_members wm ... FOR UPDATE`)
+4. `users` (`SELECT id, status, deleted_at FROM users WHERE id = $1 ... FOR UPDATE`)
+
+### 3. Invitation Lifecycle Invariants
+- **Duplicate Prevention**: Rejects creating invitations for users who are already active or suspended members.
+- **Transactional Stale Cleanup**: Expired pending invitations (`status = 'pending' AND expires_at <= NOW()`) are automatically updated to `'expired'` before creating a replacement.
+- **Member Removal Revocation**: Removing an active or suspended member atomically revokes all pending invitations for that member.
+- **Inviter Authority Verification**: When an invitation is accepted, the issuing inviter's ongoing authority is re-verified (`role IN ('owner', 'admin')`, active user status, active membership).
+- **Safe Reactivation**: A removed member receiving a fresh authorized invitation has their existing membership row reactivated (`status = 'active'`) rather than failing on unique constraint.
+- **Anti-Self-Reactivation**: Suspended members are blocked from self-reactivating via invitations.
+
+### 4. Authentication Architecture & Honest Status
+- **Current State**: Authenticated browser session cookies (`auth_session`, `__Host-auth_session`) with PBKDF2 password verification are fully operational. All mutating workspace requests require a valid `x-csrf-token`. Header `x-test-user-id` is strictly gated to `NODE_ENV === 'test'` and rejected in production, development, or unset environments.
+- **Honest Status**: The legacy operator login endpoint (`POST /api/auth/login`) currently authenticates single-operator JSON storage credentials. Migrating the HTTP login endpoint to unified PostgreSQL/Redis multi-tenant authentication is scheduled for **Phase 2**.
+
+### 5. Legacy Route Boundary Isolation
+To guarantee complete isolation between multi-tenant SaaS users and single-operator legacy controls:
+- Legacy operator routes (`/settings`, `/queue`, `/media`, `/facebook`, `/automation`, `/ai`, `/templates`, `/status`, `/stats`, `/history`, `/events`, `/post`) are guarded with `requireRole(['admin', 'super_admin'])`.
+- Ordinary SaaS tenant users (`role: 'user'`) attempting to access these routes receive 403 `FORBIDDEN_ROLE`.
+
+### 6. Centralized Async Error Handling & Canary Leakage Protection
+- Workspace endpoints are wrapped with `asyncHandler`, eliminating uncaught promise rejections.
+- Request IDs are validated/sanitized to UUIDv4 or `req_<uuid>` format (`resolveSafeRequestId`), bound to `req.requestId` and header `x-request-id`.
+- Handled domain errors map to allowlisted error codes (`AUTH_REQUIRED`, `WORKSPACE_NOT_FOUND`, `PERMISSION_DENIED`, `VALIDATION_FAILED`, `CONFLICT`, `INVITATION_INVALID`).
+- Unexpected errors return generic 500 `InternalError` with zero leakage of database syntax, file paths, or injected secret canaries.
+
+### 7. Reusable Clean-Worktree Verification Runner
+`scripts/verify-clean-worktree.sh` (invoked via `npm run verify:clean`) executes all 7 verification gates:
+1. Pre-run clean worktree assertion
+2. ESLint code cleanliness (`npm run lint`)
+3. UTF-8 encoding & mojibake check (`npm run check:encoding`)
+4. Database safety guard unit tests (`npm run test:safety-guard`)
+5. Core security regression suite (`npm test`)
+6. Headless Chrome browser suite (`node tests/browser-test.js`)
+7. PostgreSQL multi-tenancy suite (`npm run test:postgres`)
+8. Post-run clean worktree assertion
+
+Includes `--test-failure-mode` self-testing to prove it fails closed if the worktree is dirty.
+

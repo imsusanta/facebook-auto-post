@@ -17,9 +17,9 @@ The test runner operates under strict fail-closed constraints:
 
 ---
 
-## The 42 Cross-Tenant Test Assertions
+## The 56 Cross-Tenant Test Assertions
 
-The suite executes 42 specific assertions testing tenant isolation, RBAC boundaries, invitation security, and transaction concurrency:
+The suite executes 56 specific assertions testing tenant isolation, RBAC boundaries, invitation security, transaction concurrency, active-principal rules, and authentication integration:
 
 | # | Assertion | Verification Mechanism |
 | :- | :--- | :--- |
@@ -65,19 +65,49 @@ The suite executes 42 specific assertions testing tenant isolation, RBAC boundar
 | 40 | **Production database URL guard** | Rejects cloud, AWS, RDS, Neon, Supabase, or non-local database URLs in test mode. |
 | 41 | **Pool reset lifecycle drain** | `resetPool()` ends active clients cleanly; new pool initializes without client leaks. |
 | 42 | **Migration runner safety guards** | Rejects invalid migration filenames, duplicate version prefixes, and empty files. |
+| 43 | **Complete Active-Principal (Users)** | Suspended and deleted users are rejected across all workspace child endpoints. |
+| 44 | **Complete Active-Principal (Workspaces)** | Suspended/paused and deleted workspaces are rejected across all endpoints. |
+| 45 | **Invitation Lifecycle: Anti-Self-Reactivation** | Suspended members cannot self-reactivate via invitations. |
+| 46 | **Invitation Lifecycle: Member Removal Revocation** | Removing an active or suspended member revokes all pending invitations for that member. |
+| 47 | **Invitation Lifecycle: Removed Member Reactivation** | Removed member can be reactivated with fresh authorized invitation acceptance. |
+| 48 | **Invitation Lifecycle: Stale Invitation Cleanup** | Stale pending invitations are transactionally expired before creating a replacement. |
+| 49 | **Invitation Lifecycle: Inviter Authority Check** | Acceptance fails if issuing inviter lost administrative authority or was removed. |
+| 50 | **Fault Injection: Zero Secret Canary Leakage** | Database failure with injected secret canary returns generic 500 without leaking canary. |
+| 51 | **Real Session & CSRF Authentication** | Workspace read and mutation succeed when authenticated via session cookie and CSRF token. |
+| 52 | **Real Session CSRF Protection** | Rejects mutations without CSRF token or with invalid CSRF token (403 `CSRF_TOKEN_INVALID`). |
+| 53 | **Real Session Cross-Tenant Denial** | Session authenticated as User B cannot read or access Workspace A. |
+| 54 | **Test Identity Header Gating** | Header `x-test-user-id` is rejected with 401 in production, development, or unset environments. |
+| 55 | **Legacy Route Boundary Isolation** | Ordinary SaaS users (`role: 'user'`) receive 403 `FORBIDDEN_ROLE` on legacy operator routes. |
+| 56 | **Atomic Transactional Audit Logging** | Verifies persistent audit records committed inside same transaction for all workspace mutations. |
 
 ---
 
-## Running Integration Tests
+## Running Integration & Security Tests
 
-### Local Execution with Native PostgreSQL
+### 1. PostgreSQL Tenancy Integration Suite (56 Assertions)
 ```bash
+# Local Execution with Native PostgreSQL:
 DATABASE_URL="postgres://susantalohar@127.0.0.1:5432/facebook_auto_poster_test" npm run test:postgres
-```
 
-### Local Execution with Docker Compose
-```bash
+# Or with Docker Compose:
 docker compose -f docker-compose.test.yml up -d
 npm run test:postgres
 docker compose -f docker-compose.test.yml down
 ```
+
+### 2. Database Safety Guard Unit Tests (14 Assertions)
+```bash
+npm run test:safety-guard
+```
+
+### 3. Clean-Worktree End-to-End Verification Runner
+Executes the full 7-step verification gate (lint, encoding, safety guard, unit tests, browser tests, postgres runner, and clean worktree post-run):
+```bash
+npm run verify:clean
+# Or directly:
+bash scripts/verify-clean-worktree.sh
+
+# Self-testing failure mode:
+bash scripts/verify-clean-worktree.sh --test-failure-mode
+```
+
