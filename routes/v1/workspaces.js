@@ -327,7 +327,7 @@ router.post(
   requireWorkspacePermission('members:invite'),
   async (req, res) => {
     const { workspaceId } = req.params;
-    const { email, role } = req.body || {};
+    const { email, role, ttlHours } = req.body || {};
 
     if (!email || typeof email !== 'string' || !email.includes('@')) {
       return res.status(400).json({
@@ -361,7 +361,8 @@ router.post(
         workspaceId,
         email,
         role,
-        invitedBy: req.user.id
+        invitedBy: req.user.id,
+        ttlHours: ttlHours !== undefined ? ttlHours : 72
       });
 
       return res.status(201).json({
@@ -371,6 +372,14 @@ router.post(
         requestId: req.requestId
       });
     } catch (err) {
+      if (err.code === 'CONFLICT' || err.code === '23505' || (err.message && err.message.includes('already exists'))) {
+        return res.status(409).json({
+          error: 'Conflict',
+          message: err.message || 'A pending invitation already exists for this email address.',
+          code: 'CONFLICT',
+          requestId: req.requestId
+        });
+      }
       return res.status(400).json({
         error: 'InvitationFailed',
         message: err.message,

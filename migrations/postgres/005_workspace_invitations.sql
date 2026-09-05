@@ -1,6 +1,7 @@
 -- Migration 005: Workspace Invitations Table
 -- Stores invitation metadata with secure SHA-256 token hashing.
 -- Invitations cannot grant the 'owner' role.
+-- Deleting an inviter retains invitation history for audit (invited_by ON DELETE SET NULL).
 
 CREATE TABLE workspace_invitations (
     id UUID PRIMARY KEY,
@@ -8,7 +9,7 @@ CREATE TABLE workspace_invitations (
     email_normalized VARCHAR(255) NOT NULL,
     role VARCHAR(32) NOT NULL,
     token_hash VARCHAR(64) NOT NULL,
-    invited_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    invited_by UUID REFERENCES users(id) ON DELETE SET NULL,
     status VARCHAR(32) NOT NULL DEFAULT 'pending',
     expires_at TIMESTAMPTZ NOT NULL,
     accepted_at TIMESTAMPTZ,
@@ -19,5 +20,5 @@ CREATE TABLE workspace_invitations (
 );
 
 CREATE INDEX idx_invitations_workspace ON workspace_invitations(workspace_id);
-CREATE INDEX idx_invitations_token_hash ON workspace_invitations(token_hash);
 CREATE INDEX idx_invitations_email ON workspace_invitations(email_normalized);
+CREATE UNIQUE INDEX uq_invitations_active ON workspace_invitations(workspace_id, email_normalized) WHERE status = 'pending';

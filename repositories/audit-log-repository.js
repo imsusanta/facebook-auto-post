@@ -1,7 +1,7 @@
 'use strict';
 
 const { query } = require('../db/index');
-const { generateUuidV7, isValidUuid } = require('../db/uuid');
+const { generateUuid, isValidUuid } = require('../db/uuid');
 
 const SENSITIVE_KEY_REGEX = /password|secret|token|authorization|cookie|key|credential|jwt|bearer/i;
 
@@ -62,7 +62,7 @@ class AuditLogRepository {
       throw new Error('ResourceType is required for audit logging');
     }
 
-    const id = generateUuidV7();
+    const id = generateUuid();
     const cleanMetadata = sanitizeMetadata(metadata);
 
     const sql = `

@@ -1,7 +1,7 @@
 'use strict';
 
 const { query, withTransaction } = require('../db/index');
-const { generateUuidV7, isValidUuid } = require('../db/uuid');
+const { generateUuid, isValidUuid } = require('../db/uuid');
 const membershipRepository = require('./membership-repository');
 
 function normalizeSlug(str) {
@@ -32,7 +32,7 @@ class WorkspaceRepository {
     }
 
     return withTransaction(async (client) => {
-      const workspaceId = generateUuidV7();
+      const workspaceId = generateUuid();
 
       const insertWorkspaceSql = `
         INSERT INTO workspaces (id, name, slug, created_by)
