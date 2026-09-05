@@ -2,6 +2,7 @@
 
 const { query, withTransaction } = require('../db/index');
 const { isValidUuid } = require('../db/uuid');
+const auditLogRepository = require('./audit-log-repository');
 
 const VALID_ROLES = ['owner', 'admin', 'editor', 'reviewer', 'viewer'];
 const VALID_STATUSES = ['active', 'suspended', 'removed'];
@@ -32,8 +33,24 @@ class MembershipRepository {
     if (!isValidUuid(workspaceId) || !isValidUuid(userId)) return null;
 
     const sql = `
-      SELECT * FROM workspace_members
-      WHERE workspace_id = $1 AND user_id = $2 AND status = 'active';
+      SELECT
+        wm.workspace_id,
+        wm.user_id,
+        wm.role,
+        wm.status,
+        wm.joined_at,
+        wm.created_at,
+        wm.updated_at
+      FROM workspace_members wm
+      JOIN users u ON wm.user_id = u.id
+      JOIN workspaces w ON wm.workspace_id = w.id
+      WHERE wm.workspace_id = $1
+        AND wm.user_id = $2
+        AND wm.status = 'active'
+        AND u.status = 'active'
+        AND u.deleted_at IS NULL
+        AND w.status = 'active'
+        AND w.deleted_at IS NULL;
     `;
     const { rows } = client ? await client.query(sql, [workspaceId, userId]) : await query(sql, [workspaceId, userId]);
     return rows[0] || null;
@@ -64,7 +81,12 @@ class MembershipRepository {
         u.email_normalized
       FROM workspace_members wm
       JOIN users u ON u.id = wm.user_id
-      WHERE wm.workspace_id = $1 AND wm.status != 'removed'
+      JOIN workspaces w ON w.id = wm.workspace_id
+      WHERE wm.workspace_id = $1
+        AND wm.status != 'removed'
+        AND u.deleted_at IS NULL
+        AND w.status = 'active'
+        AND w.deleted_at IS NULL
       ORDER BY wm.joined_at ASC;
     `;
     const { rows } = client ? await client.query(sql, [workspaceId]) : await query(sql, [workspaceId]);
@@ -85,9 +107,10 @@ class MembershipRepository {
 
   /**
    * Atomically updates a member's role inside a workspace-locked transaction.
-   * Reloads actor membership from the database to prevent stale role bypass.
+   * Enforces complete active-principal checks and canonical lock ordering.
+   * Atomically records audit event inside transaction.
    */
-  async updateRole({ workspaceId, targetUserId, newRole, actorUserId, actorRole = null }, clientOverride = null) {
+  async updateRole({ workspaceId, targetUserId, newRole, actorUserId, actorRole = null, requestId = null }, clientOverride = null) {
     if (!isValidUuid(workspaceId) || !isValidUuid(targetUserId) || !isValidUuid(actorUserId)) {
       throw new Error('Invalid workspaceId, targetUserId, or actorUserId');
     }
@@ -102,22 +125,25 @@ class MembershipRepository {
     }
 
     const executeInTx = async (client) => {
-      // Lock workspace to serialize concurrent ownership modifications
+      // 1. workspaces lock: verify workspace exists, active, not deleted
       const { rows: wsRows } = await client.query(
-        'SELECT id FROM workspaces WHERE id = $1 FOR UPDATE',
-        [workspaceId]
+        'SELECT id, status, deleted_at FROM workspaces WHERE id = $1 AND status = $2 AND deleted_at IS NULL FOR UPDATE',
+        [workspaceId, 'active']
       );
       if (wsRows.length === 0) {
-        throw new Error('Workspace not found');
+        throw new Error('Workspace not found or inactive');
       }
 
-      // Reload actor membership authoritatively from DB inside transaction
+      // 3. workspace_members lock: reload actor membership and join users
       const { rows: actorRows } = await client.query(
-        'SELECT * FROM workspace_members WHERE workspace_id = $1 AND user_id = $2 FOR UPDATE',
+        `SELECT wm.*, u.status as user_status, u.deleted_at as user_deleted_at
+         FROM workspace_members wm
+         JOIN users u ON wm.user_id = u.id
+         WHERE wm.workspace_id = $1 AND wm.user_id = $2 FOR UPDATE`,
         [workspaceId, actorUserId]
       );
       const actor = actorRows[0];
-      if (!actor || actor.status !== 'active') {
+      if (!actor || actor.status !== 'active' || actor.user_status !== 'active' || actor.user_deleted_at !== null) {
         throw new Error('Actor membership not found or not active in workspace');
       }
       if (actor.role !== 'owner' && actor.role !== 'admin') {
@@ -126,11 +152,14 @@ class MembershipRepository {
 
       // Reload target membership inside transaction
       const { rows: targetRows } = await client.query(
-        'SELECT * FROM workspace_members WHERE workspace_id = $1 AND user_id = $2 FOR UPDATE',
+        `SELECT wm.*, u.status as user_status, u.deleted_at as user_deleted_at
+         FROM workspace_members wm
+         JOIN users u ON wm.user_id = u.id
+         WHERE wm.workspace_id = $1 AND wm.user_id = $2 FOR UPDATE`,
         [workspaceId, targetUserId]
       );
       const target = targetRows[0];
-      if (!target || target.status === 'removed') {
+      if (!target || target.status === 'removed' || target.user_deleted_at !== null) {
         throw new Error('Target member not found in workspace');
       }
 
@@ -147,7 +176,11 @@ class MembershipRepository {
       // 4. Owner cannot be demoted if they are the final active owner
       if (target.role === 'owner' && newRole !== 'owner') {
         const { rows: countRows } = await client.query(
-          "SELECT COUNT(*)::int as count FROM workspace_members WHERE workspace_id = $1 AND role = 'owner' AND status = 'active'",
+          `SELECT COUNT(*)::int as count
+           FROM workspace_members wm
+           JOIN users u ON wm.user_id = u.id
+           WHERE wm.workspace_id = $1 AND wm.role = 'owner' AND wm.status = 'active'
+             AND u.status = 'active' AND u.deleted_at IS NULL`,
           [workspaceId]
         );
         const activeOwners = countRows[0]?.count || 0;
@@ -160,6 +193,22 @@ class MembershipRepository {
         'UPDATE workspace_members SET role = $1, updated_at = NOW() WHERE workspace_id = $2 AND user_id = $3 RETURNING *',
         [newRole, workspaceId, targetUserId]
       );
+
+      // Atomically record audit event inside transaction
+      await auditLogRepository.recordEvent({
+        workspaceId,
+        actorUserId,
+        action: 'membership:role_updated',
+        resourceType: 'membership',
+        resourceId: targetUserId,
+        requestId,
+        metadata: {
+          targetUserId,
+          previousRole: target.role,
+          newRole
+        }
+      }, client);
+
       return updatedRows[0];
     };
 
@@ -168,39 +217,57 @@ class MembershipRepository {
 
   /**
    * Atomically removes a member (status = 'removed') inside a workspace-locked transaction.
-   * Reloads actor membership from the database and protects the final active owner.
+   * Follows canonical lock hierarchy: 1. workspaces -> 2. invitations -> 3. members -> 4. users.
+   * Inactive/pending invitations for the removed user are automatically revoked.
+   * Atomically records audit event inside transaction.
    */
-  async removeMember({ workspaceId, targetUserId, actorUserId, actorRole = null }, clientOverride = null) {
+  async removeMember({ workspaceId, targetUserId, actorUserId, actorRole = null, requestId = null }, clientOverride = null) {
     if (!isValidUuid(workspaceId) || !isValidUuid(targetUserId) || !isValidUuid(actorUserId)) {
       throw new Error('Invalid workspaceId, targetUserId, or actorUserId');
     }
 
     const executeInTx = async (client) => {
-      // Lock workspace to serialize concurrent member removals
+      // 1. Lock workspace: verify active and not deleted
       const { rows: wsRows } = await client.query(
-        'SELECT id FROM workspaces WHERE id = $1 FOR UPDATE',
-        [workspaceId]
+        'SELECT id, status, deleted_at FROM workspaces WHERE id = $1 AND status = $2 AND deleted_at IS NULL FOR UPDATE',
+        [workspaceId, 'active']
       );
       if (wsRows.length === 0) {
-        throw new Error('Workspace not found');
+        throw new Error('Workspace not found or inactive');
       }
 
-      // Reload actor membership authoritatively from DB inside transaction
+      // 2. Lock and revoke obsolete pending invitations for target user in this workspace
+      await client.query(
+        `UPDATE workspace_invitations
+         SET status = 'revoked'
+         WHERE workspace_id = $1
+           AND email_normalized = (SELECT email_normalized FROM users WHERE id = $2)
+           AND status = 'pending'`,
+        [workspaceId, targetUserId]
+      );
+
+      // 3. Lock actor membership and verify active principal
       const { rows: actorRows } = await client.query(
-        'SELECT * FROM workspace_members WHERE workspace_id = $1 AND user_id = $2 FOR UPDATE',
+        `SELECT wm.*, u.status as user_status, u.deleted_at as user_deleted_at
+         FROM workspace_members wm
+         JOIN users u ON wm.user_id = u.id
+         WHERE wm.workspace_id = $1 AND wm.user_id = $2 FOR UPDATE`,
         [workspaceId, actorUserId]
       );
       const actor = actorRows[0];
-      if (!actor || actor.status !== 'active') {
+      if (!actor || actor.status !== 'active' || actor.user_status !== 'active' || actor.user_deleted_at !== null) {
         throw new Error('Actor membership not found or not active in workspace');
       }
       if (actor.role !== 'owner' && actor.role !== 'admin') {
         throw new Error('Actor lacks permission to remove workspace members');
       }
 
-      // Reload target membership inside transaction
+      // Lock target membership inside transaction
       const { rows: targetRows } = await client.query(
-        'SELECT * FROM workspace_members WHERE workspace_id = $1 AND user_id = $2 FOR UPDATE',
+        `SELECT wm.*, u.status as user_status, u.deleted_at as user_deleted_at
+         FROM workspace_members wm
+         JOIN users u ON wm.user_id = u.id
+         WHERE wm.workspace_id = $1 AND wm.user_id = $2 FOR UPDATE`,
         [workspaceId, targetUserId]
       );
       const target = targetRows[0];
@@ -216,7 +283,11 @@ class MembershipRepository {
       // Final owner protection: Cannot remove last remaining active owner
       if (target.role === 'owner') {
         const { rows: countRows } = await client.query(
-          "SELECT COUNT(*)::int as count FROM workspace_members WHERE workspace_id = $1 AND role = 'owner' AND status = 'active'",
+          `SELECT COUNT(*)::int as count
+           FROM workspace_members wm
+           JOIN users u ON wm.user_id = u.id
+           WHERE wm.workspace_id = $1 AND wm.role = 'owner' AND wm.status = 'active'
+             AND u.status = 'active' AND u.deleted_at IS NULL`,
           [workspaceId]
         );
         const activeOwners = countRows[0]?.count || 0;
@@ -230,6 +301,21 @@ class MembershipRepository {
         "UPDATE workspace_members SET status = 'removed', updated_at = NOW() WHERE workspace_id = $1 AND user_id = $2 RETURNING *",
         [workspaceId, targetUserId]
       );
+
+      // Atomically record audit event inside transaction
+      await auditLogRepository.recordEvent({
+        workspaceId,
+        actorUserId,
+        action: 'membership:removed',
+        resourceType: 'membership',
+        resourceId: targetUserId,
+        requestId,
+        metadata: {
+          targetUserId,
+          previousRole: target.role
+        }
+      }, client);
+
       return updatedRows[0];
     };
 
