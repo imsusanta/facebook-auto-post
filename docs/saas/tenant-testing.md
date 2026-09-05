@@ -9,16 +9,17 @@ npm run test:postgres
 ```
 
 The test runner operates under strict fail-closed constraints:
-1. **Network Egress Guard**: Enforces that all outgoing connections are strictly bound to loopback addresses (`127.0.0.1`, `localhost`).
-2. **Production Safety Guard**: Immediately terminates if `DATABASE_URL` targets remote, cloud, or production databases (e.g. AWS, RDS, Supabase, Neon).
-3. **Environment Requirement**: Requires `NODE_ENV=test` and `STORAGE_MODE=postgres`.
-4. **Data Tampering Protection**: Verifies SHA-256 integrity of `data/settings.json` to prove real application files are never touched.
+1. **Isolated Schema Lifecycle**: Every test run generates a unique, randomized PostgreSQL schema (`test_schema_<timestamp>_<random>`), sets `search_path`, executes migrations, and drops the schema with `CASCADE` on teardown unless `DEBUG_RETAIN_TEST_DB=true`. Never pollutes `public` or leaves test remnants.
+2. **Network Egress Guard**: Enforces that all outgoing connections are strictly bound to loopback addresses (`127.0.0.1`, `localhost`).
+3. **Production Safety Guard**: Immediately terminates if `DATABASE_URL` targets remote, cloud, or production databases (e.g. AWS, RDS, Supabase, Neon).
+4. **Environment Requirement**: Requires `NODE_ENV=test` and `STORAGE_MODE=postgres`.
+5. **Data Tampering Protection**: Verifies SHA-256 integrity of `data/settings.json` to prove real application files are never touched.
 
 ---
 
-## The 30 Cross-Tenant Test Assertions
+## The 42 Cross-Tenant Test Assertions
 
-The suite executes 30 specific assertions testing tenant isolation, RBAC boundaries, and transaction safety:
+The suite executes 42 specific assertions testing tenant isolation, RBAC boundaries, invitation security, and transaction concurrency:
 
 | # | Assertion | Verification Mechanism |
 | :- | :--- | :--- |
@@ -51,7 +52,19 @@ The suite executes 30 specific assertions testing tenant isolation, RBAC boundar
 | 27 | **SQL injection payloads remain inert** | Malformed UUIDs fail validation with 400; SQL payloads in strings remain inert. |
 | 28 | **Concurrent slug race handling** | Concurrent workspace creations with same slug yield exactly 1 winner and 1 conflict (23505). |
 | 29 | **Database failure returns sanitized error** | Invalid requests return sanitized JSON codes with zero stack traces or connection strings. |
-| 30 | **Connection pool shuts down cleanly** | `closePool()` terminates all pool connections cleanly without dangling handles. |
+| 30 | **Connection pool is active & operational** | Connection pool remains alive, responsive, and handles active transactional traffic. |
+| 31 | **DELETE member persists status = 'removed'** | Soft removal sets `status = 'removed'`; member record is retained for audit while access is denied. |
+| 32 | **Concurrent final-owner demotion race** | Simultaneous demote/remove requests on dual owners serialize; workspace never has 0 active owners. |
+| 33 | **Stale or spoofed actorRole bypassed** | Authoritative database role reloaded in transaction prevents caller role spoofing. |
+| 34 | **Suspended/removed actor cannot modify** | Inactive or removed member attempting mutations fails with actor not active in workspace. |
+| 35 | **Verified email binding on invitations** | Rejects unverified users, mismatched emails, and suspended accounts; matching verified user succeeds. |
+| 36 | **Concurrent invitation acceptance race** | Two simultaneous accept calls with single-use token produce exactly 1 success and 1 rejection. |
+| 37 | **Duplicate pending invite conflict** | Partial unique index rejects duplicate pending invites with 409 `CONFLICT`. |
+| 38 | **Inviter deletion preserves invitation history** | Foreign key `invited_by ON DELETE SET NULL` preserves invitation history when inviter is deleted. |
+| 39 | **Invitation TTL validation bounds** | Enforces integer between 1 and 168 hours; rejects negative, fractional, or >168 values. |
+| 40 | **Production database URL guard** | Rejects cloud, AWS, RDS, Neon, Supabase, or non-local database URLs in test mode. |
+| 41 | **Pool reset lifecycle drain** | `resetPool()` ends active clients cleanly; new pool initializes without client leaks. |
+| 42 | **Migration runner safety guards** | Rejects invalid migration filenames, duplicate version prefixes, and empty files. |
 
 ---
 

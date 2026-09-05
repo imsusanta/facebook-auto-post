@@ -17,10 +17,11 @@
 | ADR-006 | Page DNA (PR #2) Selective Integration Strategy     | Accepted    |
 | ADR-007 | Two-Phase CLI Migration & PR Review Sequence        | Accepted    |
 | ADR-008 | URL-Scoped Workspace Context & Anti-Body-Tampering  | Accepted    |
-| ADR-009 | PostgreSQL Repository Strategy with Monotonic UUIDs | Accepted    |
+| ADR-009 | PostgreSQL Repository Strategy with Standard UUIDv4 | Accepted    |
 | ADR-010 | One-Workspace-Per-Facebook-Page MVP Rule            | Accepted    |
 | ADR-011 | India-First Billing Deferred to Phase 4             | Accepted    |
 | ADR-012 | Legacy Storage Compatibility Boundary & Dual Mode   | Accepted    |
+| ADR-013 | Canonical Membership Lifecycle & Verified Invites   | Accepted    |
 +---------+-----------------------------------------------------+-------------+
 ```
 
@@ -184,25 +185,26 @@ User authentication (session/cookie/token) establishes identity (`req.user`). Th
 
 ---
 
-## ADR-009: PostgreSQL Repository Strategy with Monotonic UUIDv7
+## ADR-009: PostgreSQL Repository Strategy with Standard UUIDv4
 
 ### Status: Accepted
 ### Context
-Choosing between an Object-Relational Mapper (ORM) like Prisma/TypeORM versus an explicit repository pattern. Furthermore, choosing between auto-incrementing integers, UUIDv4, and UUIDv7.
+Choosing an identifier generation strategy and repository pattern. In-process monotonic counters for UUIDv7 implementations in Node.js introduce vulnerabilities around clock rollback, sequence overflow/wrap under concurrent loads, and reliance on extensions like `pgcrypto` or `uuid-ossp`.
 
 ### Decision
-Adopt a **lean, explicit repository layer using `pg.Pool`** and **application-generated monotonic UUIDv7 IDs (RFC 9562)**:
+Adopt a **lean, explicit repository layer using `pg.Pool`** and **native RFC 4122 UUIDv4 identifiers via Node.js `crypto.randomUUID()`**:
 1. Every repository method strictly uses parameterized queries (`$1, $2, ...`). Zero raw string interpolation is permitted.
 2. Tenant queries must explicitly require `workspaceId` as a mandatory parameter.
-3. UUIDv7 combines 48-bit UNIX millisecond timestamps with monotonic counter sequence bits and cryptographically secure random bits, ensuring optimal B-tree index locality without exposing sequential auto-increment vulnerability.
+3. `crypto.randomUUID()` leverages native OS CSPRNG with zero sequence state, eliminating clock-skew and sequence-wrapping vulnerabilities.
+4. Tables use the native PostgreSQL `UUID` type, eliminating external extension requirements or elevated superuser privileges.
 
 ### Alternatives Considered
-1. **Heavy ORM (Prisma/TypeORM)**: High runtime overhead, complex multi-tenant query interception, and opaque query generation.
-2. **UUIDv4**: Causes severe B-tree fragmentation on large tables due to lack of time-ordering.
+1. **Custom Monotonic Counter UUIDv7**: Prone to sequence wrap on high concurrency bursts and clock rollbacks.
+2. **Heavy ORM (Prisma/TypeORM)**: High runtime overhead, complex multi-tenant query interception, and opaque query generation.
 3. **Sequential Serial/BigInt**: Exposes total entity count and enables resource enumeration attacks.
 
 ### Consequences
-- **Positive**: High database write throughput, zero index bloat, complete control over query plans and transactions.
+- **Positive**: Zero sequence wrap vulnerability, complete extension independence, robust cryptographic randomness, and full control over query execution.
 - **Negative**: Requires authoring explicit SQL queries and repository methods.
 
 ---
@@ -262,3 +264,29 @@ Implement a **controlled runtime mode flag**: `STORAGE_MODE=legacy|postgres`:
 ### Consequences
 - **Positive**: 100% backward compatibility preserved; legacy tests (49/49) pass without modification; zero downtime risk.
 - **Negative**: Requires maintaining dual storage interfaces during the migration transition.
+
+---
+
+## ADR-013: Canonical Membership Lifecycle & Verified Invitation Acceptance
+
+### Status: Accepted
+### Context
+Workspace memberships must preserve auditability when members depart while preventing ambient access. Furthermore, open invitation acceptance without email verification allows unintended users with possession of a forwarded invite link to claim seats.
+
+### Decision
+1. Canonicalize membership statuses to exactly three values:
+   - `active`: Normal workspace access.
+   - `suspended`: Relationship retained, access denied.
+   - `removed`: Historical record retained for audit, access denied. Reactivatable only via explicit invitation or admin action.
+2. Member deletion performs soft removal (`status = 'removed'`), maintaining foreign key referential integrity in audit logs.
+3. Require verified email binding on invitation acceptance: the accepting user's account must have `email_verified_at IS NOT NULL` and `email_normalized` matching the invitation.
+4. Bound invitation TTL strictly between 1 and 168 hours (default 72 hours).
+5. Serialize membership mutations via row-level workspace locking (`SELECT id FROM workspaces WHERE id = $1 FOR UPDATE`).
+
+### Alternatives Considered
+1. **Hard DELETE on Membership Removal**: Breaks audit log foreign key references and eliminates historical attribution.
+2. **Unbound Invitation Acceptance**: Allows seat hijacking via forwarded tokens.
+
+### Consequences
+- **Positive**: Cryptographically tight invitation workflows, zero orphan records, clean audit trails.
+- **Negative**: Unverified users must verify email before joining workspaces.

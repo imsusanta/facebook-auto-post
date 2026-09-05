@@ -69,6 +69,8 @@ npm run db:migrate:status
 Roll back the most recent migration:
 ```bash
 npm run db:rollback
+# In production environment:
+node scripts/migrate.js down --confirm
 ```
 
 ---
@@ -87,7 +89,7 @@ npm run lint
 # 3. Existing unit & security regression test suite (49 assertions)
 npm test
 
-# 4. PostgreSQL cross-tenant isolation suite (30 assertions)
+# 4. PostgreSQL cross-tenant isolation suite (42 assertions)
 npm run test:postgres
 
 # 5. Headless Chrome browser integration suite (19 assertions)
