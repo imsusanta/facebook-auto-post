@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware } = require('../middleware/auth');
+const { authMiddleware, requireRole } = require('../middleware/auth');
 
 const systemRoutes = require('./system.routes');
 const aiRoutes = require('./ai.routes');
@@ -22,19 +22,23 @@ router.use('/auth', authRoutes);
 // Apply API authentication middleware to all subsequent routes
 router.use(authMiddleware);
 
-// Mount Domain Routes
-router.use('/', systemRoutes);
-router.use('/ai', aiRoutes);
-router.use('/automation', automationRoutes);
-router.use('/facebook', facebookRoutes);
-router.use('/', facebookRoutes); // Mounts /post directly under /api/post
-router.use('/queue', queueRoutes);
-router.use('/media', mediaRoutes);
-router.use('/settings', settingsRoutes);
-router.use('/templates', templatesRoutes);
-
-// SaaS Phase 1: Multi-Tenant Workspace Routes
+// SaaS Phase 1: Multi-Tenant Workspace Routes (Scoped to Authenticated User)
 const v1WorkspacesRoutes = require('./v1/workspaces');
 router.use('/v1/workspaces', v1WorkspacesRoutes);
+
+// Legacy Operator / Admin Routes: Guarded against ordinary SaaS tenant users
+const adminOnly = requireRole(['admin', 'super_admin']);
+
+router.use('/ai', adminOnly, aiRoutes);
+router.use('/automation', adminOnly, automationRoutes);
+router.use('/facebook', adminOnly, facebookRoutes);
+router.use('/queue', adminOnly, queueRoutes);
+router.use('/media', adminOnly, mediaRoutes);
+router.use('/settings', adminOnly, settingsRoutes);
+router.use('/templates', adminOnly, templatesRoutes);
+
+// Legacy root-mounted operator routes (/status, /stats, /history, /events, /post)
+router.use('/', adminOnly, systemRoutes);
+router.use('/', adminOnly, facebookRoutes);
 
 module.exports = router;
