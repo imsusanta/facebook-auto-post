@@ -32,15 +32,17 @@ if [[ "${1:-}" == "--test-failure-mode" ]]; then
   echo "========================================================"
   
   TMP_TEST_FILE="${REPO_DIR}/.tmp_failure_test_marker"
+  trap 'rm -f "${TMP_TEST_FILE}"' EXIT
   echo "Creating deliberate dirty file: ${TMP_TEST_FILE}"
   touch "${TMP_TEST_FILE}"
 
   echo "Testing that uncommitted change causes verification failure..."
-  set +e
-  bash "${BASH_SOURCE[0]}" --internal-check > /dev/null 2>&1
-  EXIT_CODE=$?
-  set -e
+  trap '' ERR
+  EXIT_CODE=0
+  bash "${BASH_SOURCE[0]}" --internal-check > /dev/null 2>&1 || EXIT_CODE=$?
+  trap 'echo "[ERROR] Clean-worktree verification failed at line $LINENO" >&2; exit 1' ERR
   rm -f "${TMP_TEST_FILE}"
+  trap - EXIT
 
   if [ ${EXIT_CODE} -ne 0 ]; then
     echo "✅ SUCCESS: Verification runner correctly failed closed (exit code ${EXIT_CODE}) when worktree was dirty."
