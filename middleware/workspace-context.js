@@ -5,8 +5,20 @@ const { isValidUuid } = require('../db/uuid');
 const membershipRepository = require('../repositories/membership-repository');
 const { hasPermission } = require('../security/permissions');
 
+const SAFE_REQUEST_ID_REGEX = /^[-_a-zA-Z0-9.]{1,64}$/;
+
 function generateRequestId() {
-  return `req_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+  return `req_${crypto.randomUUID()}`;
+}
+
+function resolveSafeRequestId(headerValue) {
+  if (typeof headerValue === 'string') {
+    const trimmed = headerValue.trim();
+    if (SAFE_REQUEST_ID_REGEX.test(trimmed)) {
+      return trimmed;
+    }
+  }
+  return generateRequestId();
 }
 
 /**
@@ -14,8 +26,9 @@ function generateRequestId() {
  * verifies active workspace membership, and binds verified context to req.workspaceContext.
  */
 async function resolveWorkspaceContext(req, res, next) {
-  const requestId = req.headers['x-request-id'] || generateRequestId();
+  const requestId = resolveSafeRequestId(req.headers['x-request-id']);
   req.requestId = requestId;
+  res.setHeader('x-request-id', requestId);
 
   // 1. Anti-Tampering: Prohibit client-supplied workspaceId in request bodies
   if (req.body && (req.body.workspaceId !== undefined || req.body.workspace_id !== undefined)) {
@@ -88,6 +101,7 @@ async function resolveWorkspaceContext(req, res, next) {
 
 /**
  * Middleware factory requiring a specific RBAC permission within the active workspace context.
+ * In production, returns generic error message without leaking internal role/permission metadata.
  * @param {string} permission
  */
 function requireWorkspacePermission(permission) {
@@ -105,11 +119,14 @@ function requireWorkspacePermission(permission) {
 
     const { role } = req.workspaceContext;
     if (!hasPermission(role, permission)) {
+      const isProduction = process.env.NODE_ENV === 'production';
       return res.status(403).json({
         error: 'PermissionDenied',
-        message: `Insufficient permissions. Role "${role}" lacks required permission: "${permission}".`,
+        message: isProduction
+          ? 'You do not have permission to perform this action.'
+          : `Insufficient permissions. Role "${role}" lacks required permission: "${permission}".`,
         code: 'PERMISSION_DENIED',
-        permission,
+        ...(!isProduction ? { permission, role } : {}),
         requestId
       });
     }
@@ -121,5 +138,6 @@ function requireWorkspacePermission(permission) {
 module.exports = {
   resolveWorkspaceContext,
   requireWorkspacePermission,
-  generateRequestId
+  generateRequestId,
+  resolveSafeRequestId
 };

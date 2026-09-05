@@ -1,6 +1,6 @@
 'use strict';
 
-const { query } = require('../db/index');
+const { query, withTransaction } = require('../db/index');
 const { isValidUuid } = require('../db/uuid');
 
 const VALID_ROLES = ['owner', 'admin', 'editor', 'reviewer', 'viewer'];
@@ -83,7 +83,11 @@ class MembershipRepository {
     return rows[0]?.count || 0;
   }
 
-  async updateRole({ workspaceId, targetUserId, newRole, actorUserId, actorRole }, client = null) {
+  /**
+   * Atomically updates a member's role inside a workspace-locked transaction.
+   * Reloads actor membership from the database to prevent stale role bypass.
+   */
+  async updateRole({ workspaceId, targetUserId, newRole, actorUserId, actorRole = null }, clientOverride = null) {
     if (!isValidUuid(workspaceId) || !isValidUuid(targetUserId) || !isValidUuid(actorUserId)) {
       throw new Error('Invalid workspaceId, targetUserId, or actorUserId');
     }
@@ -97,70 +101,139 @@ class MembershipRepository {
       throw new Error('Self-elevation prohibited: Users cannot alter their own membership role.');
     }
 
-    // 2. Admin cannot grant owner role
-    if (actorRole !== 'owner' && newRole === 'owner') {
-      throw new Error('Privilege violation: Only an owner can grant the owner role.');
-    }
-
-    const target = await this.getMember({ workspaceId, userId: targetUserId }, client);
-    if (!target) {
-      throw new Error('Target member not found in workspace');
-    }
-
-    // 3. Admin cannot modify an owner's role
-    if (actorRole !== 'owner' && target.role === 'owner') {
-      throw new Error('Privilege violation: Admins cannot alter an owner membership.');
-    }
-
-    // 4. Owner cannot be demoted if they are the final active owner
-    if (target.role === 'owner' && newRole !== 'owner') {
-      const activeOwners = await this.countOwners({ workspaceId }, client);
-      if (activeOwners <= 1) {
-        throw new Error('Safety violation: Cannot demote the final remaining owner without ownership transfer.');
+    const executeInTx = async (client) => {
+      // Lock workspace to serialize concurrent ownership modifications
+      const { rows: wsRows } = await client.query(
+        'SELECT id FROM workspaces WHERE id = $1 FOR UPDATE',
+        [workspaceId]
+      );
+      if (wsRows.length === 0) {
+        throw new Error('Workspace not found');
       }
-    }
 
-    const sql = `
-      UPDATE workspace_members
-      SET role = $1, updated_at = NOW()
-      WHERE workspace_id = $2 AND user_id = $3
-      RETURNING *;
-    `;
-    const { rows } = client ? await client.query(sql, [newRole, workspaceId, targetUserId]) : await query(sql, [newRole, workspaceId, targetUserId]);
-    return rows[0];
+      // Reload actor membership authoritatively from DB inside transaction
+      const { rows: actorRows } = await client.query(
+        'SELECT * FROM workspace_members WHERE workspace_id = $1 AND user_id = $2 FOR UPDATE',
+        [workspaceId, actorUserId]
+      );
+      const actor = actorRows[0];
+      if (!actor || actor.status !== 'active') {
+        throw new Error('Actor membership not found or not active in workspace');
+      }
+      if (actor.role !== 'owner' && actor.role !== 'admin') {
+        throw new Error('Actor lacks permission to update membership roles');
+      }
+
+      // Reload target membership inside transaction
+      const { rows: targetRows } = await client.query(
+        'SELECT * FROM workspace_members WHERE workspace_id = $1 AND user_id = $2 FOR UPDATE',
+        [workspaceId, targetUserId]
+      );
+      const target = targetRows[0];
+      if (!target || target.status === 'removed') {
+        throw new Error('Target member not found in workspace');
+      }
+
+      // 2. Admin cannot grant owner role
+      if (actor.role !== 'owner' && newRole === 'owner') {
+        throw new Error('Privilege violation: Only an owner can grant the owner role.');
+      }
+
+      // 3. Admin cannot modify an owner's role
+      if (actor.role !== 'owner' && target.role === 'owner') {
+        throw new Error('Privilege violation: Admins cannot alter an owner membership.');
+      }
+
+      // 4. Owner cannot be demoted if they are the final active owner
+      if (target.role === 'owner' && newRole !== 'owner') {
+        const { rows: countRows } = await client.query(
+          "SELECT COUNT(*)::int as count FROM workspace_members WHERE workspace_id = $1 AND role = 'owner' AND status = 'active'",
+          [workspaceId]
+        );
+        const activeOwners = countRows[0]?.count || 0;
+        if (activeOwners <= 1) {
+          throw new Error('Safety violation: Cannot demote the final remaining owner without ownership transfer.');
+        }
+      }
+
+      const { rows: updatedRows } = await client.query(
+        'UPDATE workspace_members SET role = $1, updated_at = NOW() WHERE workspace_id = $2 AND user_id = $3 RETURNING *',
+        [newRole, workspaceId, targetUserId]
+      );
+      return updatedRows[0];
+    };
+
+    return clientOverride ? executeInTx(clientOverride) : withTransaction(executeInTx);
   }
 
-  async removeMember({ workspaceId, targetUserId, actorUserId, actorRole }, client = null) {
+  /**
+   * Atomically removes a member (status = 'removed') inside a workspace-locked transaction.
+   * Reloads actor membership from the database and protects the final active owner.
+   */
+  async removeMember({ workspaceId, targetUserId, actorUserId, actorRole = null }, clientOverride = null) {
     if (!isValidUuid(workspaceId) || !isValidUuid(targetUserId) || !isValidUuid(actorUserId)) {
       throw new Error('Invalid workspaceId, targetUserId, or actorUserId');
     }
 
-    const target = await this.getMember({ workspaceId, userId: targetUserId }, client);
-    if (!target || target.status === 'removed') {
-      throw new Error('Target member not found in workspace');
-    }
-
-    // Non-owner cannot remove an owner
-    if (actorRole !== 'owner' && target.role === 'owner') {
-      throw new Error('Privilege violation: Only an owner can remove an owner.');
-    }
-
-    // Final owner protection: Cannot remove last remaining owner
-    if (target.role === 'owner') {
-      const activeOwners = await this.countOwners({ workspaceId }, client);
-      if (activeOwners <= 1) {
-        throw new Error('Safety violation: Cannot remove the final remaining workspace owner.');
+    const executeInTx = async (client) => {
+      // Lock workspace to serialize concurrent member removals
+      const { rows: wsRows } = await client.query(
+        'SELECT id FROM workspaces WHERE id = $1 FOR UPDATE',
+        [workspaceId]
+      );
+      if (wsRows.length === 0) {
+        throw new Error('Workspace not found');
       }
-    }
 
-    const sql = `
-      UPDATE workspace_members
-      SET status = 'removed', updated_at = NOW()
-      WHERE workspace_id = $1 AND user_id = $2
-      RETURNING *;
-    `;
-    const { rows } = client ? await client.query(sql, [workspaceId, targetUserId]) : await query(sql, [workspaceId, targetUserId]);
-    return rows[0];
+      // Reload actor membership authoritatively from DB inside transaction
+      const { rows: actorRows } = await client.query(
+        'SELECT * FROM workspace_members WHERE workspace_id = $1 AND user_id = $2 FOR UPDATE',
+        [workspaceId, actorUserId]
+      );
+      const actor = actorRows[0];
+      if (!actor || actor.status !== 'active') {
+        throw new Error('Actor membership not found or not active in workspace');
+      }
+      if (actor.role !== 'owner' && actor.role !== 'admin') {
+        throw new Error('Actor lacks permission to remove workspace members');
+      }
+
+      // Reload target membership inside transaction
+      const { rows: targetRows } = await client.query(
+        'SELECT * FROM workspace_members WHERE workspace_id = $1 AND user_id = $2 FOR UPDATE',
+        [workspaceId, targetUserId]
+      );
+      const target = targetRows[0];
+      if (!target || target.status === 'removed') {
+        throw new Error('Target member not found in workspace');
+      }
+
+      // Non-owner cannot remove an owner
+      if (actor.role !== 'owner' && target.role === 'owner') {
+        throw new Error('Privilege violation: Only an owner can remove an owner.');
+      }
+
+      // Final owner protection: Cannot remove last remaining active owner
+      if (target.role === 'owner') {
+        const { rows: countRows } = await client.query(
+          "SELECT COUNT(*)::int as count FROM workspace_members WHERE workspace_id = $1 AND role = 'owner' AND status = 'active'",
+          [workspaceId]
+        );
+        const activeOwners = countRows[0]?.count || 0;
+        if (activeOwners <= 1) {
+          throw new Error('Safety violation: Cannot remove the final remaining workspace owner.');
+        }
+      }
+
+      // Apply soft removal: status = 'removed'
+      const { rows: updatedRows } = await client.query(
+        "UPDATE workspace_members SET status = 'removed', updated_at = NOW() WHERE workspace_id = $1 AND user_id = $2 RETURNING *",
+        [workspaceId, targetUserId]
+      );
+      return updatedRows[0];
+    };
+
+    return clientOverride ? executeInTx(clientOverride) : withTransaction(executeInTx);
   }
 }
 
