@@ -24,6 +24,7 @@ const assert = require('node:assert');
 // 1. Enforce Test Environment & Reject Production URLs
 process.env.NODE_ENV = 'test';
 process.env.STORAGE_MODE = 'postgres';
+process.env.AUTH_RATE_LIMIT_KEY = crypto.randomBytes(32).toString('hex');
 
 const { resolveTestDatabaseUrl, assertLeastPrivilegedTestRole } = require('../db/safety-guard');
 const databaseUrl = resolveTestDatabaseUrl();
@@ -687,12 +688,12 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
   it('32. Concurrent demotion/removal of final owner prevents zero-owner state.', async () => {
     const owner1 = await userRepository.createUser({
       email: 'owner1@example.com',
-      password: 'PasswordO1!',
+      password: 'PasswordO1!123',
       emailVerifiedAt: new Date()
     });
     const owner2 = await userRepository.createUser({
       email: 'owner2@example.com',
-      password: 'PasswordO2!',
+      password: 'PasswordO2!123',
       emailVerifiedAt: new Date()
     });
 
@@ -744,7 +745,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
   it('33. Stale or spoofed actorRole cannot bypass database authoritative role.', async () => {
     const freshEditor = await userRepository.createUser({
       email: 'fresh-editor@example.com',
-      password: 'PasswordE1!',
+      password: 'PasswordE1!123',
       emailVerifiedAt: new Date()
     });
     await membershipRepository.addMember({
@@ -771,7 +772,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
   it('34. Suspended or removed actor cannot modify workspace membership.', async () => {
     const actorSuspended = await userRepository.createUser({
       email: 'suspended-actor@example.com',
-      password: 'PasswordS1!',
+      password: 'PasswordS1!123',
       emailVerifiedAt: new Date()
     });
     await membershipRepository.addMember({
@@ -808,7 +809,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
     // Case A: Unverified user with matching email
     const candidateUser = await userRepository.createUser({
       email: targetEmail,
-      password: 'PasswordU1!',
+      password: 'PasswordU1!123',
       emailVerifiedAt: null
     });
     await assert.rejects(
@@ -824,7 +825,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
     // Case B: Verified user with different email
     const differentUser = await userRepository.createUser({
       email: 'different-target@example.com',
-      password: 'PasswordD1!',
+      password: 'PasswordD1!123',
       emailVerifiedAt: new Date()
     });
     await assert.rejects(
@@ -871,7 +872,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
     const raceEmail = 'race-accept@example.com';
     const raceUser = await userRepository.createUser({
       email: raceEmail,
-      password: 'PasswordR1!',
+      password: 'PasswordR1!123',
       emailVerifiedAt: new Date()
     });
     const invite = await invitationRepository.createInvitation({
@@ -936,7 +937,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
   it('38. Inviter deletion retains invitation history with invited_by set to null.', async () => {
     const tempInviter = await userRepository.createUser({
       email: 'temp-inviter@example.com',
-      password: 'PasswordT1!',
+      password: 'PasswordT1!123',
       emailVerifiedAt: new Date()
     });
     await membershipRepository.addMember({ workspaceId: workspaceA.id, userId: tempInviter.id, role: 'admin' });
@@ -1710,7 +1711,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
       assert.strictEqual((await request(baseUrl, { path: `/api/v1/workspaces/${f.ws.id}`, headers: { Cookie: auth.cookie } })).status, 401);
     }
     await query("UPDATE users SET status = 'active', deleted_at = NULL, email_verified_at = NOW() WHERE id = $1", [f.owner.id]);
-    assert.strictEqual((await request(baseUrl, { method: 'POST', path: '/api/auth/login', body: { email: f.owner.email, password: 'wrong' } })).status, 401);
+    assert.strictEqual((await request(baseUrl, { method: 'POST', path: '/api/auth/login', body: { email: f.owner.email, password: 'wrong123' } })).status, 401);
     const rotated = await request(baseUrl, { method: 'POST', path: '/api/auth/login', headers: { Cookie: auth.cookie }, body: { email: f.owner.email, password: 'FixturePassword123!' } });
     assert.strictEqual(rotated.status, 200);
     assert.notStrictEqual(rotated.headers['set-cookie'][0].split(';')[0], auth.cookie);
@@ -1891,4 +1892,5 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
     assert.strictEqual((await auditLogRepository.listByWorkspace({ workspaceId: f.ws.id })).length, beforeLogs);
   });
 
+  require('./identity-lifecycle-cases')({ request: options => request(baseUrl, options), query, getPool, baseUrl: () => baseUrl });
 });

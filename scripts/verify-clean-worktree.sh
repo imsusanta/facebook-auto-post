@@ -70,6 +70,7 @@ unset STORAGE_MODE DEV_AUTH_BYPASS
 node -e "require('./db/safety-guard').resolveTestDatabaseUrl()"
 echo "Verifying committed HEAD: $EXPECTED_HEAD"
 run 'clean dependency installation' npm ci
+run 'dependency audit (high/critical gate; report moderate findings)' npm audit --audit-level=high
 run 'lint' npm run lint
 run 'syntax' bash -c 'set -euo pipefail; while IFS= read -r -d "" file; do node --check "$file" >/dev/null; done < <(git ls-files -z "*.js")'
 run 'encoding' npm run check:encoding

@@ -1,0 +1,70 @@
+name: SaaS verification
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: saas-verification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test_password_only
+          POSTGRES_DB: postgres
+        ports:
+          - '127.0.0.1:5432:5432'
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ALLOW_TEST_DATABASE: 'true'
+      DATABASE_URL: postgres://app_test:test_password_only@127.0.0.1:5432/facebook_auto_poster_test
+      VALIDATION_TIMEOUT_SECONDS: '180'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, verified tag
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5, verified tag
+        with:
+          node-version: '24'
+      - name: Install test dependencies and Chromium
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          npm ci
+          npx --no-install playwright install chromium --with-deps
+          node -e "process.stdout.write('BROWSER_EXECUTABLE=' + require('playwright').chromium.executablePath() + '\\n')" >> "$GITHUB_ENV"
+      - name: Bootstrap dedicated least-privileged test role
+        timeout-minutes: 2
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGPASSWORD: test_password_only
+        run: psql -v ON_ERROR_STOP=1 -d postgres -f scripts/test-db-init.sql
+      - name: Fail on high or critical dependency advisories
+        timeout-minutes: 2
+        run: npm audit --audit-level=high
+      - name: Verify the exact committed HEAD and cleanup
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          export EXPECTED_HEAD="$(git rev-parse HEAD)"
+          npm run verify:clean
+      - name: Confirm no worktree changes
+        if: always()
+        run: |
+          git status --short
+          test -z "$(git status --porcelain)"

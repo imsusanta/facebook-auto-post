@@ -1,3 +1,5 @@
+> Follow-on lifecycle implementation is documented in [identity-lifecycle.md](identity-lifecycle.md). This document records the earlier PR #5 slice; it is not the current account-lifecycle inventory.
+
 # Security and PostgreSQL identity implementation
 
 ## Status
