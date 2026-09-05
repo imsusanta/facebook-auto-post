@@ -9,6 +9,10 @@ const PUBLIC_ERRORS = Object.freeze({
   PERMISSION_DENIED: [403, 'PermissionDenied', 'You do not have permission to perform this action.'],
   VALIDATION_FAILED: [400, 'ValidationFailed', 'The supplied input is invalid.'],
   INVITATION_INVALID: [400, 'InvitationInvalid', 'The invitation is invalid or unavailable.'],
+  OAUTH_STATE_INVALID: [400, 'OAuthStateInvalid', 'OAuth state is invalid, expired, or already consumed.'],
+  OAUTH_EXCHANGE_FAILED: [502, 'OAuthExchangeFailed', 'Failed to exchange authorization code for access token.'],
+  TOKEN_EXPIRED: [401, 'TokenExpired', 'The stored access token has expired or been revoked.'],
+  META_API_ERROR: [502, 'MetaApiError', 'An error occurred communicating with the Meta Graph API.'],
   CONFLICT: [409, 'Conflict', 'A conflict occurred with an existing resource.']
 });
 class PublicError extends Error {

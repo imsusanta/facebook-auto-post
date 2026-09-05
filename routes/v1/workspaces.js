@@ -980,6 +980,160 @@ router.delete(
   })
 );
 
+// --- Facebook / Meta OAuth Integration ---
+
+const facebookOAuth = require('../../services/facebook-oauth');
+
+// GET /:workspaceId/facebook/auth — Initiate OAuth flow
+router.get(
+  '/:workspaceId/facebook/auth',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('facebook:connect'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId } = req.workspaceContext;
+    try {
+      const result = await facebookOAuth.generateAuthUrl({
+        workspaceId,
+        userId: req.user.id
+      });
+      return res.status(200).json({
+        success: true,
+        authUrl: result.authUrl,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+// GET /:workspaceId/facebook/callback — Handle OAuth callback
+router.get(
+  '/:workspaceId/facebook/callback',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('facebook:connect'),
+  asyncHandler(async (req, res) => {
+    const { code, state, error: oauthError } = req.query || {};
+    if (oauthError) {
+      return res.status(400).json({
+        success: false,
+        error: 'OAuthDenied',
+        message: 'User denied the authorization request.',
+        code: 'OAUTH_STATE_INVALID',
+        requestId: req.requestId
+      });
+    }
+    try {
+      const result = await facebookOAuth.handleCallback({ code, state });
+      return res.status(200).json({
+        success: true,
+        pages: result.pages,
+        workspaceId: result.workspaceId,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+// POST /:workspaceId/facebook/connect — Connect selected pages
+router.post(
+  '/:workspaceId/facebook/connect',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('facebook:connect'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId } = req.workspaceContext;
+    const { selectedPages, longLivedUserToken } = req.body || {};
+    try {
+      const connected = await facebookOAuth.connectSelectedPages({
+        workspaceId,
+        userId: req.user.id,
+        selectedPages,
+        longLivedUserToken,
+        requestId: req.requestId
+      });
+      return res.status(201).json({
+        success: true,
+        pages: connected,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+// POST /:workspaceId/facebook/disconnect/:pageId — Disconnect a page
+router.post(
+  '/:workspaceId/facebook/disconnect/:pageId',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('facebook:disconnect'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId } = req.workspaceContext;
+    const { pageId } = req.params;
+    try {
+      const result = await facebookOAuth.disconnectPage({
+        workspaceId,
+        pageId,
+        userId: req.user.id,
+        requestId: req.requestId
+      });
+      return res.status(200).json({
+        success: true,
+        ...result,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+// GET /:workspaceId/facebook/status — Connection status for all pages
+router.get(
+  '/:workspaceId/facebook/status',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('facebook:status'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId } = req.workspaceContext;
+    try {
+      const statuses = await facebookOAuth.getConnectionStatus({ workspaceId });
+      return res.status(200).json({
+        success: true,
+        connections: statuses,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+// POST /:workspaceId/facebook/test-connection/:pageId — Test Graph API connectivity
+router.post(
+  '/:workspaceId/facebook/test-connection/:pageId',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('facebook:status'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId } = req.workspaceContext;
+    const { pageId } = req.params;
+    try {
+      const result = await facebookOAuth.testPageConnection({
+        workspaceId,
+        pageId
+      });
+      return res.status(200).json({
+        success: true,
+        ...result,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
 // Fallthrough error handler for unhandled errors
 router.use((err, req, res, next) => {
   if (res.headersSent) {

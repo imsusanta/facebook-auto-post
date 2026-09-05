@@ -606,8 +606,10 @@ module.exports = function registerTenantDomainCases(ctx) {
     describe('Migration 010 Down & Up Reapplication', () => {
       it('Migration 010 down drops all tenant domain tables cleanly and 010 up re-creates them idempotently in an isolated schema', async () => {
         const migSchema = 'test_mig_010_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
-        const { getPool } = require('../db/index');
-        const pool = getPool();
+        const { Pool } = require('pg');
+        const { getDatabaseConfig } = require('../config/database');
+        const config = getDatabaseConfig();
+        const pool = new Pool({ connectionString: config.connectionString });
         const client = await pool.connect();
 
         try {
@@ -615,7 +617,7 @@ module.exports = function registerTenantDomainCases(ctx) {
           await client.query(`SET search_path TO "${migSchema}", public;`);
 
           const migrator = require('../db/migrator');
-          const files = migrator.loadMigrationFiles();
+          const files = migrator.loadMigrationFiles().filter(f => f.version <= '010');
 
           for (const f of files) {
             await client.query(f.sql);
@@ -647,6 +649,7 @@ module.exports = function registerTenantDomainCases(ctx) {
             await client.query(`DROP SCHEMA IF EXISTS "${migSchema}" CASCADE;`);
           } catch (_) {}
           client.release();
+          await pool.end();
         }
       });
     });
