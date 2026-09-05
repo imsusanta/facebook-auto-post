@@ -7,15 +7,17 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: test_password_only
-      POSTGRES_DB: facebook_auto_poster_test
+      POSTGRES_DB: postgres
     ports:
       # Strictly bound to loopback interface only
       - "127.0.0.1:5432:5432"
+    volumes:
+      - ./scripts/test-db-init.sql:/docker-entrypoint-initdb.d/10-test-role.sql:ro
     tmpfs:
       # Run entirely in-memory for ephemeral, fast testing without disk persistence
       - /var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d facebook_auto_poster_test"]
+      test: ["CMD-SHELL", "pg_isready -U app_test -d facebook_auto_poster_test"]
       interval: 2s
       timeout: 2s
       retries: 10

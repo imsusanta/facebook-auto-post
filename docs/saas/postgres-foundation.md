@@ -1,3 +1,5 @@
+> **Current status:** CORRECTIONS INCOMPLETE. This is historical Phase 1 architecture documentation. Current implementation, test boundaries and deferred work are in [security/identity pass](security-identity-pass.md). Production SaaS auth/workspace exposure remains blocked.
+
 # PostgreSQL Multi-Tenancy Foundation (Phase 1)
 
 ## Overview
@@ -174,32 +176,7 @@ Stores append-only security and operational events:
 
 ## Architectural Correctness & Readiness Scoring
 
-To maintain absolute technical transparency and avoid conflating foundation completeness with overall SaaS readiness, two distinct scores are tracked:
-
-### 1. PostgreSQL Tenancy Foundation Score: 100 / 100
-Evaluates the execution of Phase 1 requirements:
-- **Connection pool & lifecycle**: 20/20 (drain on close/reset, sanitized logging, test safety guard `db/safety-guard.js`)
-- **Migration engine**: 20/20 (advisory lock, checksum verification, format validation, safe status check)
-- **Multi-tenant schema**: 20/20 (URL-scoped tables, canonical roles/statuses, foreign keys, partial indexes)
-- **Concurrency & invariants**: 20/20 (workspace row lock serialization, canonical lock ordering, final owner defense)
-- **Invitation & audit security**: 20/20 (verified email binding, TTL validation bounds, stale cleanup, inviter authority checks, metadata redaction, zero secret leakage)
-
-### 2. Overall SaaS Readiness Score: 22 / 100
-Evaluates complete production SaaS readiness across all required platform capabilities:
-
-| Dimension | Max Points | Current Score | Status / Gaps |
-| :--- | :---: | :---: | :--- |
-| **Tenant Isolation** | 20 | 7 | URL-scoped context & PostgreSQL schema operational; Redis isolation & worker scoping pending. |
-| **Identity & Authorization** | 15 | 4 | Canonical RBAC & transactional invariant guards operational; Redis sessions & multi-user auth pending. |
-| **Persistence & Data Integrity** | 15 | 5 | Phase 1 PostgreSQL foundation complete; production backup, point-in-time recovery, and read replicas pending. |
-| **Job Durability** | 15 | 0 | Legacy in-memory cron still active; BullMQ + Redis worker fleet not yet implemented. |
-| **Secret Management** | 10 | 3 | Env-based secrets with loopback & log redaction; KMS/envelope encryption for Page tokens pending. |
-| **Facebook OAuth Readiness** | 10 | 0 | Static Page tokens; OAuth authorization code flow not yet implemented. |
-| **Billing & Entitlement** | 10 | 0 | Deferred to Phase 4 (Razorpay India-first integration). |
-| **Operations & Compliance** | 5 | 3 | Append-only audit logs & sanitized error codes operational; compliance runbooks pending. |
-| **Total** | **100** | **22** | **PostgreSQL Tenancy Foundation complete; multi-tenant runtime in progress.** |
-
----
+Readiness scoring has been retired. Use the evidence-based [delivery gates](delivery-plan.md); this foundation is not a completed SaaS product.
 
 ## Repository Layer
 

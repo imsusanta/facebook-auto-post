@@ -1,3 +1,7 @@
+# Historical Phase 1 test inventory
+
+> Superseded for current execution/status by [security/identity pass](security-identity-pass.md) and [local development](local-development.md). The old table below is historical, not current coverage proof.
+
 # PostgreSQL Multi-Tenant Integration & Isolation Testing
 
 ## Overview
@@ -73,9 +77,9 @@ The suite executes 56 specific assertions testing tenant isolation, RBAC boundar
 | 48 | **Invitation Lifecycle: Stale Invitation Cleanup** | Stale pending invitations are transactionally expired before creating a replacement. |
 | 49 | **Invitation Lifecycle: Inviter Authority Check** | Acceptance fails if issuing inviter lost administrative authority or was removed. |
 | 50 | **Fault Injection: Zero Secret Canary Leakage** | Database failure with injected secret canary returns generic 500 without leaking canary. |
-| 51 | **Real Session & CSRF Authentication** | Workspace read and mutation succeed when authenticated via session cookie and CSRF token. |
-| 52 | **Real Session CSRF Protection** | Rejects mutations without CSRF token or with invalid CSRF token (403 `CSRF_TOKEN_INVALID`). |
-| 53 | **Real Session Cross-Tenant Denial** | Session authenticated as User B cannot read or access Workspace A. |
+| 51 | **Injected Session & CSRF Middleware** | Workspace read and mutation succeed when authenticated via session cookie and CSRF token. |
+| 52 | **Injected Session CSRF Protection** | Rejects mutations without CSRF token or with invalid CSRF token (403 `CSRF_TOKEN_INVALID`). |
+| 53 | **Injected Session Cross-Tenant Denial** | Session authenticated as User B cannot read or access Workspace A. |
 | 54 | **Test Identity Header Gating** | Header `x-test-user-id` is rejected with 401 in production, development, or unset environments. |
 | 55 | **Legacy Route Boundary Isolation** | Ordinary SaaS users (`role: 'user'`) receive 403 `FORBIDDEN_ROLE` on legacy operator routes. |
 | 56 | **Atomic Transactional Audit Logging** | Verifies persistent audit records committed inside same transaction for all workspace mutations. |
@@ -87,7 +91,7 @@ The suite executes 56 specific assertions testing tenant isolation, RBAC boundar
 ### 1. PostgreSQL Tenancy Integration Suite (56 Assertions)
 ```bash
 # Local Execution with Native PostgreSQL:
-DATABASE_URL="postgres://susantalohar@127.0.0.1:5432/facebook_auto_poster_test" npm run test:postgres
+ALLOW_TEST_DATABASE=true NODE_ENV=test DATABASE_URL="postgres://app_test:test_password_only@127.0.0.1:5432/facebook_auto_poster_test" npm run test:postgres
 
 # Or with Docker Compose:
 docker compose -f docker-compose.test.yml up -d
@@ -103,7 +107,7 @@ npm run test:safety-guard
 ### 3. Clean-Worktree End-to-End Verification Runner
 Executes the full 7-step verification gate (lint, encoding, safety guard, unit tests, browser tests, postgres runner, and clean worktree post-run):
 ```bash
-npm run verify:clean
+EXPECTED_HEAD="$(git rev-parse HEAD)" ALLOW_TEST_DATABASE=true npm run verify:clean
 # Or directly:
 bash scripts/verify-clean-worktree.sh
 

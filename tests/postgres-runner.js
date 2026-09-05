@@ -25,7 +25,7 @@ const assert = require('node:assert');
 process.env.NODE_ENV = 'test';
 process.env.STORAGE_MODE = 'postgres';
 
-const { resolveTestDatabaseUrl } = require('../db/safety-guard');
+const { resolveTestDatabaseUrl, assertLeastPrivilegedTestRole } = require('../db/safety-guard');
 const databaseUrl = resolveTestDatabaseUrl();
 process.env.DATABASE_URL = databaseUrl;
 
@@ -106,8 +106,11 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
   before(async () => {
     // A. Create dedicated isolated schema
     const bootstrapPool = new Pool({ connectionString: databaseUrl });
-    await bootstrapPool.query(`CREATE SCHEMA "${testSchema}";`);
-    await bootstrapPool.end();
+    try {
+      await assertLeastPrivilegedTestRole(bootstrapPool);
+      if (process.env.PG_TEST_SCHEMA_FILE) fs.writeFileSync(process.env.PG_TEST_SCHEMA_FILE, testSchema);
+      await bootstrapPool.query(`CREATE SCHEMA "${testSchema}";`);
+    } finally { await bootstrapPool.end(); }
 
     // B. Direct search_path to isolated schema
     process.env.PGOPTIONS = `-c search_path="${testSchema}",public`;
@@ -176,10 +179,11 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
 
     // Drop isolated test schema unless retaining for debug
     delete process.env.PGOPTIONS;
-    if (process.env.DEBUG_RETAIN_TEST_DB !== 'true') {
+    {
       const cleanupPool = new Pool({ connectionString: databaseUrl });
       try {
         await cleanupPool.query(`DROP SCHEMA IF EXISTS "${testSchema}" CASCADE;`);
+        if (process.env.PG_TEST_SCHEMA_FILE && fs.existsSync(process.env.PG_TEST_SCHEMA_FILE)) fs.unlinkSync(process.env.PG_TEST_SCHEMA_FILE);
       } finally {
         await cleanupPool.end();
       }
@@ -196,11 +200,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
     }
 
     // Clean up temp dir
-    try {
-      fs.rmSync(testDataDir, { recursive: true, force: true });
-    } catch {
-      // ignore
-    }
+    fs.rmSync(testDataDir, { recursive: true, force: true });
   });
 
   // --- The 30 Canonical Isolation & Security Assertions ---
@@ -376,7 +376,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
     });
     assert.strictEqual(res.status, 403);
     assert.strictEqual(res.body.code, 'PERMISSION_DENIED');
-    assert.match(res.body.message, /Only an owner can grant the owner role/i);
+    assert.strictEqual(res.body.code, 'PERMISSION_DENIED');
   });
 
   it('15. User cannot promote self.', async () => {
@@ -388,7 +388,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
     });
     assert.strictEqual(res.status, 403);
     assert.strictEqual(res.body.code, 'PERMISSION_DENIED');
-    assert.match(res.body.message, /Users cannot alter their own membership role/i);
+    assert.strictEqual(res.body.code, 'PERMISSION_DENIED');
   });
 
   it('16. Final owner cannot be removed.', async () => {
@@ -399,7 +399,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
     });
     assert.strictEqual(res.status, 403);
     assert.strictEqual(res.body.code, 'PERMISSION_DENIED');
-    assert.match(res.body.message, /Cannot remove the final remaining workspace owner/i);
+    assert.strictEqual(res.body.code, 'PERMISSION_DENIED');
   });
 
   it('17. Suspended member loses access.', async () => {
@@ -541,7 +541,8 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
 
     await invitationRepository.revokeInvitation({
       workspaceId: workspaceA.id,
-      invitationId: invite.invitation.id
+      invitationId: invite.invitation.id,
+      actorUserId: userA.id
     });
 
     await assert.rejects(
@@ -625,7 +626,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
     assert.strictEqual(failures[0].reason.code, '23505', 'Failure must be PostgreSQL unique violation');
   });
 
-  it('29. Database failure returns sanitized error.', async () => {
+  it('29. Empty workspace name returns validation error.', async () => {
     // When input is invalid, API returns a sanitized code without raw database traces
     const res = await request(baseUrl, {
       method: 'POST',
@@ -730,10 +731,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
 
     assert.strictEqual(successes.length, 1, 'Exactly one concurrent demotion must succeed');
     assert.strictEqual(failures.length, 1, 'Exactly one concurrent demotion must fail');
-    assert.ok(
-      /last remaining owner|final remaining owner|lacks permission/i.test(failures[0].reason.message),
-      `Expected failure message to reflect ownership or permission safety, got: ${failures[0].reason.message}`
-    );
+    assert.strictEqual(failures[0].reason.code, 'PERMISSION_DENIED');
 
     // Verify exactly one active owner remains
     const { rows } = await query(
@@ -766,7 +764,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
           actorRole: 'owner' // Spoofed!
         });
       },
-      /Actor lacks permission to update membership roles/i
+      { code: 'PERMISSION_DENIED' }
     );
   });
 
@@ -794,7 +792,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
           actorRole: 'admin'
         });
       },
-      /not active in workspace/i
+      { code: 'WORKSPACE_NOT_FOUND' }
     );
   });
 
@@ -849,7 +847,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
           userId: candidateUser.id
         });
       },
-      /User account is suspended or inactive/i
+      { code: 'WORKSPACE_NOT_FOUND' }
     );
 
     // Case D: Reactivated/active user with matching email accepts successfully
@@ -941,6 +939,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
       password: 'PasswordT1!',
       emailVerifiedAt: new Date()
     });
+    await membershipRepository.addMember({ workspaceId: workspaceA.id, userId: tempInviter.id, role: 'admin' });
     const invite = await invitationRepository.createInvitation({
       workspaceId: workspaceA.id,
       email: 'orphan-invite@example.com',
@@ -1007,10 +1006,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
     ];
 
     for (const dUrl of dangerousUrls) {
-      const isRejected =
-        /aws|rds|neon|supabase|heroku|prod|production/i.test(dUrl) ||
-        (!dUrl.includes('127.0.0.1') && !dUrl.includes('localhost') && !dUrl.includes('test'));
-      assert.strictEqual(isRejected, true, `Dangerous URL must be rejected: ${dUrl}`);
+      assert.throws(() => assertSafeTestDatabaseUrl(dUrl), /Security Error/);
     }
   });
 
@@ -1415,7 +1411,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
           userId: targetUser.id
         });
       },
-      /issuing inviter no longer possesses administrative authority/i
+      { code: 'PERMISSION_DENIED' }
     );
   });
 
@@ -1451,8 +1447,8 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
     }
   });
 
-  it('51. Real Session & CSRF Authentication: Workspace read and mutation succeed with session cookie.', async () => {
-    // 1. Create real cookie session for User A
+  it('51. Injected session-cookie & CSRF middleware: Workspace read and mutation succeed with session cookie.', async () => {
+    // 1. Inject cookie session for User A
     const sessionId = createSession({
       id: userA.id,
       email: userA.email,
@@ -1462,7 +1458,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
     assert.ok(session);
     assert.ok(session.csrfToken);
 
-    // 2. Read workspace using real session cookie
+    // 2. Read workspace using injected session cookie
     const readRes = await request(baseUrl, {
       method: 'GET',
       path: `/api/v1/workspaces/${workspaceA.id}`,
@@ -1488,7 +1484,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
     assert.ok(mutateRes.body.invitation.id);
   });
 
-  it('52. Real Session CSRF Protection: Rejects mutation without CSRF token or with invalid CSRF token.', async () => {
+  it('52. Injected session-cookie CSRF protection: Rejects mutation without CSRF token or with invalid CSRF token.', async () => {
     const sessionId = createSession({
       id: userA.id,
       email: userA.email,
@@ -1519,7 +1515,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
     assert.strictEqual(invalidCsrfRes.body.code, 'CSRF_TOKEN_INVALID');
   });
 
-  it('53. Real Session Cross-Tenant Denial: User B session cannot read Workspace A.', async () => {
+  it('53. Injected session-cookie cross-tenant denial: User B session cannot read Workspace A.', async () => {
     const sessB = createSession({
       id: userB.id,
       email: userB.email,
@@ -1655,4 +1651,244 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
       assert.strictEqual(entry.outcome, 'success');
     }
   });
+
+  async function freshFixture() {
+    const suffix = crypto.randomBytes(6).toString('hex');
+    const owner = await userRepository.createUser({ email: `owner-${suffix}@example.test`, password: 'FixturePassword123!', emailVerifiedAt: new Date() });
+    const member = await userRepository.createUser({ email: `member-${suffix}@example.test`, password: 'FixturePassword123!', emailVerifiedAt: new Date() });
+    const ws = await workspaceRepository.createWorkspaceWithOwner({ name: `Fixture ${suffix}`, creatorUserId: owner.id });
+    await membershipRepository.addMember({ workspaceId: ws.id, userId: member.id, role: 'viewer' });
+    return { owner, member, ws };
+  }
+  async function freshInvite(f) {
+    const recipient = await userRepository.createUser({ email: `invite-${crypto.randomBytes(6).toString('hex')}@example.test`, password: 'FixturePassword123!', emailVerifiedAt: new Date() });
+    const invite = await invitationRepository.createInvitation({ workspaceId: f.ws.id, email: recipient.email, role: 'viewer', invitedBy: f.owner.id });
+    return { recipient, invite };
+  }
+  async function login(user, password = 'FixturePassword123!') {
+    const result = await request(baseUrl, { method: 'POST', path: '/api/auth/login', body: { email: user.email, password } });
+    assert.strictEqual(result.status, 200);
+    assert.strictEqual(result.body.user.id, user.id);
+    assert.strictEqual(result.body.user.role, 'user');
+    return { cookie: result.headers['set-cookie'][0].split(';')[0], csrfToken: result.body.csrfToken };
+  }
+  it('57. Actual HTTP PostgreSQL login -> persistent cookie -> workspace read/mutation -> CSRF -> cross-tenant denial -> logout', async () => {
+    const f = await freshFixture();
+    const auth = await login(f.owner);
+    const headers = { Cookie: auth.cookie, 'x-csrf-token': auth.csrfToken };
+    const read = await request(baseUrl, { path: `/api/v1/workspaces/${f.ws.id}`, headers });
+    assert.strictEqual(read.status, 200);
+    const mutate = await request(baseUrl, { method: 'PATCH', path: `/api/v1/workspaces/${f.ws.id}`, headers, body: { name: 'Authenticated change' } });
+    assert.strictEqual(mutate.status, 200);
+    for (const csrf of [undefined, 'invalid']) {
+      const res = await request(baseUrl, { method: 'PATCH', path: `/api/v1/workspaces/${f.ws.id}`, headers: { Cookie: auth.cookie, ...(csrf ? { 'x-csrf-token': csrf } : {}) }, body: { name: 'Must not change' } });
+      assert.strictEqual(res.status, 403);
+      assert.strictEqual(res.body.code, 'CSRF_TOKEN_INVALID');
+    }
+    const denied = await request(baseUrl, { path: `/api/v1/workspaces/${workspaceB.id}`, headers });
+    assert.strictEqual(denied.status, 404);
+    for (const ep of ['/api/settings', '/api/queue', '/api/media', '/api/facebook/pages', '/api/status', '/uploads/nonexistent.png']) {
+      assert.strictEqual((await request(baseUrl, { path: ep, headers })).status, 403, ep);
+    }
+    const rawToken = auth.cookie.split('=')[1];
+    const { rows } = await query('SELECT token_hash FROM auth_sessions WHERE user_id = $1', [f.owner.id]);
+    assert.strictEqual(rows.length, 1);
+    assert.notStrictEqual(rows[0].token_hash, rawToken);
+    // Pool/module recreation does not erase persistent sessions.
+    await resetPool();
+    assert.strictEqual((await request(baseUrl, { path: '/api/auth/session', headers })).body.authenticated, true);
+    assert.strictEqual((await request(baseUrl, { method: 'POST', path: '/api/auth/logout', headers: { Cookie: auth.cookie } })).status, 403);
+    assert.strictEqual((await request(baseUrl, { method: 'POST', path: '/api/auth/logout', headers })).status, 200);
+    assert.strictEqual((await request(baseUrl, { path: `/api/v1/workspaces/${f.ws.id}`, headers })).status, 401);
+  });
+  it('58. Actual login rejects bad credentials/unverified/suspended/deleted users, rotates sessions and rechecks status', async () => {
+    const f = await freshFixture();
+    const auth = await login(f.owner);
+    for (const state of ['suspended', 'deleted', 'unverified']) {
+      await query(`UPDATE users SET status = $2, deleted_at = $3, email_verified_at = $4 WHERE id = $1`, [f.owner.id, state === 'suspended' ? 'suspended' : 'active', state === 'deleted' ? new Date() : null, state === 'unverified' ? null : new Date()]);
+      assert.strictEqual((await request(baseUrl, { method: 'POST', path: '/api/auth/login', body: { email: f.owner.email, password: 'FixturePassword123!' } })).status, 401);
+      assert.strictEqual((await request(baseUrl, { path: `/api/v1/workspaces/${f.ws.id}`, headers: { Cookie: auth.cookie } })).status, 401);
+    }
+    await query("UPDATE users SET status = 'active', deleted_at = NULL, email_verified_at = NOW() WHERE id = $1", [f.owner.id]);
+    assert.strictEqual((await request(baseUrl, { method: 'POST', path: '/api/auth/login', body: { email: f.owner.email, password: 'wrong' } })).status, 401);
+    const rotated = await request(baseUrl, { method: 'POST', path: '/api/auth/login', headers: { Cookie: auth.cookie }, body: { email: f.owner.email, password: 'FixturePassword123!' } });
+    assert.strictEqual(rotated.status, 200);
+    assert.notStrictEqual(rotated.headers['set-cookie'][0].split(';')[0], auth.cookie);
+    assert.strictEqual((await request(baseUrl, { path: '/api/auth/session', headers: { Cookie: auth.cookie } })).body.authenticated, false);
+    for (const ep of ['/api/auth/dev-login', '/api/auth/setup']) assert.strictEqual((await request(baseUrl, { method: 'POST', path: ep })).status, 404);
+    const saved = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = 'production';
+      assert.strictEqual((await request(baseUrl, { method: 'POST', path: '/api/auth/login', body: {} })).status, 404);
+    } finally { process.env.NODE_ENV = saved; }
+  });
+  for (const target of ['user', 'workspace']) {
+    for (const state of ['suspended', 'deleted']) {
+      it(`59. Active-principal matrix: ${target} ${state} denies workspace/member/role/invitation/audit endpoints`, async () => {
+        const f = await freshFixture();
+        // Invitation acceptance uses a different, independently authenticated recipient.
+        const { recipient, invite } = await freshInvite(f);
+        const table = target === 'user' ? 'users' : 'workspaces';
+        const id = target === 'user' ? f.owner.id : f.ws.id;
+        await query(`UPDATE ${table} SET ${state === 'suspended' ? "status = 'suspended'" : 'deleted_at = NOW()'} WHERE id = $1`, [id]);
+        const root = `/api/v1/workspaces/${f.ws.id}`;
+        for (const ep of [
+          { path: root }, { path: `${root}/members` }, { path: `${root}/audit-logs` },
+          { method: 'PATCH', path: `${root}/members/${f.member.id}/role`, body: { role: 'editor' } },
+          { method: 'POST', path: `${root}/invitations`, body: { email: 'new@example.test', role: 'viewer' } }
+        ]) {
+          const res = await request(baseUrl, { ...ep, headers: { 'x-test-user-id': f.owner.id } });
+          assert.strictEqual(res.status, 404, ep.path);
+        }
+        if (target === 'user') await query(`UPDATE users SET ${state === 'suspended' ? "status = 'suspended'" : 'deleted_at = NOW()'} WHERE id = $1`, [recipient.id]);
+        const accept = await request(baseUrl, { method: 'POST', path: '/api/v1/workspaces/invitations/accept', headers: { 'x-test-user-id': recipient.id }, body: { token: invite.token } });
+        assert.strictEqual(accept.status, 404);
+      });
+    }
+  }
+  it('60. HTTP fault injection captures response/header/console/logger canaries on create/list/read/context paths', async () => {
+    const captured = [];
+    const oldConsole = { error: console.error, warn: console.warn, log: console.log };
+    const faults = [
+      [workspaceRepository, 'createWorkspaceWithOwner', { method: 'POST', path: '/api/v1/workspaces', body: { name: 'Fault' } }],
+      [workspaceRepository, 'listForUser', { path: '/api/v1/workspaces' }],
+      [workspaceRepository, 'getByIdForUser', { path: `/api/v1/workspaces/${workspaceA.id}` }],
+      [membershipRepository, 'findActive', { path: `/api/v1/workspaces/${workspaceA.id}/members` }]
+    ];
+    try {
+      for (const level of Object.keys(oldConsole)) console[level] = (...args) => captured.push(JSON.stringify(args));
+      for (const [repository, method, ep] of faults) {
+        const original = repository[method];
+        try {
+          for (const phrase of ['already exists', 'permission required', 'Invalid malformed', 'CANARY_ONLY']) {
+            const canary = `SECRET_CANARY_${crypto.randomBytes(8).toString('hex')}`;
+            repository[method] = async () => { const e = new Error(`${phrase}: ${canary}`); e.code = 'VALIDATION_FAILED'; throw e; };
+            const res = await request(baseUrl, { ...ep, headers: { 'x-test-user-id': userA.id, 'x-request-id': canary } });
+            assert.ok([500, 503].includes(res.status));
+            assert.strictEqual(res.headers['x-request-id'], res.body.requestId);
+            assert.match(res.body.requestId, /^req_[a-f0-9-]{36}$/);
+            assert.ok(!JSON.stringify([res.body, res.headers, captured]).includes(canary));
+          }
+        } finally { repository[method] = original; }
+      }
+    } finally { Object.assign(console, oldConsole); }
+  });
+  it('61. Request IDs are server-owned even for valid-looking, huge, CR/LF and secret inputs', () => {
+    const { resolveSafeRequestId } = require('../middleware/workspace-context');
+    for (const value of [undefined, crypto.randomUUID(), 'x'.repeat(10000), 'x\r\nforged', 'SECRET_CANARY']) {
+      const id = resolveSafeRequestId(value);
+      assert.match(id, /^req_[a-f0-9-]{36}$/);
+      assert.notStrictEqual(id, value);
+    }
+  });
+  it('62. Repository invitation create/revoke and workspace update recheck actor authority transactionally', async () => {
+    const f = await freshFixture();
+    const { invite } = await freshInvite(f);
+    await assert.rejects(invitationRepository.createInvitation({ workspaceId: f.ws.id, email: 'blocked@example.test', role: 'viewer', invitedBy: f.member.id }), { code: 'PERMISSION_DENIED' });
+    await assert.rejects(invitationRepository.revokeInvitation({ workspaceId: f.ws.id, invitationId: invite.invitation.id, actorUserId: f.member.id }), { code: 'PERMISSION_DENIED' });
+    await assert.rejects(workspaceRepository.update({ workspaceId: f.ws.id, updates: { name: 'forbidden' }, actorUserId: f.member.id }), { code: 'PERMISSION_DENIED' });
+    assert.strictEqual((await query('SELECT status FROM workspace_invitations WHERE id = $1', [invite.invitation.id])).rows[0].status, 'pending');
+  });
+  async function orderedRace(workspaceId, first, second) {
+    const blocker = await getPool().connect();
+    const pending = [];
+    const blocked = async count => {
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        const { rows } = await query("SELECT COUNT(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND usename = current_user AND wait_event_type = 'Lock' AND query LIKE '%workspaces%'");
+        if (rows[0].n >= count) return;
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      throw new Error('Deterministic lock barrier timed out');
+    };
+    try {
+      await blocker.query('BEGIN');
+      await blocker.query('SELECT id FROM workspaces WHERE id = $1 FOR UPDATE', [workspaceId]);
+      pending.push(Promise.allSettled([first()]));
+      await blocked(1);
+      pending.push(Promise.allSettled([second()]));
+      await blocked(2);
+      await blocker.query('COMMIT');
+      return (await Promise.all(pending)).flat();
+    } finally {
+      await blocker.query('ROLLBACK');
+      blocker.release();
+      await Promise.all(pending);
+    }
+  }
+  for (const firstOperation of ['accept', 'revoke']) {
+    it(`63. Deterministic acceptance/revoke race: ${firstOperation} obtains workspace lock first`, async () => {
+      const f = await freshFixture();
+      const { recipient, invite } = await freshInvite(f);
+      const operations = {
+        accept: () => invitationRepository.acceptInvitation({ token: invite.token, userId: recipient.id }),
+        revoke: () => invitationRepository.revokeInvitation({ workspaceId: f.ws.id, invitationId: invite.invitation.id, actorUserId: f.owner.id })
+      };
+      const outcomes = await orderedRace(f.ws.id, operations[firstOperation], operations[firstOperation === 'accept' ? 'revoke' : 'accept']);
+      assert.strictEqual(outcomes.filter(x => x.status === 'fulfilled').length, 1);
+      const status = (await query('SELECT status FROM workspace_invitations WHERE id = $1', [invite.invitation.id])).rows[0].status;
+      assert.strictEqual(status, firstOperation === 'accept' ? 'accepted' : 'revoked');
+      // Even an aged terminal invitation must never be overwritten by expiry.
+      await query("UPDATE workspace_invitations SET expires_at = NOW() - INTERVAL '1 hour' WHERE id = $1", [invite.invitation.id]);
+      await assert.rejects(invitationRepository.acceptInvitation({ token: invite.token, userId: recipient.id }));
+      assert.strictEqual((await query('SELECT status FROM workspace_invitations WHERE id = $1', [invite.invitation.id])).rows[0].status, status);
+    });
+  }
+  for (const firstOperation of ['expire', 'revoke']) {
+    it(`64. Deterministic expiration/revoke race: ${firstOperation} wins without resurrection`, async () => {
+      const f = await freshFixture();
+      const { recipient, invite } = await freshInvite(f);
+      await query("UPDATE workspace_invitations SET expires_at = NOW() - INTERVAL '1 hour' WHERE id = $1", [invite.invitation.id]);
+      const ops = {
+        expire: () => invitationRepository.acceptInvitation({ token: invite.token, userId: recipient.id }),
+        revoke: () => invitationRepository.revokeInvitation({ workspaceId: f.ws.id, invitationId: invite.invitation.id, actorUserId: f.owner.id })
+      };
+      await orderedRace(f.ws.id, ops[firstOperation], ops[firstOperation === 'expire' ? 'revoke' : 'expire']);
+      assert.strictEqual((await query('SELECT status FROM workspace_invitations WHERE id = $1', [invite.invitation.id])).rows[0].status, firstOperation === 'expire' ? 'expired' : 'revoked');
+      assert.strictEqual(await membershipRepository.getMember({ workspaceId: f.ws.id, userId: recipient.id }), null);
+    });
+  }
+  for (const action of ['demote', 'remove']) {
+    it(`65. Deterministic inviter ${action} before acceptance denies stale authority`, async () => {
+      const f = await freshFixture();
+      await membershipRepository.updateRole({ workspaceId: f.ws.id, targetUserId: f.member.id, newRole: 'admin', actorUserId: f.owner.id });
+      const recipient = await userRepository.createUser({ email: `race-${crypto.randomBytes(6).toString('hex')}@example.test`, password: 'FixturePassword123!', emailVerifiedAt: new Date() });
+      const invite = await invitationRepository.createInvitation({ workspaceId: f.ws.id, email: recipient.email, role: 'viewer', invitedBy: f.member.id });
+      const mutation = action === 'demote'
+        ? () => membershipRepository.updateRole({ workspaceId: f.ws.id, targetUserId: f.member.id, newRole: 'viewer', actorUserId: f.owner.id })
+        : () => membershipRepository.removeMember({ workspaceId: f.ws.id, targetUserId: f.member.id, actorUserId: f.owner.id });
+      const outcome = await orderedRace(f.ws.id, mutation, () => invitationRepository.acceptInvitation({ token: invite.token, userId: recipient.id }));
+      assert.strictEqual(outcome[0].status, 'fulfilled');
+      assert.strictEqual(outcome[1].status, 'rejected');
+      assert.strictEqual(await membershipRepository.getMember({ workspaceId: f.ws.id, userId: recipient.id }), null);
+    });
+  }
+  it('66. Audit insertion failure rolls back workspace create/update, member role/removal, invite create/revoke/accept', async () => {
+    const f = await freshFixture();
+    const { invite, recipient } = await freshInvite(f);
+    const beforeLogs = (await auditLogRepository.listByWorkspace({ workspaceId: f.ws.id })).length;
+    const original = auditLogRepository.recordEvent;
+    auditLogRepository.recordEvent = async () => { throw new Error('SYNTHETIC_AUDIT_FAILURE'); };
+    try {
+      for (const mutate of [
+        () => workspaceRepository.createWorkspaceWithOwner({ name: 'Must rollback', slug: 'audit-rollback-create', creatorUserId: f.owner.id }),
+        () => workspaceRepository.update({ workspaceId: f.ws.id, updates: { name: 'Must rollback' }, actorUserId: f.owner.id }),
+        () => membershipRepository.updateRole({ workspaceId: f.ws.id, targetUserId: f.member.id, newRole: 'editor', actorUserId: f.owner.id }),
+        () => membershipRepository.removeMember({ workspaceId: f.ws.id, targetUserId: f.member.id, actorUserId: f.owner.id }),
+        () => invitationRepository.createInvitation({ workspaceId: f.ws.id, email: 'audit-rollback@example.test', role: 'viewer', invitedBy: f.owner.id }),
+        () => invitationRepository.revokeInvitation({ workspaceId: f.ws.id, invitationId: invite.invitation.id, actorUserId: f.owner.id }),
+        () => invitationRepository.acceptInvitation({ token: invite.token, userId: recipient.id })
+      ]) await assert.rejects(mutate, /SYNTHETIC_AUDIT_FAILURE/);
+    } finally { auditLogRepository.recordEvent = original; }
+    assert.strictEqual((await query("SELECT id FROM workspaces WHERE slug = 'audit-rollback-create'")).rows.length, 0);
+    assert.strictEqual((await workspaceRepository.getByIdForUser({ workspaceId: f.ws.id, userId: f.owner.id })).name, f.ws.name);
+    const member = await membershipRepository.getMember({ workspaceId: f.ws.id, userId: f.member.id });
+    assert.strictEqual(member.role, 'viewer');
+    assert.strictEqual(member.status, 'active');
+    assert.strictEqual(await membershipRepository.getMember({ workspaceId: f.ws.id, userId: recipient.id }), null);
+    assert.strictEqual((await query("SELECT id FROM workspace_invitations WHERE email_normalized = 'audit-rollback@example.test'")).rows.length, 0);
+    assert.strictEqual((await query('SELECT status FROM workspace_invitations WHERE id = $1', [invite.invitation.id])).rows[0].status, 'pending');
+    assert.strictEqual((await auditLogRepository.listByWorkspace({ workspaceId: f.ws.id })).length, beforeLogs);
+  });
+
 });

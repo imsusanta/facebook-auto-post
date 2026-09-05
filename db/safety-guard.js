@@ -1,131 +1,41 @@
 'use strict';
+const ALLOWED_LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
-const ALLOWED_LOOPBACK_HOSTNAMES = new Set([
-  '127.0.0.1',
-  'localhost',
-  '::1',
-  '[::1]'
-]);
-
-const PROD_KEYWORD_REGEX = /aws|rds|neon|supabase|heroku|prod|production/i;
-
-/**
- * Redacts credentials from a database connection string for safe error reporting and logging.
- * Replaces password with '***' while preserving protocol, hostname, port, and database name.
- * Returns '[MALFORMED_URL]' if string cannot be parsed.
- *
- * @param {string} connectionString
- * @returns {string}
- */
+// Do not retain userinfo, path, fragment, or query; any may contain credentials.
 function redactDatabaseUrl(connectionString) {
-  if (typeof connectionString !== 'string' || !connectionString.trim()) {
-    return '[EMPTY_URL]';
-  }
-
-  try {
-    const parsed = new URL(connectionString.trim());
-    if (parsed.password) {
-      parsed.password = '***';
-    }
-    return parsed.toString();
-  } catch {
-    return '[MALFORMED_URL]';
-  }
+  if (typeof connectionString !== 'string' || !connectionString.trim()) return '[EMPTY_URL]';
+  try { new URL(connectionString); return '[DATABASE_URL_REDACTED]'; }
+  catch { return '[MALFORMED_URL]'; }
 }
-
-/**
- * Validates whether a database connection string strictly targets a local loopback interface.
- * Uses WHATWG URL parsing to prevent userinfo spoofing (e.g., postgres://localhost@evil.com/db).
- *
- * @param {string} connectionString
- * @returns {{ valid: boolean, error?: string, hostname?: string, redactedUrl: string }}
- */
 function validateLoopbackDatabaseUrl(connectionString) {
-  const redacted = redactDatabaseUrl(connectionString);
-
-  if (typeof connectionString !== 'string' || !connectionString.trim()) {
-    return {
-      valid: false,
-      error: 'DATABASE_URL connection string is missing or empty.',
-      redactedUrl: redacted
-    };
-  }
-
+  const reject = error => ({ valid: false, error, redactedUrl: redactDatabaseUrl(connectionString) });
+  if (typeof connectionString !== 'string' || !connectionString.trim()) return reject('DATABASE_URL is required.');
   let parsed;
-  try {
-    parsed = new URL(connectionString.trim());
-  } catch (err) {
-    return {
-      valid: false,
-      error: `Malformed database connection URL: ${err.message}`,
-      redactedUrl: redacted
-    };
-  }
-
-  if (parsed.protocol !== 'postgres:' && parsed.protocol !== 'postgresql:') {
-    return {
-      valid: false,
-      error: `Invalid protocol "${parsed.protocol}". Expected "postgres:" or "postgresql:".`,
-      redactedUrl: redacted
-    };
-  }
-
-  const hostname = parsed.hostname.toLowerCase();
-  if (!ALLOWED_LOOPBACK_HOSTNAMES.has(hostname)) {
-    return {
-      valid: false,
-      error: `Non-loopback host "${hostname}" is prohibited in test mode. Allowed hosts: ${[...ALLOWED_LOOPBACK_HOSTNAMES].join(', ')}.`,
-      hostname,
-      redactedUrl: redacted
-    };
-  }
-
-  // Deceptive production-like database name or query guard
-  if (PROD_KEYWORD_REGEX.test(parsed.pathname) || PROD_KEYWORD_REGEX.test(parsed.search)) {
-    return {
-      valid: false,
-      error: 'Database name or query parameters contain production keywords (prod/production/aws/rds/neon/supabase/heroku).',
-      hostname,
-      redactedUrl: redacted
-    };
-  }
-
-  return {
-    valid: true,
-    hostname,
-    redactedUrl: redacted
-  };
+  try { parsed = new URL(connectionString); } catch { return reject('Malformed database connection URL.'); }
+  if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) return reject('Invalid protocol.');
+  if (!ALLOWED_LOOPBACK_HOSTNAMES.has(parsed.hostname)) return reject('Non-loopback host is prohibited.');
+  // libpq URL options can override the actual host/user/database. Disallow all.
+  if (parsed.search || parsed.hash) return reject('URL query parameters and fragments are prohibited.');
+  if (!/^\/(?:test_[a-z0-9_]+|[a-z0-9_]+_test)$/.test(parsed.pathname) || /prod|production/.test(parsed.pathname)) return reject('A dedicated test database name is required.');
+  if (!parsed.username || ['postgres', 'root'].includes(parsed.username)) return reject('An explicit least-privileged test role is required.');
+  return { valid: true, hostname: parsed.hostname, redactedUrl: redactDatabaseUrl(connectionString) };
 }
-
-/**
- * Asserts that a database connection string is safe for test execution.
- * Throws a sanitized Error with credentials redacted if validation fails.
- *
- * @param {string} connectionString
- * @returns {string} The validated connection string
- */
-function assertSafeTestDatabaseUrl(connectionString) {
+function assertSafeTestDatabaseUrl(connectionString, env = process.env) {
+  if (env.ALLOW_TEST_DATABASE !== 'true') throw new Error('[Security Error] Explicit ALLOW_TEST_DATABASE=true is required.');
+  if (env.NODE_ENV !== 'test') throw new Error('[Security Error] NODE_ENV=test is required.');
   const result = validateLoopbackDatabaseUrl(connectionString);
-  if (!result.valid) {
-    throw new Error(`[Security Error] Test runner safety guard rejected DATABASE_URL: ${result.error} (${result.redactedUrl})`);
-  }
+  if (!result.valid) throw new Error(`[Security Error] ${result.error}`);
   return connectionString;
 }
-
-/**
- * Resolves the canonical test database URL from environment or default loopback target.
- *
- * @returns {string}
- */
-function resolveTestDatabaseUrl() {
-  const raw = process.env.DATABASE_URL || 'postgres://127.0.0.1:5432/facebook_auto_poster_test';
-  return assertSafeTestDatabaseUrl(raw);
+function resolveTestDatabaseUrl() { return assertSafeTestDatabaseUrl(process.env.DATABASE_URL); }
+async function assertLeastPrivilegedTestRole(client) {
+  const { rows } = await client.query(`SELECT r.rolsuper, r.rolcreatedb, r.rolcreaterole, r.rolreplication, r.rolbypassrls,
+    EXISTS(SELECT 1 FROM pg_auth_members WHERE member = r.oid) AS inherits_roles,
+    current_database() AS database_name
+    FROM pg_roles r WHERE r.rolname = current_user`);
+  const role = rows[0];
+  if (!role || role.rolsuper || role.rolcreatedb || role.rolcreaterole || role.rolreplication || role.rolbypassrls || role.inherits_roles || !/^(test_[a-z0-9_]+|[a-z0-9_]+_test)$/.test(role.database_name)) {
+    throw new Error('[Security Error] Test database requires a dedicated non-privileged role without inherited roles.');
+  }
 }
-
-module.exports = {
-  ALLOWED_LOOPBACK_HOSTNAMES,
-  redactDatabaseUrl,
-  validateLoopbackDatabaseUrl,
-  assertSafeTestDatabaseUrl,
-  resolveTestDatabaseUrl
-};
+module.exports = { ALLOWED_LOOPBACK_HOSTNAMES, redactDatabaseUrl, validateLoopbackDatabaseUrl, assertSafeTestDatabaseUrl, resolveTestDatabaseUrl, assertLeastPrivilegedTestRole };

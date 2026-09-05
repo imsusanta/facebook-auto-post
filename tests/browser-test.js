@@ -102,6 +102,36 @@ function findChromeExecutable() {
 }
 
 async function launchHeadlessChrome() {
+  if (process.env.AGENT_BROWSER_CDP) {
+    // Use a new page only; never close the shared browser or unrelated tabs.
+    const { chromium } = require('playwright');
+    const browser = await chromium.connectOverCDP(process.env.AGENT_BROWSER_CDP);
+    const page = await browser.contexts()[0].newPage();
+    try {
+      await page.route('**/*', async route => {
+        const url = new URL(route.request().url());
+        if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) return route.abort();
+        // The shared browser may be on another host. Relay real local HTTP
+        // responses through the local driver, without mocking application data.
+        try {
+          const response = await route.fetch({ timeout: 60000, maxRedirects: 0 });
+          await route.fulfill({ response });
+          await response.dispose();
+        } catch (err) { if (!page.isClosed()) await route.abort().catch(() => {}); }
+      });
+      const session = await page.context().newCDPSession(page);
+      const cdp = {
+        send: (method, params = {}) => session.send(method, params),
+        on: (event, handler) => session.on(event, handler),
+        evaluate: async expression => {
+          const result = await session.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+          if (result.exceptionDetails) throw new Error('Browser evaluation failed.');
+          return result.result?.value;
+        }
+      };
+      return { cdp, chromeProcess: null, cleanup: async () => { await session.detach(); await page.close(); } };
+    } catch (err) { await page.close(); throw err; }
+  }
   const chromePath = findChromeExecutable();
   if (!chromePath) {
     throw new Error('Google Chrome executable not found for headless browser test.');
