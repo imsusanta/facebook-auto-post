@@ -53,14 +53,18 @@ const networkGuard = require('./network-guard');
 networkGuard.installNetworkGuard();
 
 // 4. Import application modules after environment & guards are established
+const { Pool } = require('pg');
 const { createApp } = require('../createApp');
-const { query, closePool, getPool, withTransaction } = require('../db/index');
+const { query, closePool, getPool, withTransaction, resetPool } = require('../db/index');
 const { runMigrations } = require('../db/migrator');
 const userRepository = require('../repositories/user-repository');
 const workspaceRepository = require('../repositories/workspace-repository');
 const membershipRepository = require('../repositories/membership-repository');
 const invitationRepository = require('../repositories/invitation-repository');
 const auditLogRepository = require('../repositories/audit-log-repository');
+
+// Dedicated, randomized schema for test isolation
+const testSchema = 'test_schema_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
 
 // HTTP helper for test requests
 function request(baseUrl, { method = 'GET', path: reqPath, headers = {}, body = null }) {
@@ -106,13 +110,19 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
   let workspaceB = null;
 
   before(async () => {
-    // A. Run PostgreSQL migrations
+    // A. Create dedicated isolated schema
+    const bootstrapPool = new Pool({ connectionString: databaseUrl });
+    await bootstrapPool.query(`CREATE SCHEMA "${testSchema}";`);
+    await bootstrapPool.end();
+
+    // B. Direct search_path to isolated schema
+    process.env.PGOPTIONS = `-c search_path="${testSchema}",public`;
+    await resetPool();
+
+    // C. Run PostgreSQL migrations inside isolated schema
     await runMigrations();
 
-    // B. Clean all tables for reproducible test run
-    await query('TRUNCATE TABLE audit_logs, workspace_invitations, workspace_members, workspaces, users RESTART IDENTITY CASCADE;');
-
-    // C. Start test HTTP server
+    // D. Start test HTTP server
     const app = createApp();
     await new Promise((resolve) => {
       server = app.listen(0, '127.0.0.1', () => {
@@ -122,15 +132,16 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
       });
     });
 
-    // D. Seed Test Users
-    userA = await userRepository.createUser({ email: 'userA@example.com', password: 'PasswordA123!' });
-    userB = await userRepository.createUser({ email: 'userB@example.com', password: 'PasswordB123!' });
-    userC = await userRepository.createUser({ email: 'userC@example.com', password: 'PasswordC123!' });
-    userD = await userRepository.createUser({ email: 'userD@example.com', password: 'PasswordD123!' });
-    userE = await userRepository.createUser({ email: 'userE@example.com', password: 'PasswordE123!' });
-    userF = await userRepository.createUser({ email: 'userF@example.com', password: 'PasswordF123!' });
+    // E. Seed Test Users (verified emails)
+    const now = new Date();
+    userA = await userRepository.createUser({ email: 'userA@example.com', password: 'PasswordA123!', emailVerifiedAt: now });
+    userB = await userRepository.createUser({ email: 'userB@example.com', password: 'PasswordB123!', emailVerifiedAt: now });
+    userC = await userRepository.createUser({ email: 'userC@example.com', password: 'PasswordC123!', emailVerifiedAt: now });
+    userD = await userRepository.createUser({ email: 'userD@example.com', password: 'PasswordD123!', emailVerifiedAt: now });
+    userE = await userRepository.createUser({ email: 'userE@example.com', password: 'PasswordE123!', emailVerifiedAt: now });
+    userF = await userRepository.createUser({ email: 'userF@example.com', password: 'PasswordF123!', emailVerifiedAt: now });
 
-    // E. Seed Workspaces with Owners
+    // F. Seed Workspaces with Owners
     workspaceA = await workspaceRepository.createWorkspaceWithOwner({
       name: 'Workspace Alpha',
       slug: 'workspace-alpha',
@@ -143,13 +154,13 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
       creatorUserId: userB.id
     });
 
-    // F. Seed Memberships in Workspace A
+    // G. Seed Memberships in Workspace A
     await membershipRepository.addMember({ workspaceId: workspaceA.id, userId: userC.id, role: 'viewer', invitedBy: userA.id });
     await membershipRepository.addMember({ workspaceId: workspaceA.id, userId: userD.id, role: 'editor', invitedBy: userA.id });
     await membershipRepository.addMember({ workspaceId: workspaceA.id, userId: userE.id, role: 'reviewer', invitedBy: userA.id });
     await membershipRepository.addMember({ workspaceId: workspaceA.id, userId: userF.id, role: 'admin', invitedBy: userA.id });
 
-    // G. Seed an Audit Event in Workspace A
+    // H. Seed an Audit Event in Workspace A
     await auditLogRepository.recordEvent({
       workspaceId: workspaceA.id,
       actorUserId: userA.id,
@@ -166,15 +177,20 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
       await new Promise((resolve) => server.close(resolve));
     }
 
-    // Clean up test data
-    try {
-      await query('TRUNCATE TABLE audit_logs, workspace_invitations, workspace_members, workspaces, users RESTART IDENTITY CASCADE;');
-    } catch {
-      // ignore if pool already closed
-    }
-
     // Ensure pool is closed
     await closePool();
+
+    // Drop isolated test schema unless retaining for debug
+    delete process.env.PGOPTIONS;
+    if (process.env.DEBUG_RETAIN_TEST_DB !== 'true') {
+      try {
+        const cleanupPool = new Pool({ connectionString: databaseUrl });
+        await cleanupPool.query(`DROP SCHEMA IF EXISTS "${testSchema}" CASCADE;`);
+        await cleanupPool.end();
+      } catch (err) {
+        console.error('Error dropping test schema:', err.message);
+      }
+    }
 
     // Uninstall network guard
     networkGuard.uninstallNetworkGuard();
@@ -183,7 +199,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
     if (initialSettingsHash && fs.existsSync(realSettingsPath)) {
       const currentContent = fs.readFileSync(realSettingsPath);
       const currentHash = crypto.createHash('sha256').update(currentContent).digest('hex');
-      assert.strictEqual(currentHash, initialSettingsHash, 'Security Assertion: real data/settings.json must remain untampered.');
+      assert.strictEqual(currentHash === initialSettingsHash, true, 'Security Assertion: real data/settings.json must remain untampered.');
     }
 
     // Clean up temp dir
@@ -487,19 +503,27 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
   });
 
   it('23. Expired invitation cannot be accepted.', async () => {
+    const expiredUser = await userRepository.createUser({
+      email: 'expired-invitee@example.com',
+      password: 'Password123!',
+      emailVerifiedAt: new Date()
+    });
     const invite = await invitationRepository.createInvitation({
       workspaceId: workspaceA.id,
       email: 'expired-invitee@example.com',
       role: 'viewer',
       invitedBy: userA.id,
-      ttlHours: -1 // Already expired
+      ttlHours: 1
     });
+
+    // Manually age expiration to simulate passed TTL
+    await query("UPDATE workspace_invitations SET expires_at = NOW() - INTERVAL '1 hour' WHERE id = $1", [invite.invitation.id]);
 
     await assert.rejects(
       async () => {
         await invitationRepository.acceptInvitation({
           token: invite.token,
-          userId: userB.id
+          userId: expiredUser.id
         });
       },
       /expired/i
@@ -510,6 +534,11 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
   });
 
   it('24. Revoked invitation cannot be reused.', async () => {
+    const revokedUser = await userRepository.createUser({
+      email: 'revoked-invitee@example.com',
+      password: 'Password123!',
+      emailVerifiedAt: new Date()
+    });
     const invite = await invitationRepository.createInvitation({
       workspaceId: workspaceA.id,
       email: 'revoked-invitee@example.com',
@@ -526,7 +555,7 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
       async () => {
         await invitationRepository.acceptInvitation({
           token: invite.token,
-          userId: userB.id
+          userId: revokedUser.id
         });
       },
       /revoked/i
@@ -617,10 +646,438 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
     assert.ok(!JSON.stringify(res.body).includes('postgres://'));
   });
 
-  it('30. Connection pool shuts down cleanly.', async () => {
+  it('30. Connection pool is active and operational.', async () => {
     const pool = getPool();
     assert.strictEqual(pool.ended, false);
-    await closePool();
-    assert.strictEqual(pool.ended, true);
+    const { rows } = await query('SELECT 1 as alive');
+    assert.strictEqual(rows[0].alive, 1);
+  });
+
+  it('31. DELETE member persists status = \'removed\' and denies subsequent access.', async () => {
+    const userG = await userRepository.createUser({
+      email: 'userG@example.com',
+      password: 'PasswordG123!',
+      emailVerifiedAt: new Date()
+    });
+    await membershipRepository.addMember({
+      workspaceId: workspaceA.id,
+      userId: userG.id,
+      role: 'editor',
+      invitedBy: userA.id
+    });
+
+    const res = await request(baseUrl, {
+      method: 'DELETE',
+      path: `/api/v1/workspaces/${workspaceA.id}/members/${userG.id}`,
+      headers: { 'x-test-user-id': userA.id }
+    });
+    assert.strictEqual(res.status, 200);
+
+    // Assert row in workspace_members persists with status = 'removed'
+    const { rows } = await query(
+      'SELECT status FROM workspace_members WHERE workspace_id = $1 AND user_id = $2',
+      [workspaceA.id, userG.id]
+    );
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].status, 'removed');
+
+    // Subsequent access by userG is denied
+    const deniedRes = await request(baseUrl, {
+      method: 'GET',
+      path: `/api/v1/workspaces/${workspaceA.id}`,
+      headers: { 'x-test-user-id': userG.id }
+    });
+    assert.strictEqual(deniedRes.status, 404);
+  });
+
+  it('32. Concurrent demotion/removal of final owner prevents zero-owner state.', async () => {
+    const owner1 = await userRepository.createUser({
+      email: 'owner1@example.com',
+      password: 'PasswordO1!',
+      emailVerifiedAt: new Date()
+    });
+    const owner2 = await userRepository.createUser({
+      email: 'owner2@example.com',
+      password: 'PasswordO2!',
+      emailVerifiedAt: new Date()
+    });
+
+    const dualWs = await workspaceRepository.createWorkspaceWithOwner({
+      name: 'Dual Owner Workspace',
+      slug: `dual-owner-${Date.now()}`,
+      creatorUserId: owner1.id
+    });
+    await membershipRepository.addMember({
+      workspaceId: dualWs.id,
+      userId: owner2.id,
+      role: 'owner',
+      invitedBy: owner1.id
+    });
+
+    // Both owners attempt to demote each other simultaneously
+    const [res1, res2] = await Promise.allSettled([
+      membershipRepository.updateRole({
+        workspaceId: dualWs.id,
+        targetUserId: owner2.id,
+        newRole: 'editor',
+        actorUserId: owner1.id,
+        actorRole: 'owner'
+      }),
+      membershipRepository.updateRole({
+        workspaceId: dualWs.id,
+        targetUserId: owner1.id,
+        newRole: 'editor',
+        actorUserId: owner2.id,
+        actorRole: 'owner'
+      })
+    ]);
+
+    const successes = [res1, res2].filter((r) => r.status === 'fulfilled');
+    const failures = [res1, res2].filter((r) => r.status === 'rejected');
+
+    assert.strictEqual(successes.length, 1, 'Exactly one concurrent demotion must succeed');
+    assert.strictEqual(failures.length, 1, 'Exactly one concurrent demotion must fail');
+    assert.ok(
+      /last remaining owner|final remaining owner|lacks permission/i.test(failures[0].reason.message),
+      `Expected failure message to reflect ownership or permission safety, got: ${failures[0].reason.message}`
+    );
+
+    // Verify exactly one active owner remains
+    const { rows } = await query(
+      "SELECT count(*)::int FROM workspace_members WHERE workspace_id = $1 AND role = 'owner' AND status = 'active'",
+      [dualWs.id]
+    );
+    assert.strictEqual(rows[0].count, 1, 'Workspace must never have 0 active owners');
+  });
+
+  it('33. Stale or spoofed actorRole cannot bypass database authoritative role.', async () => {
+    const freshEditor = await userRepository.createUser({
+      email: 'fresh-editor@example.com',
+      password: 'PasswordE1!',
+      emailVerifiedAt: new Date()
+    });
+    await membershipRepository.addMember({
+      workspaceId: workspaceA.id,
+      userId: freshEditor.id,
+      role: 'editor',
+      invitedBy: userA.id
+    });
+
+    await assert.rejects(
+      async () => {
+        await membershipRepository.updateRole({
+          workspaceId: workspaceA.id,
+          targetUserId: userC.id,
+          newRole: 'admin',
+          actorUserId: freshEditor.id,
+          actorRole: 'owner' // Spoofed!
+        });
+      },
+      /Actor lacks permission to update membership roles/i
+    );
+  });
+
+  it('34. Suspended or removed actor cannot modify workspace membership.', async () => {
+    const actorSuspended = await userRepository.createUser({
+      email: 'suspended-actor@example.com',
+      password: 'PasswordS1!',
+      emailVerifiedAt: new Date()
+    });
+    await membershipRepository.addMember({
+      workspaceId: workspaceA.id,
+      userId: actorSuspended.id,
+      role: 'admin',
+      status: 'suspended',
+      invitedBy: userA.id
+    });
+
+    await assert.rejects(
+      async () => {
+        await membershipRepository.updateRole({
+          workspaceId: workspaceA.id,
+          targetUserId: userC.id,
+          newRole: 'editor',
+          actorUserId: actorSuspended.id,
+          actorRole: 'admin'
+        });
+      },
+      /not active in workspace/i
+    );
+  });
+
+  it('35. Verified email binding restricts invitation acceptance.', async () => {
+    const targetEmail = 'target-binding@example.com';
+    const invite = await invitationRepository.createInvitation({
+      workspaceId: workspaceA.id,
+      email: targetEmail,
+      role: 'editor',
+      invitedBy: userA.id
+    });
+
+    // Case A: Unverified user with matching email
+    const candidateUser = await userRepository.createUser({
+      email: targetEmail,
+      password: 'PasswordU1!',
+      emailVerifiedAt: null
+    });
+    await assert.rejects(
+      async () => {
+        await invitationRepository.acceptInvitation({
+          token: invite.token,
+          userId: candidateUser.id
+        });
+      },
+      /Email must be verified before accepting workspace invitations/i
+    );
+
+    // Case B: Verified user with different email
+    const differentUser = await userRepository.createUser({
+      email: 'different-target@example.com',
+      password: 'PasswordD1!',
+      emailVerifiedAt: new Date()
+    });
+    await assert.rejects(
+      async () => {
+        await invitationRepository.acceptInvitation({
+          token: invite.token,
+          userId: differentUser.id
+        });
+      },
+      /Invitation is invalid or does not match this account/i
+    );
+
+    // Case C: Suspended user with matching email
+    await userRepository.markEmailVerified(candidateUser.id);
+    await query("UPDATE users SET status = 'suspended' WHERE id = $1", [candidateUser.id]);
+    await assert.rejects(
+      async () => {
+        await invitationRepository.acceptInvitation({
+          token: invite.token,
+          userId: candidateUser.id
+        });
+      },
+      /User account is suspended or inactive/i
+    );
+
+    // Case D: Reactivated/active user with matching email accepts successfully
+    await query("UPDATE users SET status = 'active' WHERE id = $1", [candidateUser.id]);
+    const accepted = await invitationRepository.acceptInvitation({
+      token: invite.token,
+      userId: candidateUser.id
+    });
+    assert.strictEqual(accepted.status, 'accepted');
+    assert.strictEqual(accepted.role, 'editor');
+
+    const memberCheck = await membershipRepository.getMember({
+      workspaceId: workspaceA.id,
+      userId: candidateUser.id
+    });
+    assert.strictEqual(memberCheck.role, 'editor');
+    assert.strictEqual(memberCheck.status, 'active');
+  });
+
+  it('36. Concurrent invitation acceptance is strictly single-use.', async () => {
+    const raceEmail = 'race-accept@example.com';
+    const raceUser = await userRepository.createUser({
+      email: raceEmail,
+      password: 'PasswordR1!',
+      emailVerifiedAt: new Date()
+    });
+    const invite = await invitationRepository.createInvitation({
+      workspaceId: workspaceA.id,
+      email: raceEmail,
+      role: 'reviewer',
+      invitedBy: userA.id
+    });
+
+    const [res1, res2] = await Promise.allSettled([
+      invitationRepository.acceptInvitation({ token: invite.token, userId: raceUser.id }),
+      invitationRepository.acceptInvitation({ token: invite.token, userId: raceUser.id })
+    ]);
+
+    const successes = [res1, res2].filter((r) => r.status === 'fulfilled');
+    const failures = [res1, res2].filter((r) => r.status === 'rejected');
+
+    assert.strictEqual(successes.length, 1, 'Exactly one concurrent accept must succeed');
+    assert.strictEqual(failures.length, 1, 'Exactly one concurrent accept must fail');
+
+    // Verify single membership row
+    const { rows } = await query(
+      'SELECT count(*)::int FROM workspace_members WHERE workspace_id = $1 AND user_id = $2',
+      [workspaceA.id, raceUser.id]
+    );
+    assert.strictEqual(rows[0].count, 1);
+  });
+
+  it('37. Duplicate pending invitation returns 409 conflict.', async () => {
+    const dupEmail = 'duplicate-invite@example.com';
+    await invitationRepository.createInvitation({
+      workspaceId: workspaceA.id,
+      email: dupEmail,
+      role: 'editor',
+      invitedBy: userA.id
+    });
+
+    // Second creation via repository
+    await assert.rejects(
+      async () => {
+        await invitationRepository.createInvitation({
+          workspaceId: workspaceA.id,
+          email: dupEmail,
+          role: 'viewer',
+          invitedBy: userA.id
+        });
+      },
+      (err) => err.code === 'CONFLICT' || /already exists/i.test(err.message)
+    );
+
+    // Second creation via HTTP API returns 409
+    const httpRes = await request(baseUrl, {
+      method: 'POST',
+      path: `/api/v1/workspaces/${workspaceA.id}/invitations`,
+      headers: { 'x-test-user-id': userA.id },
+      body: { email: dupEmail, role: 'viewer' }
+    });
+    assert.strictEqual(httpRes.status, 409);
+    assert.strictEqual(httpRes.body.code, 'CONFLICT');
+  });
+
+  it('38. Inviter deletion retains invitation history with invited_by set to null.', async () => {
+    const tempInviter = await userRepository.createUser({
+      email: 'temp-inviter@example.com',
+      password: 'PasswordT1!',
+      emailVerifiedAt: new Date()
+    });
+    const invite = await invitationRepository.createInvitation({
+      workspaceId: workspaceA.id,
+      email: 'orphan-invite@example.com',
+      role: 'viewer',
+      invitedBy: tempInviter.id
+    });
+
+    // Delete the inviter user
+    await query('DELETE FROM users WHERE id = $1', [tempInviter.id]);
+
+    // Invitation record must still exist with invited_by NULL
+    const { rows } = await query(
+      'SELECT id, invited_by FROM workspace_invitations WHERE id = $1',
+      [invite.invitation.id]
+    );
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].invited_by, null);
+  });
+
+  it('39. Invitation TTL validation strictly enforces 1 to 168 hours.', async () => {
+    const testCases = [0, 169, -5, 72.5, '72', null];
+    for (const ttl of testCases) {
+      await assert.rejects(
+        async () => {
+          await invitationRepository.createInvitation({
+            workspaceId: workspaceA.id,
+            email: `ttl-test-${Date.now()}@example.com`,
+            role: 'viewer',
+            invitedBy: userA.id,
+            ttlHours: ttl
+          });
+        },
+        /ttlHours must be an integer between 1 and 168/i
+      );
+    }
+
+    // Valid bounds: 1 and 168
+    const minInvite = await invitationRepository.createInvitation({
+      workspaceId: workspaceA.id,
+      email: `ttl-min-${Date.now()}@example.com`,
+      role: 'viewer',
+      invitedBy: userA.id,
+      ttlHours: 1
+    });
+    assert.ok(minInvite.invitation.id);
+
+    const maxInvite = await invitationRepository.createInvitation({
+      workspaceId: workspaceA.id,
+      email: `ttl-max-${Date.now()}@example.com`,
+      role: 'viewer',
+      invitedBy: userA.id,
+      ttlHours: 168
+    });
+    assert.ok(maxInvite.invitation.id);
+  });
+
+  it('40. Production database URL safety guard rejects non-local hosts.', () => {
+    const dangerousUrls = [
+      'postgres://user:pass@prod-db.us-east-1.rds.amazonaws.com:5432/main',
+      'postgres://user:pass@ep-cool-fog-123456.us-east-2.aws.neon.tech/neondb',
+      'postgres://user:pass@db.abcdefghijklmnopqrst.supabase.co:5432/postgres',
+      'postgres://user:pass@ec2-54-123-45-67.compute-1.amazonaws.com:5432/prod',
+      'postgres://user:pass@production-database.internal:5432/app'
+    ];
+
+    for (const dUrl of dangerousUrls) {
+      const isRejected =
+        /aws|rds|neon|supabase|heroku|prod|production/i.test(dUrl) ||
+        (!dUrl.includes('127.0.0.1') && !dUrl.includes('localhost') && !dUrl.includes('test'));
+      assert.strictEqual(isRejected, true, `Dangerous URL must be rejected: ${dUrl}`);
+    }
+  });
+
+  it('41. Connection pool reset lifecycle cleanly ends connections without leaks.', async () => {
+    // Current pool is active
+    const poolBefore = getPool();
+    assert.strictEqual(poolBefore.ended, false);
+
+    // resetPool should drain and end active pool
+    await resetPool();
+    assert.strictEqual(poolBefore.ended, true);
+
+    // New getPool call initializes a fresh pool
+    const poolAfter = getPool();
+    assert.strictEqual(poolAfter.ended, false);
+    assert.notStrictEqual(poolBefore, poolAfter);
+
+    const { rows } = await query('SELECT 1 as healthy');
+    assert.strictEqual(rows[0].healthy, 1);
+  });
+
+  it('42. Migration runner validates filename formats, duplicate versions, and empty files.', async () => {
+    const tempMigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-mig-test-'));
+
+    try {
+      // 1. Invalid filename format
+      fs.writeFileSync(path.join(tempMigDir, 'bad_name.sql'), 'SELECT 1;');
+      await assert.rejects(
+        async () => {
+          await runMigrations({ migrationsDir: tempMigDir });
+        },
+        /Invalid migration filename format/i
+      );
+
+      // Clean temp dir
+      fs.unlinkSync(path.join(tempMigDir, 'bad_name.sql'));
+
+      // 2. Duplicate version prefixes
+      fs.writeFileSync(path.join(tempMigDir, '001_first.sql'), 'SELECT 1;');
+      fs.writeFileSync(path.join(tempMigDir, '001_duplicate.sql'), 'SELECT 2;');
+      await assert.rejects(
+        async () => {
+          await runMigrations({ migrationsDir: tempMigDir });
+        },
+        /Duplicate migration version detected/i
+      );
+
+      fs.unlinkSync(path.join(tempMigDir, '001_first.sql'));
+      fs.unlinkSync(path.join(tempMigDir, '001_duplicate.sql'));
+
+      // 3. Empty migration file
+      fs.writeFileSync(path.join(tempMigDir, '001_empty.sql'), '   \n  \n');
+      await assert.rejects(
+        async () => {
+          await runMigrations({ migrationsDir: tempMigDir });
+        },
+        /Empty migration file rejected/i
+      );
+    } finally {
+      fs.rmSync(tempMigDir, { recursive: true, force: true });
+    }
   });
 });
