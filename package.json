@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "test": "node tests/runner.js",
     "test:postgres": "node tests/postgres-runner.js",
+    "test:safety-guard": "node tests/safety-guard.test.js",
     "db:migrate": "node scripts/migrate.js",
     "db:migrate:status": "node scripts/migrate.js --status",
     "db:rollback": "node scripts/migrate.js --rollback"

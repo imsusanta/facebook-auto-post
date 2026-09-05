@@ -54,6 +54,8 @@ const workspaceRepository = require('../repositories/workspace-repository');
 const membershipRepository = require('../repositories/membership-repository');
 const invitationRepository = require('../repositories/invitation-repository');
 const auditLogRepository = require('../repositories/audit-log-repository');
+const { createSession, getSession } = require('../middleware/auth');
+const { validateLoopbackDatabaseUrl, assertSafeTestDatabaseUrl, redactDatabaseUrl } = require('../db/safety-guard');
 
 // Dedicated, randomized schema for test isolation
 const testSchema = 'test_schema_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
@@ -1069,6 +1071,588 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
       );
     } finally {
       fs.rmSync(tempMigDir, { recursive: true, force: true });
+    }
+  });
+
+  it('43. Complete Active-Principal: Suspended and deleted users are rejected across all child endpoints.', async () => {
+    // 1. Seed user and membership
+    const userGhost = await userRepository.createUser({
+      email: `ghost-${Date.now()}@example.com`,
+      password: 'PasswordGhost123!',
+      emailVerifiedAt: new Date()
+    });
+    await membershipRepository.addMember({
+      workspaceId: workspaceA.id,
+      userId: userGhost.id,
+      role: 'editor',
+      invitedBy: userA.id
+    });
+
+    // Verify active user can access member list
+    const activeRes = await request(baseUrl, {
+      method: 'GET',
+      path: `/api/v1/workspaces/${workspaceA.id}/members`,
+      headers: { 'x-test-user-id': userGhost.id }
+    });
+    assert.strictEqual(activeRes.status, 200);
+
+    // 2. Suspend user in users table
+    await query("UPDATE users SET status = 'suspended' WHERE id = $1", [userGhost.id]);
+
+    // Test member listing (404)
+    const listRes = await request(baseUrl, {
+      method: 'GET',
+      path: `/api/v1/workspaces/${workspaceA.id}/members`,
+      headers: { 'x-test-user-id': userGhost.id }
+    });
+    assert.strictEqual(listRes.status, 404);
+    assert.strictEqual(listRes.body.code, 'WORKSPACE_NOT_FOUND');
+
+    // Test role update (404)
+    const roleRes = await request(baseUrl, {
+      method: 'PATCH',
+      path: `/api/v1/workspaces/${workspaceA.id}/members/${userC.id}/role`,
+      headers: { 'x-test-user-id': userGhost.id },
+      body: { role: 'editor' }
+    });
+    assert.strictEqual(roleRes.status, 404);
+    assert.strictEqual(roleRes.body.code, 'WORKSPACE_NOT_FOUND');
+
+    // Test invitation creation (404)
+    const inviteRes = await request(baseUrl, {
+      method: 'POST',
+      path: `/api/v1/workspaces/${workspaceA.id}/invitations`,
+      headers: { 'x-test-user-id': userGhost.id },
+      body: { email: 'test-new@example.com', role: 'viewer' }
+    });
+    assert.strictEqual(inviteRes.status, 404);
+    assert.strictEqual(inviteRes.body.code, 'WORKSPACE_NOT_FOUND');
+
+    // Test audit log read (404)
+    const auditRes = await request(baseUrl, {
+      method: 'GET',
+      path: `/api/v1/workspaces/${workspaceA.id}/audit-logs`,
+      headers: { 'x-test-user-id': userGhost.id }
+    });
+    assert.strictEqual(auditRes.status, 404);
+    assert.strictEqual(auditRes.body.code, 'WORKSPACE_NOT_FOUND');
+
+    // 3. Mark user deleted (deleted_at IS NOT NULL)
+    await query("UPDATE users SET status = 'active', deleted_at = NOW() WHERE id = $1", [userGhost.id]);
+    const deletedRes = await request(baseUrl, {
+      method: 'GET',
+      path: `/api/v1/workspaces/${workspaceA.id}/members`,
+      headers: { 'x-test-user-id': userGhost.id }
+    });
+    assert.strictEqual(deletedRes.status, 404);
+  });
+
+  it('44. Complete Active-Principal: Suspended and deleted workspaces are rejected across all endpoints.', async () => {
+    // 1. Create a dedicated workspace
+    const tempOwner = await userRepository.createUser({
+      email: `tempowner-${Date.now()}@example.com`,
+      password: 'PasswordOwner123!',
+      emailVerifiedAt: new Date()
+    });
+    const wsTemp = await workspaceRepository.createWorkspaceWithOwner({
+      name: 'Temporary Workspace',
+      slug: `temp-ws-${Date.now()}`,
+      creatorUserId: tempOwner.id
+    });
+
+    // Verify accessible when active
+    const readBefore = await request(baseUrl, {
+      method: 'GET',
+      path: `/api/v1/workspaces/${wsTemp.id}`,
+      headers: { 'x-test-user-id': tempOwner.id }
+    });
+    assert.strictEqual(readBefore.status, 200);
+
+    // 2. Suspend/pause workspace
+    await query("UPDATE workspaces SET status = 'paused' WHERE id = $1", [wsTemp.id]);
+
+    const readSuspended = await request(baseUrl, {
+      method: 'GET',
+      path: `/api/v1/workspaces/${wsTemp.id}`,
+      headers: { 'x-test-user-id': tempOwner.id }
+    });
+    assert.strictEqual(readSuspended.status, 404);
+    assert.strictEqual(readSuspended.body.code, 'WORKSPACE_NOT_FOUND');
+
+    const membersSuspended = await request(baseUrl, {
+      method: 'GET',
+      path: `/api/v1/workspaces/${wsTemp.id}/members`,
+      headers: { 'x-test-user-id': tempOwner.id }
+    });
+    assert.strictEqual(membersSuspended.status, 404);
+
+    const auditSuspended = await request(baseUrl, {
+      method: 'GET',
+      path: `/api/v1/workspaces/${wsTemp.id}/audit-logs`,
+      headers: { 'x-test-user-id': tempOwner.id }
+    });
+    assert.strictEqual(auditSuspended.status, 404);
+
+    // 3. Mark workspace deleted
+    await query("UPDATE workspaces SET status = 'active', deleted_at = NOW() WHERE id = $1", [wsTemp.id]);
+
+    const readDeleted = await request(baseUrl, {
+      method: 'GET',
+      path: `/api/v1/workspaces/${wsTemp.id}`,
+      headers: { 'x-test-user-id': tempOwner.id }
+    });
+    assert.strictEqual(readDeleted.status, 404);
+  });
+
+  it('45. Invitation Lifecycle: Suspended members cannot self-reactivate via invitations.', async () => {
+    const userSusp = await userRepository.createUser({
+      email: `suspended-member-${Date.now()}@example.com`,
+      password: 'PasswordSusp123!',
+      emailVerifiedAt: new Date()
+    });
+    await membershipRepository.addMember({
+      workspaceId: workspaceA.id,
+      userId: userSusp.id,
+      role: 'editor',
+      status: 'suspended',
+      invitedBy: userA.id
+    });
+
+    // 1. Attempting to create an invite for a suspended member is rejected
+    await assert.rejects(
+      async () => {
+        await invitationRepository.createInvitation({
+          workspaceId: workspaceA.id,
+          email: userSusp.email,
+          role: 'viewer',
+          invitedBy: userA.id
+        });
+      },
+      /suspended member/i
+    );
+
+    // 2. If an invite was pre-created before suspension, accepting it must fail
+    const token = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    await query(
+      `INSERT INTO workspace_invitations (id, workspace_id, email_normalized, role, token_hash, invited_by, expires_at)
+       VALUES ($1, $2, $3, 'viewer', $4, $5, NOW() + INTERVAL '24 hours')`,
+      [crypto.randomUUID(), workspaceA.id, userSusp.email.toLowerCase(), tokenHash, userA.id]
+    );
+
+    await assert.rejects(
+      async () => {
+        await invitationRepository.acceptInvitation({
+          token,
+          userId: userSusp.id
+        });
+      },
+      /Suspended members cannot reactivate/i
+    );
+
+    // Verify member remains suspended
+    const check = await membershipRepository.getMember({ workspaceId: workspaceA.id, userId: userSusp.id });
+    assert.strictEqual(check.status, 'suspended');
+  });
+
+  it('46. Invitation Lifecycle: Member removal revokes all pending invitations for that member.', async () => {
+    const userRem = await userRepository.createUser({
+      email: `removed-member-${Date.now()}@example.com`,
+      password: 'PasswordRem123!',
+      emailVerifiedAt: new Date()
+    });
+    // Create pending invite for userRem BEFORE they become active member
+    const invite = await invitationRepository.createInvitation({
+      workspaceId: workspaceA.id,
+      email: userRem.email,
+      role: 'viewer',
+      invitedBy: userA.id
+    });
+
+    await membershipRepository.addMember({
+      workspaceId: workspaceA.id,
+      userId: userRem.id,
+      role: 'editor',
+      invitedBy: userA.id
+    });
+
+    // Remove member
+    await membershipRepository.removeMember({
+      workspaceId: workspaceA.id,
+      targetUserId: userRem.id,
+      actorUserId: userA.id
+    });
+
+    // Verify pending invite was updated to 'revoked'
+    const { rows } = await query(
+      'SELECT status FROM workspace_invitations WHERE id = $1',
+      [invite.invitation.id]
+    );
+    assert.strictEqual(rows[0].status, 'revoked');
+
+    // Attempting to accept revoked token fails
+    await assert.rejects(
+      async () => {
+        await invitationRepository.acceptInvitation({
+          token: invite.token,
+          userId: userRem.id
+        });
+      },
+      /already been revoked/i
+    );
+  });
+
+  it('47. Invitation Lifecycle: Removed member can be reactivated with fresh authorized invitation.', async () => {
+    const userReactivate = await userRepository.createUser({
+      email: `reactivate-${Date.now()}@example.com`,
+      password: 'PasswordRe123!',
+      emailVerifiedAt: new Date()
+    });
+    await membershipRepository.addMember({
+      workspaceId: workspaceA.id,
+      userId: userReactivate.id,
+      role: 'viewer',
+      status: 'removed',
+      invitedBy: userA.id
+    });
+
+    // Issue fresh invitation
+    const freshInvite = await invitationRepository.createInvitation({
+      workspaceId: workspaceA.id,
+      email: userReactivate.email,
+      role: 'editor',
+      invitedBy: userA.id
+    });
+
+    // Accept fresh invitation
+    const accepted = await invitationRepository.acceptInvitation({
+      token: freshInvite.token,
+      userId: userReactivate.id
+    });
+    assert.strictEqual(accepted.status, 'accepted');
+
+    // Verify membership is active and role updated
+    const member = await membershipRepository.getMember({ workspaceId: workspaceA.id, userId: userReactivate.id });
+    assert.strictEqual(member.status, 'active');
+    assert.strictEqual(member.role, 'editor');
+  });
+
+  it('48. Invitation Lifecycle: Stale pending invitation is transactionally expired before creating replacement.', async () => {
+    const emailStale = `stale-${Date.now()}@example.com`;
+
+    // 1. Create invitation
+    const firstInvite = await invitationRepository.createInvitation({
+      workspaceId: workspaceA.id,
+      email: emailStale,
+      role: 'viewer',
+      invitedBy: userA.id
+    });
+
+    // Manually expire it in database
+    await query(
+      "UPDATE workspace_invitations SET expires_at = NOW() - INTERVAL '1 hour' WHERE id = $1",
+      [firstInvite.invitation.id]
+    );
+
+    // 2. Create replacement invitation for same email
+    const secondInvite = await invitationRepository.createInvitation({
+      workspaceId: workspaceA.id,
+      email: emailStale,
+      role: 'editor',
+      invitedBy: userA.id
+    });
+
+    assert.ok(secondInvite.invitation.id);
+    assert.notStrictEqual(firstInvite.invitation.id, secondInvite.invitation.id);
+
+    // Check first invite status is 'expired'
+    const { rows } = await query(
+      'SELECT status FROM workspace_invitations WHERE id = $1',
+      [firstInvite.invitation.id]
+    );
+    assert.strictEqual(rows[0].status, 'expired');
+  });
+
+  it('49. Invitation Lifecycle: Acceptance fails if issuing inviter lost administrative authority.', async () => {
+    const tempInviter = await userRepository.createUser({
+      email: `temp-admin-${Date.now()}@example.com`,
+      password: 'PasswordAdmin123!',
+      emailVerifiedAt: new Date()
+    });
+    await membershipRepository.addMember({
+      workspaceId: workspaceA.id,
+      userId: tempInviter.id,
+      role: 'admin',
+      invitedBy: userA.id
+    });
+
+    const targetUser = await userRepository.createUser({
+      email: `target-${Date.now()}@example.com`,
+      password: 'PasswordTarget123!',
+      emailVerifiedAt: new Date()
+    });
+
+    const invite = await invitationRepository.createInvitation({
+      workspaceId: workspaceA.id,
+      email: targetUser.email,
+      role: 'viewer',
+      invitedBy: tempInviter.id
+    });
+
+    // Demote tempInviter to viewer
+    await membershipRepository.updateRole({
+      workspaceId: workspaceA.id,
+      targetUserId: tempInviter.id,
+      newRole: 'viewer',
+      actorUserId: userA.id
+    });
+
+    // Attempting to accept invite must fail because inviter lost admin authority
+    await assert.rejects(
+      async () => {
+        await invitationRepository.acceptInvitation({
+          token: invite.token,
+          userId: targetUser.id
+        });
+      },
+      /issuing inviter no longer possesses administrative authority/i
+    );
+  });
+
+  it('50. Fault Injection: Secret canary in simulated database failure is never leaked.', async () => {
+    const canary = 'CANARY_SECRET_FAULT_INJECTION_deadbeef0123456789';
+
+    // Inject canary into a simulated database failure
+    const origCreate = workspaceRepository.createWorkspaceWithOwner;
+    workspaceRepository.createWorkspaceWithOwner = async () => {
+      const err = new Error(`Simulated database syntax error with canary: ${canary}`);
+      err.code = '42601'; // PostgreSQL syntax_error
+      throw err;
+    };
+
+    try {
+      const res = await request(baseUrl, {
+        method: 'POST',
+        path: '/api/v1/workspaces',
+        headers: { 'x-test-user-id': userA.id },
+        body: { name: 'Canary Test Workspace' }
+      });
+
+      assert.strictEqual(res.status, 500);
+      assert.strictEqual(res.body.error, 'InternalError');
+      assert.strictEqual(res.body.message, 'An unexpected internal error occurred.');
+
+      const bodyStr = JSON.stringify(res.body);
+      const headersStr = JSON.stringify(res.headers);
+      assert.strictEqual(bodyStr.includes(canary), false, 'Canary secret must never appear in response body');
+      assert.strictEqual(headersStr.includes(canary), false, 'Canary secret must never appear in response headers');
+    } finally {
+      workspaceRepository.createWorkspaceWithOwner = origCreate;
+    }
+  });
+
+  it('51. Real Session & CSRF Authentication: Workspace read and mutation succeed with session cookie.', async () => {
+    // 1. Create real cookie session for User A
+    const sessionId = createSession({
+      id: userA.id,
+      email: userA.email,
+      role: 'user'
+    });
+    const session = getSession(sessionId);
+    assert.ok(session);
+    assert.ok(session.csrfToken);
+
+    // 2. Read workspace using real session cookie
+    const readRes = await request(baseUrl, {
+      method: 'GET',
+      path: `/api/v1/workspaces/${workspaceA.id}`,
+      headers: { Cookie: `auth_session=${sessionId}` }
+    });
+    assert.strictEqual(readRes.status, 200);
+    assert.strictEqual(readRes.body.workspace.id, workspaceA.id);
+
+    // 3. Mutate workspace (invite member) with cookie AND valid x-csrf-token
+    const mutateRes = await request(baseUrl, {
+      method: 'POST',
+      path: `/api/v1/workspaces/${workspaceA.id}/invitations`,
+      headers: {
+        Cookie: `auth_session=${sessionId}`,
+        'x-csrf-token': session.csrfToken
+      },
+      body: {
+        email: `session-invited-${Date.now()}@example.com`,
+        role: 'viewer'
+      }
+    });
+    assert.strictEqual(mutateRes.status, 201);
+    assert.ok(mutateRes.body.invitation.id);
+  });
+
+  it('52. Real Session CSRF Protection: Rejects mutation without CSRF token or with invalid CSRF token.', async () => {
+    const sessionId = createSession({
+      id: userA.id,
+      email: userA.email,
+      role: 'user'
+    });
+
+    // 1. Missing CSRF token
+    const missingCsrfRes = await request(baseUrl, {
+      method: 'POST',
+      path: `/api/v1/workspaces/${workspaceA.id}/invitations`,
+      headers: { Cookie: `auth_session=${sessionId}` },
+      body: { email: `csrf-test-${Date.now()}@example.com`, role: 'viewer' }
+    });
+    assert.strictEqual(missingCsrfRes.status, 403);
+    assert.strictEqual(missingCsrfRes.body.code, 'CSRF_TOKEN_INVALID');
+
+    // 2. Invalid CSRF token
+    const invalidCsrfRes = await request(baseUrl, {
+      method: 'POST',
+      path: `/api/v1/workspaces/${workspaceA.id}/invitations`,
+      headers: {
+        Cookie: `auth_session=${sessionId}`,
+        'x-csrf-token': 'bad_tampered_csrf_token_value_xyz'
+      },
+      body: { email: `csrf-test-2-${Date.now()}@example.com`, role: 'viewer' }
+    });
+    assert.strictEqual(invalidCsrfRes.status, 403);
+    assert.strictEqual(invalidCsrfRes.body.code, 'CSRF_TOKEN_INVALID');
+  });
+
+  it('53. Real Session Cross-Tenant Denial: User B session cannot read Workspace A.', async () => {
+    const sessB = createSession({
+      id: userB.id,
+      email: userB.email,
+      role: 'user'
+    });
+
+    const crossRes = await request(baseUrl, {
+      method: 'GET',
+      path: `/api/v1/workspaces/${workspaceA.id}`,
+      headers: { Cookie: `auth_session=${sessB}` }
+    });
+    assert.strictEqual(crossRes.status, 404);
+    assert.strictEqual(crossRes.body.code, 'WORKSPACE_NOT_FOUND');
+  });
+
+  it('54. Header x-test-user-id cannot authenticate when NODE_ENV is production, development, or unset.', async () => {
+    const savedEnv = process.env.NODE_ENV;
+    const savedAdminKey = process.env.ADMIN_API_KEY;
+
+    try {
+      // Configure server auth key so server doesn't fail-closed with 500
+      process.env.ADMIN_API_KEY = 'test-prod-key-1234567890';
+
+      // 1. NODE_ENV = 'production'
+      process.env.NODE_ENV = 'production';
+      const prodRes = await request(baseUrl, {
+        method: 'GET',
+        path: '/api/v1/workspaces',
+        headers: { 'x-test-user-id': userA.id }
+      });
+      assert.strictEqual(prodRes.status, 401);
+
+      // 2. NODE_ENV = 'development'
+      process.env.NODE_ENV = 'development';
+      const devRes = await request(baseUrl, {
+        method: 'GET',
+        path: '/api/v1/workspaces',
+        headers: { 'x-test-user-id': userA.id }
+      });
+      assert.strictEqual(devRes.status, 401);
+
+      // 3. NODE_ENV unset
+      delete process.env.NODE_ENV;
+      const unsetRes = await request(baseUrl, {
+        method: 'GET',
+        path: '/api/v1/workspaces',
+        headers: { 'x-test-user-id': userA.id }
+      });
+      assert.strictEqual(unsetRes.status, 401);
+    } finally {
+      process.env.NODE_ENV = savedEnv;
+      if (savedAdminKey !== undefined) {
+        process.env.ADMIN_API_KEY = savedAdminKey;
+      } else {
+        delete process.env.ADMIN_API_KEY;
+      }
+    }
+  });
+
+  it('55. Legacy Route Boundary: Ordinary SaaS users cannot access legacy settings, page, queue, or media routes.', async () => {
+    const userTenant = await userRepository.createUser({
+      email: `tenant-${Date.now()}@example.com`,
+      password: 'PasswordTenant123!',
+      emailVerifiedAt: new Date()
+    });
+
+    const tenantSessionId = createSession({
+      id: userTenant.id,
+      email: userTenant.email,
+      role: 'user' // ordinary SaaS user
+    });
+    const cookieHeader = `auth_session=${tenantSessionId}`;
+
+    const tenantSession = getSession(tenantSessionId);
+
+    const restrictedPaths = [
+      { method: 'GET', path: '/api/settings' },
+      { method: 'POST', path: '/api/settings' },
+      { method: 'GET', path: '/api/status' },
+      { method: 'GET', path: '/api/queue' },
+      { method: 'GET', path: '/api/media' }
+    ];
+
+    for (const ep of restrictedPaths) {
+      const res = await request(baseUrl, {
+        method: ep.method,
+        path: ep.path,
+        headers: {
+          Cookie: cookieHeader,
+          'x-csrf-token': tenantSession.csrfToken
+        }
+      });
+      assert.strictEqual(
+        res.status,
+        403,
+        `Ordinary tenant user must be denied access to legacy endpoint ${ep.path} (expected 403, got ${res.status})`
+      );
+      assert.strictEqual(res.body.code, 'FORBIDDEN_ROLE');
+    }
+
+    // Super Admin user succeeds on legacy settings
+    const adminSessionId = createSession({
+      id: 'usr_superadmin',
+      email: 'susantalohr@gmail.com',
+      role: 'super_admin'
+    });
+    const adminRes = await request(baseUrl, {
+      method: 'GET',
+      path: '/api/settings',
+      headers: { Cookie: `auth_session=${adminSessionId}` }
+    });
+    assert.strictEqual(adminRes.status, 200);
+  });
+
+  it('56. Atomic Transactional Audit Logging: Verifies persistent audit records for all workspace mutations.', async () => {
+    // Check audit records generated in Workspace A
+    const logs = await auditLogRepository.listByWorkspace({ workspaceId: workspaceA.id });
+    assert.ok(logs.length > 0, 'Audit logs must exist for workspace mutations');
+
+    const actions = new Set(logs.map(l => l.action));
+    // Verify key mutation actions are recorded
+    assert.strictEqual(actions.has('workspace:create'), true, 'workspace:create must be audited');
+    assert.strictEqual(actions.has('membership:role_updated'), true, 'membership:role_updated must be audited');
+    assert.strictEqual(actions.has('membership:removed'), true, 'membership:removed must be audited');
+    assert.strictEqual(actions.has('invitation:created'), true, 'invitation:created must be audited');
+    assert.strictEqual(actions.has('invitation:accepted'), true, 'invitation:accepted must be audited');
+    assert.strictEqual(actions.has('invitation:revoked'), true, 'invitation:revoked must be audited');
+
+    // Verify all audit rows have non-null created_at and correct workspace_id
+    for (const entry of logs) {
+      assert.strictEqual(entry.workspace_id, workspaceA.id);
+      assert.ok(entry.created_at);
+      assert.strictEqual(entry.outcome, 'success');
     }
   });
 });
