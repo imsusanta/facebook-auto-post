@@ -2,55 +2,47 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
+const media = require('../security/media');
+const { validatePost } = require('../security/validation');
+const context = require('../security/context');
 const facebook = require('../services/facebook');
 const storage = require('../services/storage');
 const upload = require('../middleware/upload');
 const { broadcastSSE } = require('../middleware/sse');
 
 // POST /api/post (or /api/facebook/post) - Instant Post Publishing
-router.post('/post', upload.single('image'), async (req, res, next) => {
-  const message = req.body.message || '';
-  let imageUrl = req.body.imageUrl || '';
-  const isDemo = req.body.isDemo === 'true' || req.body.isDemo === true;
-  let imagePath = req.file ? req.file.path : null;
-
-  // Resolve local uploaded or AI generated thumbnail
-  if (!imagePath && imageUrl && imageUrl.startsWith('/uploads/')) {
-    const localFile = path.join(__dirname, '..', imageUrl);
-    if (fs.existsSync(localFile)) {
-      imagePath = localFile;
-      imageUrl = null;
-    }
-  }
-
-  try {
-    broadcastSSE('posting_started', { message, timestamp: new Date().toISOString() });
-    
-    const result = await facebook.publishPost({
-      message,
-      imagePath,
-      imageUrl,
-      isDemo,
-      source: 'manual'
+router.post(
+  '/post',
+  require('../middleware/idempotency'),
+  upload.single('image'),
+  validatePost,
+  async (req, res) => {
+    const publishing = require('../services/publishing');
+    const item = await publishing.enqueue({
+      ...req.body,
+      imageUrl: req.file?.url || req.body.imageUrl,
+      source: 'manual',
+      operationKey: req.operationKey
     });
-
-    broadcastSSE('history_updated', storage.getHistory());
-    res.json(result);
-  } catch (err) {
-    broadcastSSE('history_updated', storage.getHistory());
-    next(err);
+    if (item.replayed && req.file && item.imageUrl !== req.file.url)
+      await media.remove(req.file.filename);
+    const result = item.id
+      ? await publishing.processJob(item.id, { forceDue: true })
+      : item;
+    publishing.respond(res, result);
   }
-});
+);
 
 // GET /api/facebook/account - Returns currently active page account info
 router.get('/account', async (req, res, next) => {
-  const activePage = storage.getActivePage();
-  const settings = storage.getSettings();
+  const activePage = await storage.getActivePage();
+  const settings = await storage.getSettings();
   try {
     const pageId = activePage?.id || settings.pageId || '';
-    const pageName = activePage?.name || settings.pageName || 'My Facebook Page';
+    const pageName =
+      activePage?.name || settings.pageName || 'My Facebook Page';
     let pictureUrl = activePage?.pictureUrl || settings.pictureUrl || '';
-    
+
     res.json({
       success: true,
       pageId,
@@ -58,7 +50,7 @@ router.get('/account', async (req, res, next) => {
       pictureUrl,
       category: activePage?.category || 'Education & Notes',
       connected: !!(activePage?.accessToken || settings.accessToken),
-      pagesCount: storage.getConnectedPages().length
+      pagesCount: (await storage.getConnectedPages()).length
     });
   } catch (err) {
     next(err);
@@ -68,13 +60,13 @@ router.get('/account', async (req, res, next) => {
 // ================= MULTI-PAGE MANAGEMENT APIS =================
 
 // GET /api/facebook/pages - List all connected pages
-router.get('/pages', (req, res) => {
-  const s = storage.getSettings();
-  const pages = storage.getConnectedPages();
+router.get('/pages', async (req, res) => {
+  const s = await storage.getSettings();
+  const pages = await storage.getConnectedPages();
   res.json({
     success: true,
     activePageId: s.activePageId || pages[0]?.id,
-    activePage: storage.getActivePage(),
+    activePage: await storage.getActivePage(),
     pages
   });
 });
@@ -83,7 +75,12 @@ router.get('/pages', (req, res) => {
 router.post('/pages', async (req, res, next) => {
   const { pageId, accessToken, name, setAsActive = true } = req.body;
   if (!pageId || !accessToken) {
-    return res.status(400).json({ success: false, error: 'Page ID and Access Token are required.' });
+    return res
+      .status(400)
+      .json({
+        success: false,
+        error: 'Page ID and Access Token are required.'
+      });
   }
 
   try {
@@ -91,19 +88,16 @@ router.post('/pages', async (req, res, next) => {
     let pictureUrl = '/pariksha_notes_logo.jpg';
     let category = 'General';
 
-    try {
-      const info = await facebook.verifyConnection(pageId, accessToken);
-      if (info.pageName) verifiedName = info.pageName;
-      if (info.category) category = info.category;
+    const info = await facebook.verifyConnection(pageId, accessToken);
+    if (info.pageId !== pageId.trim())
+      return res
+        .status(400)
+        .json({ error: 'Token does not belong to the requested page' });
+    verifiedName = info.pageName || verifiedName || 'Facebook Page';
+    category = info.category || 'General';
+    pictureUrl = info.pictureUrl || '';
 
-      const fetchedPic = await facebook.fetchPagePicture(pageId);
-      if (fetchedPic) pictureUrl = fetchedPic;
-    } catch (graphErr) {
-      console.warn('[Facebook Add Page] Could not auto-fetch info from Graph API:', graphErr.message);
-      if (!verifiedName) verifiedName = `Facebook Page (${pageId})`;
-    }
-
-    const addedPage = storage.addConnectedPage({
+    const addedPage = await storage.addConnectedPage({
       id: pageId.trim(),
       name: verifiedName.trim(),
       accessToken: accessToken.trim(),
@@ -112,13 +106,16 @@ router.post('/pages', async (req, res, next) => {
       setAsActive: !!setAsActive
     });
 
-    broadcastSSE('page_switched', { activePage: storage.getActivePage(), pages: storage.getConnectedPages() });
+    broadcastSSE('page_switched', {
+      activePage: await storage.getActivePage(),
+      pages: await storage.getConnectedPages()
+    });
 
     res.json({
       success: true,
       page: addedPage,
-      pages: storage.getConnectedPages(),
-      activePageId: storage.getActivePage()?.id
+      pages: await storage.getConnectedPages(),
+      activePageId: (await storage.getActivePage())?.id
     });
   } catch (err) {
     next(err);
@@ -126,29 +123,36 @@ router.post('/pages', async (req, res, next) => {
 });
 
 // POST /api/facebook/pages/switch - Switch active Facebook Page
-router.post('/pages/switch', (req, res) => {
+router.post('/pages/switch', async (req, res) => {
   const { pageId } = req.body;
   if (!pageId) {
-    return res.status(400).json({ success: false, error: 'Page ID is required to switch.' });
+    return res
+      .status(400)
+      .json({ success: false, error: 'Page ID is required to switch.' });
   }
 
-  const switched = storage.setActivePage(pageId);
+  const switched = await storage.setActivePage(pageId);
   if (!switched) {
-    return res.status(404).json({ success: false, error: 'Page not found in connected pages.' });
+    return res
+      .status(404)
+      .json({ success: false, error: 'Page not found in connected pages.' });
   }
 
-  broadcastSSE('page_switched', { activePage: switched, pages: storage.getConnectedPages() });
+  broadcastSSE('page_switched', {
+    activePage: switched,
+    pages: await storage.getConnectedPages()
+  });
 
   res.json({
     success: true,
     activePage: switched,
-    pages: storage.getConnectedPages()
+    pages: await storage.getConnectedPages()
   });
 });
 
 // GET /api/facebook/pages/:id - Get single page details including systemPrompt
-router.get('/pages/:id', (req, res) => {
-  const page = storage.getPageById(req.params.id);
+router.get('/pages/:id', async (req, res) => {
+  const page = await storage.getPageById(req.params.id);
   if (!page) {
     return res.status(404).json({ success: false, error: 'Page not found.' });
   }
@@ -159,26 +163,38 @@ router.get('/pages/:id', (req, res) => {
 router.put('/pages/:id', async (req, res, next) => {
   const { name, category, accessToken, systemPrompt, pictureUrl } = req.body;
   try {
-    const existing = storage.getPageById(req.params.id);
+    const existing = await storage.getPageById(req.params.id);
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Page not found.' });
     }
 
+    if (accessToken) {
+      const info = await facebook.verifyConnection(req.params.id, accessToken);
+      if (info.pageId !== req.params.id)
+        return res.status(400).json({ error: 'Token does not match page' });
+    }
     const updates = {};
     if (typeof name === 'string' && name.trim()) updates.name = name.trim();
-    if (typeof category === 'string' && category.trim()) updates.category = category.trim();
-    if (typeof accessToken === 'string' && accessToken.trim()) updates.accessToken = accessToken.trim();
-    if (typeof systemPrompt === 'string') updates.systemPrompt = systemPrompt.trim();
-    if (typeof pictureUrl === 'string' && pictureUrl.trim()) updates.pictureUrl = pictureUrl.trim();
+    if (typeof category === 'string' && category.trim())
+      updates.category = category.trim();
+    if (typeof accessToken === 'string' && accessToken.trim())
+      updates.accessToken = accessToken.trim();
+    if (typeof systemPrompt === 'string')
+      updates.systemPrompt = systemPrompt.trim();
+    if (typeof pictureUrl === 'string' && pictureUrl.trim())
+      updates.pictureUrl = pictureUrl.trim();
 
-    const updated = storage.updateConnectedPage(req.params.id, updates);
-    broadcastSSE('page_switched', { activePage: storage.getActivePage(), pages: storage.getConnectedPages() });
+    const updated = await storage.updateConnectedPage(req.params.id, updates);
+    broadcastSSE('page_switched', {
+      activePage: await storage.getActivePage(),
+      pages: await storage.getConnectedPages()
+    });
 
     res.json({
       success: true,
       page: updated,
-      pages: storage.getConnectedPages(),
-      activePage: storage.getActivePage()
+      pages: await storage.getConnectedPages(),
+      activePage: await storage.getActivePage()
     });
   } catch (err) {
     next(err);
@@ -186,23 +202,31 @@ router.put('/pages/:id', async (req, res, next) => {
 });
 
 // DELETE /api/facebook/pages/:id - Disconnect a Facebook Page
-router.delete('/pages/:id', (req, res) => {
+router.delete('/pages/:id', async (req, res) => {
   try {
-    const remaining = storage.removeConnectedPage(req.params.id);
-    broadcastSSE('page_switched', { activePage: storage.getActivePage(), pages: remaining });
+    const remaining = await storage.removeConnectedPage(req.params.id);
+    broadcastSSE('page_switched', {
+      activePage: await storage.getActivePage(),
+      pages: remaining
+    });
     res.json({
       success: true,
       pages: remaining,
-      activePage: storage.getActivePage()
+      activePage: await storage.getActivePage()
     });
   } catch (err) {
-    res.status(400).json({ success: false, error: err.message });
+    res
+      .status(400)
+      .json({
+        success: false,
+        error: 'Operation failed. Check settings and try again.'
+      });
   }
 });
 
 // POST /api/facebook/test-connection
 router.post('/test-connection', async (req, res) => {
-  const settings = storage.getSettings();
+  const settings = await storage.getSettings();
   const pageId = req.body.pageId || settings.pageId;
   const accessToken = req.body.accessToken || settings.accessToken;
 
@@ -210,14 +234,24 @@ router.post('/test-connection', async (req, res) => {
     const info = await facebook.verifyConnection(pageId, accessToken);
     res.json({ success: true, info });
   } catch (err) {
-    res.status(400).json({ success: false, error: err.message });
+    res
+      .status(400)
+      .json({
+        success: false,
+        error: 'Operation failed. Check settings and try again.'
+      });
   }
 });
 
 // GET /api/facebook/logo
 router.get('/logo', async (req, res) => {
-  const settings = storage.getSettings();
-  const logoPath = path.join(__dirname, '..', 'public', 'pariksha_notes_logo.jpg');
+  const settings = await storage.getSettings();
+  const logoPath = path.join(
+    __dirname,
+    '..',
+    'public',
+    'pariksha_notes_logo.jpg'
+  );
   if (fs.existsSync(logoPath)) {
     return res.json({ success: true, url: '/pariksha_notes_logo.jpg' });
   }
@@ -230,14 +264,14 @@ router.get('/logo', async (req, res) => {
 
 // POST /api/facebook/refresh-logo
 router.post('/refresh-logo', async (req, res, next) => {
-  const active = storage.getActivePage();
+  const active = await storage.getActivePage();
   const pageId = req.body.pageId || active?.id || '';
   try {
     const fetched = await facebook.fetchPagePicture(pageId);
     if (fetched) {
       if (active && active.id === pageId) {
         active.pictureUrl = fetched;
-        storage.saveSettings({ pictureUrl: fetched });
+        await storage.saveSettings({ pictureUrl: fetched });
       }
       return res.json({ success: true, url: fetched });
     }

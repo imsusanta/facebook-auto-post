@@ -1,640 +1,446 @@
-const fs = require('fs');
-const path = require('path');
-
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
-const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
-const QUEUE_FILE = path.join(DATA_DIR, 'queue.json');
-const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
-const RULES_FILE = path.join(DATA_DIR, 'automation_rules.json');
-const TEMPLATES_FILE = path.join(DATA_DIR, 'templates.json');
-
-// Ensure data directory exists
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+// PostgreSQL-backed, workspace-scoped repository. No implicit global/default tenant.
+const { randomUUID } = require('node:crypto');
+const db = require('./db');
+const context = require('../security/context');
+const secrets = require('../security/secrets');
+const {
+  DEFAULT_TEMPLATES,
+  DEFAULT_RULES,
+  DEFAULT_CATEGORIES
+} = require('./defaults');
+const DEFAULT_SYSTEM_PROMPT =
+  'ব্যবহারকারীর টপিক ও নির্দেশনা অনুযায়ী তথ্যবহুল, মৌলিক ফেসবুক পোস্ট তৈরি করো।';
+const TABLES = new Set([
+  'facebook_pages',
+  'scheduled_posts',
+  'post_history',
+  'templates',
+  'categories'
+]);
+function workspace() {
+  return context.current().workspaceId;
 }
-
-const DEFAULT_TEMPLATES = [
-  {
-    id: 'template_news',
-    title: 'Breaking / Trending News Analysis',
-    badge: '📰 সাম্প্রতিক খবর',
-    category: 'trending_news',
-    imageUrl: 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=1080&h=1080&q=85',
-    desc: 'Catch immediate viral attention with a sensational event breakdown.',
-    sample: '🚨 ব্রেকিং নিউজ ও সমসাময়িক আপডেট! 📢✨\n\nআজকের আলোচিত ঘটনার পেছনের মূল তথ্য ও বিস্তারিত বিশ্লেষণ:\n\n📌 গুরুত্বপূর্ণ পয়েন্ট:\n🔹 মূল ঘটনা ও প্রেক্ষাপট...\n🔹 জনসাধারণের ওপর এর প্রভাব...\n🔹 বিশেষজ্ঞদের মতামত...\n\nএই বিষয়ে আপনার ব্যক্তিগত মতামত কি? কমেন্টে জানান! 👇\n\n#TrendingNews #BreakingNews #CurrentAffairs #ViralPost'
-  },
-  {
-    id: 'template_science',
-    title: 'Amazing Science & Nature Mystery',
-    badge: '🔬 বিজ্ঞানের রহস্য',
-    category: 'science_nature',
-    imageUrl: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1080&h=1080&q=85',
-    desc: 'Fascinating mind-bending facts about the cosmos, ocean or biology.',
-    sample: '🌌 মহাবিশ্বের এমন এক রহস্য যা জানলে আপনার চোখ কপালে উঠবে! 🔭✨\n\nবিজ্ঞানীদের সাম্প্রতিক গবেষণায় উঠে এসেছে কিছু অবিশ্বাস্য তথ্য:\n\n📌 বিস্ময়কর ফ্যাক্টস:\n🔹 প্রথম অদ্ভুত সত্য...\n🔹 মানবদেহের ওপর এর চমকপ্রদ প্রভাব...\n🔹 পৃথিবী ও মহাকাশের অদ্ভুত সংযোগ...\n\nবিজ্ঞানের এমন অদ্ভুত সব তথ্য বন্ধুদের সাথে শেয়ার করতে ভুলবেন না! 🚀\n\n#ScienceFacts #AmazingUniverse #Astronomy #NatureMystery'
-  },
-  {
-    id: 'template_history',
-    title: 'Historical Heritage & Lost Legends',
-    badge: '🏛️ ইতিহাসের রহস্য',
-    category: 'history_civilization',
-    imageUrl: 'https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&w=1080&h=1080&q=85',
-    desc: 'Unveil the forgotten facts about ancient empires and heroic rulers.',
-    sample: '🏛️ ইতিহাসের পাতা থেকে: এক অজানা বীরগাথা ও ধ্বংস হওয়া সাম্রাজ্যের গল্প! 📜✨\n\nআজ থেকে শত শত বছর আগের এক অবিস্মরণীয় ঘটনা:\n\n📌 ঐতিহাসিক সত্য:\n🔹 ঘটনার পেছনের আসল রহস্য...\n🔹 যুগান্তকারী যুদ্ধের ফলাফল...\n🔹 কীভাবে বদলে গিয়েছিল ইতিহাস...\n\nআমাদের সমৃদ্ধ ঐতিহ্য ও অতীত জানতে সঙ্গে থাকুন! 🇮🇳\n\n#IndianHistory #Heritage #HistoryFacts #AncientLegends'
-  },
-  {
-    id: 'template_brain',
-    title: 'Mind Power & Psychology Hacks',
-    badge: '🧠 মানব মস্তিষ্ক',
-    category: 'psychology_mind',
-    imageUrl: 'https://images.unsplash.com/photo-1507499739999-097706ad8914?auto=format&fit=crop&w=1080&h=1080&q=85',
-    desc: 'High-engagement behavioral psychology and memory habits.',
-    sample: '🧠 প্রতিদিন সকালে এই ১টি ভুল করলেই কমে যায় আপনার ব্রেইনের শক্তি! 💡\n\nমনোবিজ্ঞান ও নিউরোসায়েন্সের গবেষণায় পাওয়া ৩টি দারুণ টিপস:\n\n📌 মস্তিষ্কের গোপন নিয়ম:\n🔹 স্মৃতিশক্তি বাড়ানোর সহজ কৌশল...\n🔹 মানসিক চাপ দ্রুত কমানোর উপায়...\n🔹 অবচেতন মনের অবিশ্বাস্য ক্ষমতা...\n\nনিজেকে প্রতিদিন ১% উন্নত করতে আজই শুরু করুন! 📚✨\n\n#PsychologyTricks #MindPower #SelfImprovement #BrainFacts'
-  },
-  {
-    id: 'template_tech',
-    title: 'AI Revolution & Future Inventions',
-    badge: '💡 ভবিষ্যৎ প্রযুক্তি',
-    category: 'tech_inventions',
-    imageUrl: 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1080&h=1080&q=85',
-    desc: 'Viral discussions on artificial intelligence, robots, and tech jobs.',
-    sample: '🤖 কৃত্রিম বুদ্ধিমত্তা (AI) কি সত্যিই প্রযুক্তির ভবিষ্যৎ বদলে দেবে? ⚡\n\nবিশ্বজুড়ে প্রযুক্তির দ্রুত পরিবর্তন নিয়ে যা বলছেন শীর্ষ বিজ্ঞানীরা:\n\n📌 প্রযুক্তির নতুন দিগন্ত:\n🔹 যে কাজগুলো এআই কখনোই করতে পারবে না...\n🔹 নতুন কী ধরণের চাকরির সুযোগ আসছে...\n🔹 সাধারণ মানুষ কীভাবে এতে লাভবান হবে...\n\nপ্রযুক্তির এই বিপ্লবে আপনার অভিমত কি? কমেন্টে জানান! 👇\n\n#ArtificialIntelligence #TechInventions #FutureTech #Innovation'
-  },
-  {
-    id: 'template_wisdom',
-    title: 'Inspiring Life Philosophy & Quotes',
-    badge: '✨ জীবন ভাবনা',
-    category: 'philosophy_wisdom',
-    imageUrl: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1080&h=1080&q=85',
-    desc: 'Emotional storytelling and moral guidance that drives massive shares.',
-    sample: '✨ জীবনের এই ৩টি কঠিন সত্য যত তাড়াতাড়ি বুঝবেন, ততই ভালো থাকবেন! 🌸\n\nঅভিজ্ঞতার চেয়ে বড় কোনো শিক্ষক জীবনে আর নেই:\n\n📌 জীবনের ৩টি শিক্ষা:\n🔹 মানুষের আচরণ ও প্রত্যাশা নিয়ন্ত্রণ...\n🔹 সময়ের মূল্য ও আত্মসম্মান...\n🔹 কঠিন সময়ে নিজেকে শান্ত রাখার কৌশল...\n\nকথাগুলো মনের মতো লাগলে আপনার প্রিয় মানুষের সাথে শেয়ার করুন। ❤️\n\n#LifeQuotes #Inspiration #Philosophy #DailyWisdom #Motivational'
-  }
-];
-
-const DEFAULT_RULES = {
-  commentAutomationEnabled: true,
-  chatAutomationEnabled: true,
-  aiCommentFallbackEnabled: true,
-  commentRules: [
-    {
-      id: 'rule_price_inquiry',
-      name: 'Price & Admission Inquiry',
-      keywords: ['price', 'dam koto', 'koto', 'cost', 'details', 'kivabe pabo', 'info', 'admission', 'interested'],
-      publicReply: 'হ্যালো {name}! আপনার আগ্রহের জন্য ধন্যবাদ। বিস্তারিত তথ্য আমরা আপনার মেসেঞ্জার ইনবক্সে পাঠিয়ে দিয়েছি, দয়া করে চেক করুন! ❤️',
-      sendPrivateDm: true,
-      privateDm: 'নমস্কার {name}! আমাদের সমস্ত তথ্য ও লিংক: https://example.com/details। যেকোনো সহায়তায় আমাদের জানান!',
-      autoLike: true,
-      isActive: true
-    },
-    {
-      id: 'rule_appreciation',
-      name: 'Appreciation & Positive Feedback',
-      keywords: ['nice', 'great', 'valolaglo', 'osadharon', 'dhonnobad', 'good', 'helpful', 'thanks', 'darun'],
-      publicReply: 'অনেক অনেক ধন্যবাদ {name}! আপনার এই সুন্দর মন্তব্য আমাদের নতুন কনটেন্ট তৈরির অনুপ্রেরণা যোগায়। সঙ্গে থাকুন! 🌸✨',
-      sendPrivateDm: false,
-      privateDm: '',
-      autoLike: true,
-      isActive: true
-    }
-  ],
-  chatSettings: {
-    enabled: true,
-    welcomeMessage: 'স্বাগতম আমাদের পেজে! 👋 আমরা আপনাকে কীভাবে সাহায্য করতে পারি? নিচে প্রশ্ন লিখুন অথবা অপশন বেছে নিন।',
-    personaPrompt: "তুমি এই ফেসবুক পেজের একজন অত্যন্ত অভিজ্ঞ ও নম্র কাস্টমার সাপোর্ট গাইড। তোমার কাজ গ্রাহক ও ফলোয়ারদের যেকোনো প্রশ্নের সহজ, প্রাঞ্জল ও মিষ্টি বাংলা ভাষায় নির্ভরযোগ্য তথ্য ও উৎসাহ দেওয়া।",
-    quickReplies: ['📚 তথ্য ও বিবরণী', '💰 কোর্স ও প্যাকেজ', '📞 কাস্টমার সাপোর্ট']
-  }
-};
-
-const DEFAULT_CATEGORIES = [
-  {
-    id: 'trending_news',
-    title: '📰 সমসাময়িক খবর ও ট্রেন্ডিং নিউজ (Trending & Breaking News)',
-    promptContext: 'দেশ ও বিদেশের সাম্প্রতিক আলোচিত খবর, জাতীয় ও আন্তর্জাতিক গুরুত্বপূর্ণ ঘটনা, নতুন নীতি, বৈজ্ঞানিক অগ্রগতি বা ভাইরাল খবরের সহজ ও তথ্যবহুল বিশ্লেষণ।',
-    icon: 'newspaper',
-    badge: '📰 সাম্প্রতিক খবর',
-    isDefault: true
-  },
-  {
-    id: 'science_nature',
-    title: '🔬 বিজ্ঞান ও প্রকৃতির বিস্ময় (Science & Nature Wonders)',
-    promptContext: 'মহাবিশ্ব, মহাকাশ, মানবদেহ, পদার্থবিজ্ঞান, প্রাণীজগৎ বা প্রকৃতির কোনো অদ্ভুত ও বৈজ্ঞানিক সত্য যা মানুষকে কৌতূহলী করে তুলবে।',
-    icon: 'atom',
-    badge: '🔬 বিজ্ঞানের রহস্য',
-    isDefault: true
-  },
-  {
-    id: 'history_civilization',
-    title: '🏛️ ইতিহাস ও বিশ্ব সভ্যতা (World History & Heritage)',
-    promptContext: 'বিশ্বের প্রাচীন সভ্যতা, বিখ্যাত আবিষ্কার, ঐতিহাসিক ঘটনা, প্রত্নতত্ত্ব বা কোনো যুগান্তকারী সিদ্ধান্তের পেছনের গল্প ও ইতিহাস।',
-    icon: 'landmark',
-    badge: '🏛️ ইতিহাসের রহস্য',
-    isDefault: true
-  },
-  {
-    id: 'psychology_mind',
-    title: '🧠 মানব মস্তিষ্ক ও মনোবিজ্ঞান (Psychology & Human Mind)',
-    promptContext: 'মানুষের আচরণ, অভ্যাস গঠনের বিজ্ঞান, স্মৃতিশক্তি, আবেগ, অবচেতন মন ও ব্রেইনের কার্যপদ্ধতির সহজ ও শিক্ষণীয় ব্যাখ্যা।',
-    icon: 'brain',
-    badge: '🧠 মানব মস্তিষ্ক',
-    isDefault: true
-  },
-  {
-    id: 'world_geography',
-    title: '🌍 জানা-অজানা পৃথিবী ও বিশ্বজ্ঞান (World Wonders & Geography)',
-    promptContext: 'পৃথিবীর অদ্ভুত সব স্থান, ভৌগোলিক বিস্ময়, মহাসাগরের রহস্য, বৈচিত্র্যময় সংস্কৃতি বা আন্তর্জাতিক জ্ঞানের আকর্ষণীয় তথ্য।',
-    icon: 'globe',
-    badge: '🌍 বিশ্ব বিস্ময়',
-    isDefault: true
-  },
-  {
-    id: 'tech_inventions',
-    title: '💡 প্রযুক্তি ও দৈনন্দিন আবিষ্কার (Inventions & Future Tech)',
-    promptContext: 'দৈনন্দিন জীবনের নানা জিনিসের আবিষ্কারের পেছনের গল্প, ইন্টারনেট, কৃত্রিম বুদ্ধিমত্তা (AI), রোবোটিক্স বা ভবিষ্যতের প্রযুক্তির ব্যাখ্যা।',
-    icon: 'cpu',
-    badge: '⚡ ভবিষ্যৎ প্রযুক্তি',
-    isDefault: true
-  },
-  {
-    id: 'philosophy_wisdom',
-    title: '✨ জীবন দর্শন ও শিক্ষণীয় ভাবনা (Philosophy & Life Wisdom)',
-    promptContext: 'জীবনদর্শন, গভীর শিক্ষণীয় দৃষ্টিভঙ্গি, আত্মউন্নয়ন, চিন্তাশক্তি বৃদ্ধি ও মানবিক মূল্যবোধের চমৎকার আলোচনা।',
-    icon: 'sparkles',
-    badge: '✨ জীবন ভাবনা',
-    isDefault: true
-  }
-];
-
-function readJsonFile(filePath, defaultVal = {}) {
-  try {
-    if (!fs.existsSync(filePath)) {
-      fs.writeFileSync(filePath, JSON.stringify(defaultVal, null, 2), 'utf8');
-      return defaultVal;
-    }
-    const data = fs.readFileSync(filePath, 'utf8');
-    return JSON.parse(data || '{}');
-  } catch (err) {
-    console.error(`Error reading ${filePath}:`, err.message);
-    return defaultVal;
-  }
+function fail(message, statusCode = 400) {
+  throw Object.assign(new Error(message), { statusCode, expose: true });
 }
-
-function writeJsonFile(filePath, data) {
-  try {
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
-    return true;
-  } catch (err) {
-    console.error(`Error writing ${filePath}:`, err.message);
-    return false;
-  }
+async function list(table) {
+  if (!TABLES.has(table)) throw new Error('Invalid table');
+  return (
+    await db.query(
+      `SELECT data FROM ${table} WHERE workspace_id=$1 ORDER BY id`,
+      [workspace()]
+    )
+  ).rows.map((r) => secrets.open(r.data));
 }
-
-const DEFAULT_SYSTEM_PROMPT = `ব্যবহারকারীর দেওয়া টপিক ও নির্দেশনা অনুযায়ী আকর্ষণীয়, তথ্যবহুল এবং সম্পূর্ণ মৌলিক ফেসবুক পোস্ট তৈরি করো। বিষয়বস্তুর সাথে মানানসই সুন্দর বাংলা ভাষা, প্রাসঙ্গিক ইমোজি এবং উপযুক্ত ট্রেন্ডিং হ্যাশট্যাগ ব্যবহার করবে।`;
-
-// Storage helpers
+async function getRecord(table, id) {
+  if (!TABLES.has(table)) throw new Error('Invalid table');
+  const row = (
+    await db.query(
+      `SELECT data FROM ${table} WHERE workspace_id=$1 AND id=$2`,
+      [workspace(), id]
+    )
+  ).rows[0];
+  return row ? secrets.open(row.data) : null;
+}
+async function put(table, value) {
+  if (!TABLES.has(table)) throw new Error('Invalid table');
+  if (table === 'scheduled_posts')
+    await db.query(
+      `INSERT INTO scheduled_posts(workspace_id,id,facebook_page_id,status,scheduled_at,created_at,processing_at,data)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(workspace_id,id) DO UPDATE SET status=excluded.status,scheduled_at=excluded.scheduled_at,processing_at=excluded.processing_at,data=excluded.data`,
+      [
+        workspace(),
+        value.id,
+        value.facebookPageId,
+        value.status,
+        value.scheduledAt,
+        value.createdAt,
+        value.processingAt || null,
+        secrets.seal(value)
+      ]
+    );
+  else if (table === 'post_history')
+    await db.query(
+      `INSERT INTO post_history(workspace_id,id,facebook_page_id,occurred_at,data,job_id) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(workspace_id,job_id) DO NOTHING`,
+      [
+        workspace(),
+        value.id,
+        value.facebookPageId,
+        value.timestamp,
+        secrets.seal(value),
+        value.jobId || null
+      ]
+    );
+  else
+    await db.query(
+      `INSERT INTO ${table}(workspace_id,id,data) VALUES($1,$2,$3) ON CONFLICT(workspace_id,id) DO UPDATE SET data=excluded.data`,
+      [workspace(), value.id, secrets.seal(value)]
+    );
+  return value;
+}
+async function remove(table, id) {
+  if (!TABLES.has(table)) throw new Error('Invalid table');
+  await db.query(`DELETE FROM ${table} WHERE workspace_id=$1 AND id=$2`, [
+    workspace(),
+    id
+  ]);
+}
+async function document(table) {
+  if (!['workspace_settings', 'automation_rules'].includes(table))
+    throw new Error('Invalid table');
+  return secrets.open(
+    (
+      await db.query(`SELECT data FROM ${table} WHERE workspace_id=$1`, [
+        workspace()
+      ])
+    ).rows[0]?.data || {}
+  );
+}
+async function saveDocument(table, data) {
+  if (!['workspace_settings', 'automation_rules'].includes(table))
+    throw new Error('Invalid table');
+  await db.query(
+    `INSERT INTO ${table}(workspace_id,data) VALUES($1,$2) ON CONFLICT(workspace_id) DO UPDATE SET data=excluded.data`,
+    [workspace(), secrets.seal(data)]
+  );
+  return data;
+}
 const storage = {
-  getDefaultSystemPrompt() {
+  async getDefaultSystemPrompt() {
     return DEFAULT_SYSTEM_PROMPT;
   },
-
-  getSettings() {
-    const s = readJsonFile(SETTINGS_FILE, {
+  async getSettings() {
+    const settings = {
       pageId: '',
-      accessToken: '',
       pageName: 'My Facebook Page',
-      isDemoMode: false,
-      autoPostEnabled: false,
-      intervalMinutes: 15,
-      autoPilotEnabled: false,
-      cronSchedule: '0 9,14,20 * * *', // Daily 9am, 2pm, 8pm
-      cronLabel: 'প্রতিদিন ৩ বার (সকাল ৯টা, দুপুর ২টা, রাত ৮টা)',
-      selectedCategories: ['trending_news', 'science_nature', 'history_civilization', 'psychology_mind', 'world_geography', 'tech_inventions', 'philosophy_wisdom'],
-      includeAiImage: true,
+      accessToken: '',
       geminiApiKey: '',
+      autoPostEnabled: false,
+      autoPilotEnabled: false,
+      isDemoMode: false,
+      cronSchedule: '0 9,14,20 * * *',
+      timeZone: 'UTC',
       customSystemPrompt: DEFAULT_SYSTEM_PROMPT,
-      lastCheck: null
-    });
-    if (!s.customSystemPrompt) {
-      s.customSystemPrompt = DEFAULT_SYSTEM_PROMPT;
-    }
-    return s;
-  },
-
-  saveSettings(newSettings) {
-    const current = this.getSettings();
-    const updated = { ...current, ...newSettings, updatedAt: new Date().toISOString() };
-    writeJsonFile(SETTINGS_FILE, updated);
-    return updated;
-  },
-
-  getConnectedPages() {
-    const s = this.getSettings();
-    if (!Array.isArray(s.pages) || s.pages.length === 0) {
-      const initialPage = {
-        id: s.pageId || '',
-        name: s.pageName || 'My Facebook Page',
-        pictureUrl: s.pictureUrl || '',
-        accessToken: s.accessToken || '',
-        category: 'General',
-        systemPrompt: s.customSystemPrompt || DEFAULT_SYSTEM_PROMPT,
-        connectedAt: s.updatedAt || new Date().toISOString(),
-        isActive: true
-      };
-      s.pages = [initialPage];
-      s.activePageId = initialPage.id;
-      writeJsonFile(SETTINGS_FILE, s);
-    } else {
-      // Ensure all existing pages have systemPrompt field
-      let changed = false;
-      s.pages.forEach(p => {
-        if (!p.systemPrompt) {
-          p.systemPrompt = s.customSystemPrompt || DEFAULT_SYSTEM_PROMPT;
-          changed = true;
-        }
+      ...(await document('workspace_settings'))
+    };
+    const page = await this.getActivePage();
+    if (page)
+      Object.assign(settings, {
+        pageId: page.id,
+        pageName: page.name,
+        accessToken: page.accessToken || '',
+        pictureUrl: page.pictureUrl || '',
+        customSystemPrompt: page.systemPrompt || settings.customSystemPrompt
       });
-      if (changed) writeJsonFile(SETTINGS_FILE, s);
-    }
-    return s.pages;
+    return settings;
   },
-
-  getActivePage() {
-    const pages = this.getConnectedPages();
-    const s = this.getSettings();
-    const active = pages.find(p => p.id === s.activePageId) || pages.find(p => p.isActive) || pages[0] || null;
-    return active;
-  },
-
-  getPageById(pageId) {
-    const pages = this.getConnectedPages();
-    return pages.find(p => p.id === pageId) || null;
-  },
-
-  getPageSystemPrompt(pageId) {
-    if (pageId) {
-      const page = this.getPageById(pageId);
-      if (page && page.systemPrompt && page.systemPrompt.trim()) {
-        return page.systemPrompt.trim();
-      }
-    }
-    const active = this.getActivePage();
-    if (active && active.systemPrompt && active.systemPrompt.trim()) {
-      return active.systemPrompt.trim();
-    }
-    const s = this.getSettings();
-    return s.customSystemPrompt || DEFAULT_SYSTEM_PROMPT;
-  },
-
-  addConnectedPage(pageData) {
-    const s = this.getSettings();
-    const pages = this.getConnectedPages();
-    
-    const existingIndex = pages.findIndex(p => p.id === pageData.id);
-    const newPage = {
-      id: pageData.id,
-      name: pageData.name || 'Facebook Page',
-      pictureUrl: pageData.pictureUrl || '/pariksha_notes_logo.jpg',
-      accessToken: pageData.accessToken,
-      category: pageData.category || 'General',
-      systemPrompt: pageData.systemPrompt || s.customSystemPrompt || DEFAULT_SYSTEM_PROMPT,
-      connectedAt: new Date().toISOString(),
-      isActive: pages.length === 0 || !!pageData.setAsActive
-    };
-
-    if (existingIndex >= 0) {
-      pages[existingIndex] = { ...pages[existingIndex], ...newPage };
-    } else {
-      pages.push(newPage);
-    }
-
-    if (newPage.isActive) {
-      pages.forEach(p => { p.isActive = (p.id === newPage.id); });
-      s.activePageId = newPage.id;
-      s.pageId = newPage.id;
-      s.pageName = newPage.name;
-      s.accessToken = newPage.accessToken;
-      s.pictureUrl = newPage.pictureUrl;
-      s.customSystemPrompt = newPage.systemPrompt;
-    }
-
-    s.pages = pages;
-    writeJsonFile(SETTINGS_FILE, s);
-    return newPage;
-  },
-
-  updateConnectedPage(pageId, updates = {}) {
-    const s = this.getSettings();
-    const pages = this.getConnectedPages();
-    const index = pages.findIndex(p => p.id === pageId);
-    if (index === -1) return null;
-
-    const current = pages[index];
-    const updated = {
-      ...current,
-      ...updates,
-      id: current.id, // Cannot mutate immutable ID
+  async saveSettings(updates) {
+    const data = await document('workspace_settings');
+    // Credentials are write-only: an empty form field means unchanged.
+    if (!updates.geminiApiKey) delete updates.geminiApiKey;
+    const page = await this.getActivePage();
+    if (page) {
+      if (updates.accessToken) page.accessToken = updates.accessToken;
+      if (updates.pageName) page.name = updates.pageName;
+      if (typeof updates.customSystemPrompt === 'string')
+        page.systemPrompt = updates.customSystemPrompt;
+      await put('facebook_pages', page);
+    } else if (updates.accessToken || updates.pageId)
+      fail('Connect and verify a Facebook page first');
+    const { pageId, pageName, accessToken, pages, activePageId, ...safe } =
+      updates;
+    await saveDocument('workspace_settings', {
+      ...data,
+      ...safe,
       updatedAt: new Date().toISOString()
-    };
-    pages[index] = updated;
-
-    // If active page, synchronize top-level settings fields
-    if (s.activePageId === pageId || updated.isActive) {
-      if (updates.name) s.pageName = updates.name;
-      if (updates.accessToken) s.accessToken = updates.accessToken;
-      if (updates.pictureUrl) s.pictureUrl = updates.pictureUrl;
-      if (updates.systemPrompt) s.customSystemPrompt = updates.systemPrompt;
-    }
-
-    s.pages = pages;
-    writeJsonFile(SETTINGS_FILE, s);
-    return updated;
-  },
-
-  setActivePage(pageId) {
-    const s = this.getSettings();
-    const pages = this.getConnectedPages();
-    const target = pages.find(p => p.id === pageId);
-    if (!target) return null;
-
-    pages.forEach(p => {
-      p.isActive = (p.id === pageId);
     });
-
-    s.pages = pages;
-    s.activePageId = target.id;
-    s.pageId = target.id;
-    s.pageName = target.name;
-    s.accessToken = target.accessToken;
-    s.pictureUrl = target.pictureUrl;
-    if (target.systemPrompt) {
-      s.customSystemPrompt = target.systemPrompt;
-    }
-
-    writeJsonFile(SETTINGS_FILE, s);
-    return target;
+    return this.getSettings();
   },
-
-  removeConnectedPage(pageId) {
-    const s = this.getSettings();
-    let pages = this.getConnectedPages();
-    if (pages.length <= 1) {
-      throw new Error('At least one Facebook Page must remain connected.');
-    }
-
-    pages = pages.filter(p => p.id !== pageId);
-    s.pages = pages;
-
-    if (s.activePageId === pageId) {
-      const nextActive = pages[0];
-      nextActive.isActive = true;
-      s.activePageId = nextActive.id;
-      s.pageId = nextActive.id;
-      s.pageName = nextActive.name;
-      s.accessToken = nextActive.accessToken;
-      s.pictureUrl = nextActive.pictureUrl;
-    }
-
-    writeJsonFile(SETTINGS_FILE, s);
+  async getConnectedPages() {
+    const pages = (await list('facebook_pages')).filter(
+        (p) => p.connected !== false
+      ),
+      settings = await document('workspace_settings');
+    return pages.map((p) => ({
+      ...p,
+      isActive: p.id === settings.activePageId
+    }));
+  },
+  async getActivePage() {
+    const s = await document('workspace_settings'),
+      pages = (await list('facebook_pages')).filter(
+        (p) => p.connected !== false
+      );
+    const target = context.current().targetPageId || s.activePageId;
+    return (
+      pages.find((p) => p.id === target) || (!target ? pages[0] : null) || null
+    );
+  },
+  async getPageById(id) {
+    const page = await getRecord('facebook_pages', id);
+    return page?.connected !== false ? page : null;
+  },
+  async getPageSystemPrompt(id) {
+    const page = id ? await this.getPageById(id) : await this.getActivePage();
+    if (id && !page) fail('Page not found', 404);
+    return page?.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  },
+  async addConnectedPage(data) {
+    if (!/^\d{1,40}$/.test(data.id)) fail('Invalid Facebook Page ID');
+    const elsewhere = await db.query(
+      'SELECT workspace_id FROM facebook_pages WHERE id=$1',
+      [data.id]
+    );
+    if (elsewhere.rows[0] && elsewhere.rows[0].workspace_id !== workspace())
+      fail('Page cannot be connected', 409);
+    const existing = await getRecord('facebook_pages', data.id);
+    const page = {
+      ...existing,
+      connected: true,
+      id: data.id,
+      name: data.name || 'Facebook Page',
+      accessToken: data.accessToken,
+      pictureUrl: data.pictureUrl || '',
+      category: data.category || 'General',
+      systemPrompt: data.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+      connectedAt: new Date().toISOString()
+    };
+    await put('facebook_pages', page);
+    if (
+      data.setAsActive ||
+      !(await document('workspace_settings')).activePageId
+    )
+      await this.setActivePage(page.id);
+    return page;
+  },
+  async updateConnectedPage(id, updates) {
+    const old = await this.getPageById(id);
+    if (!old) return null;
+    return put('facebook_pages', { ...old, ...updates, id: old.id });
+  },
+  async setActivePage(id) {
+    const page = await this.getPageById(id);
+    if (!page) return null;
+    await saveDocument('workspace_settings', {
+      ...(await document('workspace_settings')),
+      activePageId: id
+    });
+    return page;
+  },
+  async removeConnectedPage(id) {
+    if ((await this.getQueue()).some((j) => j.facebookPageId === id))
+      fail('Remove queued jobs for this page before disconnecting');
+    const existing = await getRecord('facebook_pages', id);
+    if (!existing) fail('Connected page not found', 404);
+    await put('facebook_pages', {
+      ...existing,
+      connected: false,
+      accessToken: '',
+      disconnectedAt: new Date().toISOString()
+    });
+    const pages = (await list('facebook_pages')).filter(
+      (p) => p.connected !== false
+    );
+    const s = await document('workspace_settings');
+    if (s.activePageId === id)
+      await saveDocument('workspace_settings', {
+        ...s,
+        activePageId: pages[0]?.id || null
+      });
     return pages;
   },
-
-  getCategories() {
-    if (!fs.existsSync(CATEGORIES_FILE)) {
-      writeJsonFile(CATEGORIES_FILE, DEFAULT_CATEGORIES);
-      return DEFAULT_CATEGORIES;
-    }
-    const data = readJsonFile(CATEGORIES_FILE, null);
-    return Array.isArray(data) ? data : DEFAULT_CATEGORIES;
+  async getCategories() {
+    const rows = await list('categories');
+    if (rows.length) return rows;
+    for (const item of DEFAULT_CATEGORIES) await put('categories', item);
+    return structuredClone(DEFAULT_CATEGORIES);
   },
-
-  saveCategories(categories) {
-    writeJsonFile(CATEGORIES_FILE, categories);
-    return categories;
-  },
-
-  addCategory(category) {
-    const categories = this.getCategories();
-    const id = category.id || 'cat_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
-    const newCat = {
-      id: id,
-      title: category.title || 'নতুন ক্যাটাগরি',
-      promptContext: category.promptContext || '',
-      icon: category.icon || 'tag',
-      badge: category.badge || '💡 তথ্য',
-      isDefault: false
-    };
-    categories.push(newCat);
-    this.saveCategories(categories);
-    return newCat;
-  },
-
-  updateCategory(id, updates) {
-    const categories = this.getCategories();
-    const index = categories.findIndex(c => c.id === id);
-    if (index !== -1) {
-      categories[index] = { ...categories[index], ...updates };
-      this.saveCategories(categories);
-      return categories[index];
-    }
-    return null;
-  },
-
-  deleteCategory(id) {
-    let categories = this.getCategories();
-    categories = categories.filter(c => c.id !== id);
-    this.saveCategories(categories);
-
-    // Also remove from selectedCategories in settings
-    const settings = this.getSettings();
-    if (Array.isArray(settings.selectedCategories)) {
-      const updatedSelected = settings.selectedCategories.filter(catId => catId !== id);
-      this.saveSettings({ selectedCategories: updatedSelected });
-    }
-    return categories;
-  },
-
-  getHistory() {
-    const data = readJsonFile(HISTORY_FILE, []);
-    return Array.isArray(data) ? data : [];
-  },
-
-  addHistory(entry) {
-    const history = this.getHistory();
-    const item = {
-      id: entry.id || 'hist_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-      timestamp: new Date().toISOString(),
-      status: entry.status || 'success',
-      message: entry.message || '',
-      imageUrl: entry.imageUrl || null,
-      postId: entry.postId || null,
-      fbUrl: entry.postId ? `https://facebook.com/${entry.postId}` : null,
-      error: entry.error || null,
-      source: entry.source || 'manual'
-    };
-    history.unshift(item);
-    if (history.length > 200) history.length = 200;
-    writeJsonFile(HISTORY_FILE, history);
+  async addCategory(data) {
+    const item = { ...data, id: 'cat_' + randomUUID(), isDefault: false };
+    await put('categories', item);
     return item;
   },
-
-  updateHistoryItem(id, updates) {
-    const history = this.getHistory();
-    const index = history.findIndex(h => h.id === id);
-    if (index !== -1) {
-      history[index] = { ...history[index], ...updates };
-      writeJsonFile(HISTORY_FILE, history);
-      return history[index];
-    }
-    return null;
+  async updateCategory(id, data) {
+    const old = (await this.getCategories()).find((v) => v.id === id);
+    return old ? put('categories', { ...old, ...data, id: old.id }) : null;
   },
-
-  clearHistory() {
-    writeJsonFile(HISTORY_FILE, []);
+  async deleteCategory(id) {
+    await remove('categories', id);
+    return this.getCategories();
+  },
+  async getHistory() {
+    return (
+      await db.query(
+        'SELECT data,facebook_page_id,occurred_at,legacy_unattributed FROM post_history WHERE workspace_id=$1 ORDER BY occurred_at DESC,id',
+        [workspace()]
+      )
+    ).rows.map((row) => ({
+      ...secrets.open(row.data),
+      facebookPageId: row.facebook_page_id,
+      timestamp: row.occurred_at.toISOString(),
+      legacyUnattributed: row.legacy_unattributed
+    }));
+  },
+  async addHistory(entry) {
+    const page = entry.facebookPageId
+      ? await this.getPageById(entry.facebookPageId)
+      : await this.getActivePage();
+    if (!page) fail('A connected Facebook Page is required for post history');
+    const timestamp = entry.timestamp ? new Date(entry.timestamp) : new Date();
+    if (!Number.isFinite(timestamp.getTime()))
+      fail('Invalid history timestamp');
+    return put('post_history', {
+      ...entry,
+      id: 'hist_' + randomUUID(),
+      timestamp: timestamp.toISOString(),
+      status: entry.status || 'success',
+      facebookPageId: page.id
+    });
+  },
+  async clearHistory() {
+    await db.query('DELETE FROM post_history WHERE workspace_id=$1', [
+      workspace()
+    ]);
     return [];
   },
-
-  getQueue() {
-    const data = readJsonFile(QUEUE_FILE, []);
-    return Array.isArray(data) ? data : [];
+  async getQueue() {
+    return (
+      await db.query(
+        'SELECT * FROM scheduled_posts WHERE workspace_id=$1 ORDER BY created_at,id',
+        [workspace()]
+      )
+    ).rows.map(require('./jobs').hydrate);
   },
-
-  addToQueue(item) {
-    const queue = this.getQueue();
-    const queueItem = {
-      id: 'queue_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-      message: item.message || '',
-      imageUrl: item.imageUrl || null,
-      createdAt: new Date().toISOString(),
-      scheduledAt: item.scheduledAt ? new Date(item.scheduledAt).toISOString() : null,
-      status: 'pending'
+  async getNextDueQueueItem() {
+    return require('./jobs').due();
+  },
+  async hasProcessingJobs() {
+    return !!(
+      await db.query(
+        "SELECT 1 FROM scheduled_posts WHERE workspace_id=$1 AND status='processing' LIMIT 1",
+        [workspace()]
+      )
+    ).rowCount;
+  },
+  async addToQueue(data) {
+    const page = data.facebookPageId
+      ? await this.getPageById(data.facebookPageId)
+      : await this.getActivePage();
+    if (!page) fail('Connect a Facebook page first');
+    const settings = await this.getSettings(),
+      timeZone = require('./scheduling').validateZone(
+        data.timeZone || settings.timeZone || 'UTC'
+      );
+    const scheduledAt = require('./scheduling').instant({ ...data, timeZone });
+    return require('./jobs').create(
+      {
+        facebookPageId: page.id,
+        message: data.message || '',
+        imageUrl: data.imageUrl || null,
+        scheduledAt,
+        timeZone,
+        topic: data.topic || '',
+        categoryId: data.categoryId || '',
+        includeImage: data.includeImage !== false,
+        source: data.source || 'scheduler',
+        isDemo: data.isDemo === true || data.isDemo === 'true'
+      },
+      { operationKey: data.operationKey, kind: data.kind || 'publish' }
+    );
+  },
+  async updateQueueItem(id, updates) {
+    const item = await getRecord('scheduled_posts', id);
+    if (!item) return null;
+    return put('scheduled_posts', {
+      ...item,
+      ...updates,
+      id: item.id,
+      facebookPageId: item.facebookPageId
+    });
+  },
+  async claimQueueItem(id) {
+    return require('./jobs').claim(id);
+  },
+  async removeFromQueue(id) {
+    const item = await getRecord('scheduled_posts', id);
+    if (item?.status === 'processing')
+      fail('Cannot remove a processing job', 409);
+    await remove('scheduled_posts', id);
+    return this.getQueue();
+  },
+  async getAutomationRules() {
+    const saved = await document('automation_rules');
+    return {
+      ...structuredClone(DEFAULT_RULES),
+      commentAutomationEnabled: false,
+      chatAutomationEnabled: false,
+      ...saved
     };
-    queue.push(queueItem);
-    writeJsonFile(QUEUE_FILE, queue);
-    return queueItem;
   },
-
-  removeFromQueue(id) {
-    let queue = this.getQueue();
-    queue = queue.filter(q => q.id !== id);
-    writeJsonFile(QUEUE_FILE, queue);
-    return queue;
+  async saveAutomationRules(data) {
+    return saveDocument('automation_rules', {
+      ...(await this.getAutomationRules()),
+      ...data
+    });
   },
-
-  updateQueue(queue) {
-    writeJsonFile(QUEUE_FILE, queue);
-    return queue;
-  },
-
-  getAutomationRules() {
-    if (!fs.existsSync(RULES_FILE)) {
-      writeJsonFile(RULES_FILE, DEFAULT_RULES);
-      return DEFAULT_RULES;
-    }
-    const data = readJsonFile(RULES_FILE, null);
-    return data && typeof data === 'object' ? data : DEFAULT_RULES;
-  },
-
-  saveAutomationRules(rules) {
-    writeJsonFile(RULES_FILE, rules);
-    return rules;
-  },
-
-  addCommentRule(rule) {
-    const rules = this.getAutomationRules();
-    const newRule = {
-      id: 'rule_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-      name: rule.name || 'New Comment Rule',
-      keywords: Array.isArray(rule.keywords) ? rule.keywords : (rule.keywords || '').split(',').map(k => k.trim()).filter(Boolean),
-      publicReply: rule.publicReply || '',
-      sendPrivateDm: !!rule.sendPrivateDm,
-      privateDm: rule.privateDm || '',
-      autoLike: rule.autoLike !== false,
-      isActive: true
+  async addCommentRule(data) {
+    const s = await this.getAutomationRules();
+    const rule = {
+      ...data,
+      id: 'rule_' + randomUUID(),
+      keywords: Array.isArray(data.keywords)
+        ? data.keywords
+        : String(data.keywords || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
     };
-    rules.commentRules = rules.commentRules || [];
-    rules.commentRules.unshift(newRule);
-    this.saveAutomationRules(rules);
-    return newRule;
+    s.commentRules = [...(s.commentRules || []), rule];
+    await saveDocument('automation_rules', s);
+    return rule;
   },
-
-  updateCommentRule(id, updates) {
-    const rules = this.getAutomationRules();
-    const index = (rules.commentRules || []).findIndex(r => r.id === id);
-    if (index !== -1) {
-      rules.commentRules[index] = { ...rules.commentRules[index], ...updates };
-      this.saveAutomationRules(rules);
-      return rules.commentRules[index];
+  async deleteCommentRule(id) {
+    const s = await this.getAutomationRules();
+    s.commentRules = (s.commentRules || []).filter((r) => r.id !== id);
+    await saveDocument('automation_rules', s);
+    return s.commentRules;
+  },
+  async getTemplates() {
+    const data = await list('templates');
+    const s = await document('workspace_settings');
+    if (!s.templatesInitialized) {
+      for (const t of DEFAULT_TEMPLATES) await put('templates', t);
+      await saveDocument('workspace_settings', {
+        ...s,
+        templatesInitialized: true
+      });
+      return list('templates');
     }
-    return null;
+    return data;
   },
-
-  deleteCommentRule(id) {
-    const rules = this.getAutomationRules();
-    rules.commentRules = (rules.commentRules || []).filter(r => r.id !== id);
-    this.saveAutomationRules(rules);
-    return rules.commentRules;
+  async getTemplateById(id) {
+    return (await this.getTemplates()).find((t) => t.id === id) || null;
   },
-
-  updateChatSettings(chatSettings) {
-    const rules = this.getAutomationRules();
-    rules.chatSettings = { ...(rules.chatSettings || {}), ...chatSettings };
-    this.saveAutomationRules(rules);
-    return rules.chatSettings;
-  },
-
-  // Templates Management
-  getTemplates() {
-    let templates = readJsonFile(TEMPLATES_FILE, null);
-    if (!templates || !Array.isArray(templates) || templates.length === 0) {
-      writeJsonFile(TEMPLATES_FILE, DEFAULT_TEMPLATES);
-      return DEFAULT_TEMPLATES;
-    }
-    return templates;
-  },
-
-  saveTemplates(templates) {
-    writeJsonFile(TEMPLATES_FILE, templates);
-    return templates;
-  },
-
-  getTemplateById(id) {
-    const templates = this.getTemplates();
-    return templates.find(t => t.id === id) || null;
-  },
-
-  addTemplate(templateData) {
-    const templates = this.getTemplates();
-    const newTemplate = {
-      id: 'template_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-      title: templateData.title || 'Untitled Template',
-      badge: templateData.badge || '📌 কাস্টম টেমপ্লেট',
-      category: templateData.category || 'trending_news',
-      imageUrl: templateData.imageUrl || 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=1080&h=1080&q=85',
-      desc: templateData.desc || 'Custom post template style for Facebook.',
-      sample: templateData.sample || '📢 নতুন কাস্টম পোস্ট টেমপ্লেট!\n\nএখানে আপনার পোস্টের মূল বিষয়বস্তু লিখুন...\n\n#Trending #ViralPost #Template',
-      learnedStyle: templateData.learnedStyle || null,
+  async addTemplate(data) {
+    return put('templates', {
+      ...data,
+      id: 'template_' + randomUUID(),
       createdAt: new Date().toISOString()
-    };
-    templates.unshift(newTemplate);
-    this.saveTemplates(templates);
-    return newTemplate;
+    });
   },
-
-  deleteTemplate(id) {
-    let templates = this.getTemplates();
-    templates = templates.filter(t => t.id !== id);
-    this.saveTemplates(templates);
-    return templates;
+  async updateTemplate(id, data) {
+    const old = await this.getTemplateById(id);
+    return old ? put('templates', { ...old, ...data, id: old.id }) : null;
   },
-
-  updateTemplate(id, updates) {
-    const templates = this.getTemplates();
-    const idx = templates.findIndex(t => t.id === id);
-    if (idx !== -1) {
-      templates[idx] = { ...templates[idx], ...updates };
-      this.saveTemplates(templates);
-      return templates[idx];
-    }
-    return null;
+  async deleteTemplate(id) {
+    await remove('templates', id);
+    return this.getTemplates();
   }
 };
-
+// Serialise each read-modify-write operation per workspace, including across processes.
+for (const [name, fn] of Object.entries(storage))
+  storage[name] = function (...args) {
+    const id = workspace();
+    return db.transaction(() => fn.apply(storage, args), id);
+  };
 module.exports = storage;

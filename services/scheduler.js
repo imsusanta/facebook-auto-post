@@ -1,297 +1,217 @@
-const path = require('path');
-const fs = require('fs');
-const { EventEmitter } = require('events');
-const cron = require('node-cron');
+const db = require('./db');
 const storage = require('./storage');
-const facebook = require('./facebook');
-const ai = require('./ai');
-
-class SchedulerService extends EventEmitter {
-  constructor() {
-    super();
-    this.cronTask = null;
-    this.queueIntervalId = null;
-    this.countdownIntervalId = null;
-    this.isRunning = false;
-    this.nextRunTimestamp = null;
-    this.isProcessing = false;
-    this.lastAutoPostTime = 0;
-  }
-
-  init() {
-    const settings = storage.getSettings();
-    if (settings.autoPostEnabled || settings.autoPilotEnabled) {
-      this.start();
-    } else {
-      this.nextRunTimestamp = null;
+const jobs = require('./jobs');
+const context = require('../security/context');
+const { ENABLE_AUTOMATION } = require('../config/env');
+const { nextCron } = require('./scheduling');
+let timer,
+  busy = false,
+  stopping = false;
+async function sync() {
+  const id = context.current().workspaceId;
+  return db.transaction(async () => {
+    const s = await storage.getSettings();
+    const old = (
+      await db.query(
+        'SELECT * FROM autopilot_schedules WHERE workspace_id=$1',
+        [id]
+      )
+    ).rows[0];
+    if (!s.autoPilotEnabled) {
+      if (old)
+        await db.query(
+          'UPDATE autopilot_schedules SET enabled=false WHERE workspace_id=$1',
+          [id]
+        );
+      return null;
     }
-  }
-
-  /**
-   * Calculate next run timestamp from Cron schedule string
-   */
-  computeNextRun(cronPattern) {
-    if (!cronPattern) return null;
-
-    try {
-      const now = new Date();
-      const parts = cronPattern.trim().split(/\s+/);
-      if (parts.length !== 5) return null;
-
-      const [minPart, hourPart] = parts;
-      const targetMinutes = minPart === '*' ? [0] : minPart.split(',').map(m => parseInt(m, 10)).filter(n => !isNaN(n));
-      const targetHours = hourPart.startsWith('*/')
-        ? Array.from({ length: 24 }, (_, i) => i).filter(h => h % parseInt(hourPart.replace('*/', ''), 10) === 0)
-        : (hourPart === '*' ? Array.from({ length: 24 }, (_, i) => i) : hourPart.split(',').map(h => parseInt(h, 10)).filter(n => !isNaN(n)));
-
-      // Search up to 48 hours into the future
-      for (let dayOffset = 0; dayOffset <= 2; dayOffset++) {
-        for (const h of targetHours) {
-          for (const m of targetMinutes) {
-            const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset, h, m, 0, 0);
-            if (candidate.getTime() > now.getTime() + 1000) {
-              return candidate.getTime();
-            }
-          }
-        }
-      }
-    } catch (e) {
-      console.log('[Scheduler] Error computing next run:', e.message);
+    const pageId =
+      s.autoPilotPageId ||
+      old?.facebook_page_id ||
+      (await storage.getActivePage())?.id;
+    if (!pageId || !(await storage.getPageById(pageId))) {
+      if (old)
+        await db.query(
+          'UPDATE autopilot_schedules SET enabled=false WHERE workspace_id=$1',
+          [id]
+        );
+      return null;
     }
-
-    return null;
-  }
-
-  start() {
-    const settings = storage.getSettings();
-    this.stop(); // Clear any existing runners
-
-    this.isRunning = true;
-    const schedulePattern = settings.cronSchedule || '0 9,14,20 * * *';
-
-    // 1. Cron Job for AI Auto-Pilot
-    if (cron.validate(schedulePattern)) {
+    const cron = s.cronSchedule || '0 9,14,20 * * *',
+      zone = s.timeZone || 'UTC';
+    const changed =
+      !old ||
+      !old.enabled ||
+      old.facebook_page_id !== pageId ||
+      old.cron_expression !== cron ||
+      old.time_zone !== zone;
+    if (changed)
+      await db.query(
+        `INSERT INTO autopilot_schedules(workspace_id,facebook_page_id,cron_expression,time_zone,next_run_at) VALUES($1,$2,$3,$4,$5)
+   ON CONFLICT(workspace_id) DO UPDATE SET facebook_page_id=excluded.facebook_page_id,cron_expression=excluded.cron_expression,time_zone=excluded.time_zone,next_run_at=excluded.next_run_at,enabled=true,revision=autopilot_schedules.revision+1`,
+        [id, pageId, cron, zone, nextCron(cron, zone)]
+      );
+    if (!s.autoPilotPageId)
+      await storage.saveSettings({ autoPilotPageId: pageId });
+    return (
+      await db.query(
+        'SELECT * FROM autopilot_schedules WHERE workspace_id=$1',
+        [id]
+      )
+    ).rows[0];
+  }, id);
+}
+async function enqueueAuto(topic = '', operationKey) {
+  const s = await storage.getSettings(),
+    page = await storage.getPageById(
+      s.autoPilotPageId || (await storage.getActivePage())?.id
+    );
+  if (!page)
+    throw Object.assign(new Error('Connect an autopilot page first'), {
+      statusCode: 400,
+      expose: true
+    });
+  const categories = s.selectedCategories || [];
+  // Explicit user triggers are idempotent; do not re-randomize their payload on HTTP retry.
+  const categoryId = categories[0] || '';
+  return require('./publishing').enqueue({
+    facebookPageId: page.id,
+    topic,
+    categoryId,
+    includeImage: s.includeAiImage !== false,
+    timeZone: s.timeZone || 'UTC',
+    kind: 'autopilot',
+    source: 'manual_autopilot',
+    operationKey
+  });
+}
+async function materializeDue() {
+  const id = context.current().workspaceId;
+  return db.transaction(async () => {
+    await sync();
+    const row = (
+      await db.query(
+        'SELECT * FROM autopilot_schedules WHERE workspace_id=$1 AND enabled AND next_run_at<=now() FOR UPDATE',
+        [id]
+      )
+    ).rows[0];
+    if (!row) return null;
+    const s = await storage.getSettings(),
+      categories = s.selectedCategories || [];
+    const key = `cron:${row.facebook_page_id}:${row.revision}:${row.next_run_at.toISOString()}`;
+    const job = await require('./publishing').enqueue({
+      facebookPageId: row.facebook_page_id,
+      topic: '',
+      categoryId:
+        categories[
+          Math.abs(Math.floor(row.next_run_at.getTime() / 1000)) %
+            Math.max(1, categories.length)
+        ] || '',
+      includeImage: s.includeAiImage !== false,
+      timeZone: row.time_zone,
+      kind: 'autopilot',
+      source: 'ai_autopilot',
+      operationKey: key
+    });
+    // Coalesce missed cron slots into one catch-up job, never a flood of old posts.
+    await db.query(
+      'UPDATE autopilot_schedules SET next_run_at=$2 WHERE workspace_id=$1',
+      [id, nextCron(row.cron_expression, row.time_zone)]
+    );
+    return job;
+  }, id);
+}
+async function getStatus() {
+  const s = await storage.getSettings();
+  const row = (
+    await db.query(
+      'SELECT * FROM autopilot_schedules WHERE workspace_id=$1 AND enabled',
+      [context.current().workspaceId]
+    )
+  ).rows[0];
+  return {
+    isRunning: ENABLE_AUTOMATION && !stopping,
+    autoPilotEnabled: !!s.autoPilotEnabled,
+    autoPostEnabled: !!s.autoPostEnabled,
+    timeZone: s.timeZone || 'UTC',
+    cronSchedule: s.cronSchedule,
+    cronLabel: s.cronLabel || '',
+    nextRun: row?.next_run_at.toISOString() || null,
+    secondsRemaining: row
+      ? Math.max(0, Math.ceil((row.next_run_at.getTime() - Date.now()) / 1000))
+      : null,
+    isProcessing: await storage.hasProcessingJobs()
+  };
+}
+async function tick() {
+  if (busy || stopping) return;
+  busy = true;
+  try {
+    await jobs.recover();
+    const { rows } = await db.query('SELECT id FROM workspaces');
+    for (const row of rows) {
+      if (stopping) break;
       try {
-        this.nextRunTimestamp = this.computeNextRun(schedulePattern);
-
-        this.cronTask = cron.schedule(schedulePattern, async () => {
-          console.log(`[Scheduler] ⏰ Cron trigger activated at ${new Date().toLocaleTimeString()}!`);
-          await this.executeAutoPilotTask();
-          this.nextRunTimestamp = this.computeNextRun(schedulePattern);
-          this.emit('status', this.getStatus());
+        await context.run(row.id, async () => {
+          await materializeDue();
+          const s = await storage.getSettings();
+          const due = (
+            await db.query(
+              `SELECT * FROM scheduled_posts WHERE workspace_id=$1 AND status IN ('pending','retry_wait') AND attempt_count<max_attempts
+    AND (scheduled_at IS NULL OR scheduled_at<=now() OR data->>'publishNowRequested'='true') AND (next_attempt_at IS NULL OR next_attempt_at<=now())
+    AND (data->>'publishNowRequested'='true' OR (kind='autopilot' AND ($2 OR data->>'source'='manual_autopilot')) OR (kind='publish' AND ($3 OR data->>'source'='manual')))
+    ORDER BY coalesce(next_attempt_at,scheduled_at,created_at),id LIMIT 1`,
+              [row.id, !!s.autoPilotEnabled, !!s.autoPostEnabled]
+            )
+          ).rows[0];
+          if (due) await require('./publishing').processJob(due.id);
         });
-
-        console.log(`[Scheduler] Cron schedule active: ${schedulePattern} (${settings.cronLabel || 'Scheduled'})`);
-      } catch (e) {
-        console.error('[Scheduler] Cron setup failed:', e.message);
+      } catch {
+        console.warn(
+          '[Scheduler] Workspace tick failed; other workspaces continue'
+        );
       }
     }
-
-    // 2. Countdown ticker: update nextRunTimestamp every minute
-    this.countdownIntervalId = setInterval(() => {
-      if (this.isRunning && settings.cronSchedule) {
-        const next = this.computeNextRun(settings.cronSchedule);
-        if (next !== this.nextRunTimestamp) {
-          this.nextRunTimestamp = next;
-          this.emit('status', this.getStatus());
-        }
-      }
-    }, 60 * 1000);
-
-    // 3. Dedicated Manual Queue & Custom Time Scheduler Worker (checks every 15s)
-    this.queueIntervalId = setInterval(async () => {
-      const queue = storage.getQueue();
-      const now = new Date();
-      // An item is eligible if it has status 'pending' AND (no scheduledAt OR scheduledAt <= now)
-      const eligibleItem = queue.find(item => {
-        if (item.status !== 'pending') return false;
-        if (!item.scheduledAt) return true; // immediate queue
-        return new Date(item.scheduledAt) <= now;
-      });
-
-      if (eligibleItem && !this.isProcessing) {
-        await this.processManualQueueItem(eligibleItem, queue);
-      }
-    }, 15 * 1000);
-
-    this.emit('status', this.getStatus());
-  }
-
-  stop() {
-    if (this.queueIntervalId) {
-      clearInterval(this.queueIntervalId);
-      this.queueIntervalId = null;
-    }
-    if (this.countdownIntervalId) {
-      clearInterval(this.countdownIntervalId);
-      this.countdownIntervalId = null;
-    }
-    if (this.cronTask) {
-      this.cronTask.stop();
-      this.cronTask = null;
-    }
-    this.isRunning = false;
-    this.nextRunTimestamp = null;
-    this.emit('status', this.getStatus());
-    console.log('[Scheduler] Automation & Cron stopped.');
-  }
-
-  getStatus() {
-    const settings = storage.getSettings();
-    const now = Date.now();
-    const remainingSeconds = this.nextRunTimestamp ? Math.max(0, Math.round((this.nextRunTimestamp - now) / 1000)) : null;
-
-    return {
-      isRunning: this.isRunning,
-      autoPilotEnabled: !!settings.autoPilotEnabled,
-      cronSchedule: settings.cronSchedule || '0 9,14,20 * * *',
-      cronLabel: settings.cronLabel || 'প্রতিদিন ৩ বার (সকাল ৯টা, দুপুর ২টা, রাত ৮টা)',
-      nextRun: this.nextRunTimestamp ? new Date(this.nextRunTimestamp).toISOString() : null,
-      secondsRemaining: remainingSeconds,
-      isProcessing: this.isProcessing,
-      lastAutoPostTime: this.lastAutoPostTime ? new Date(this.lastAutoPostTime).toISOString() : null
-    };
-  }
-
-  /**
-   * Execute scheduled Auto-Pilot task strictly according to cron time
-   */
-  async executeAutoPilotTask() {
-    const settings = storage.getSettings();
-    if (!settings.autoPilotEnabled) {
-      console.log('[Scheduler] Cron fired, but AI Auto-Pilot is currently turned OFF.');
-      return;
-    }
-
-    // Safety check: Prevent duplicate triggers within 30 minutes
-    const now = Date.now();
-    if (now - this.lastAutoPostTime < 30 * 60 * 1000) {
-      console.log('[Scheduler] Cooldown active: An auto-post was published recently. Skipping duplicate trigger.');
-      return;
-    }
-
-    console.log('[Scheduler] Scheduled time reached! Triggering AI Auto-Pilot post...');
-    await this.triggerAIAutoPilot();
-  }
-
-  /**
-   * Process a single queued manual post
-   */
-  async processManualQueueItem(item, queue) {
-    if (this.isProcessing) return;
-    this.isProcessing = true;
-    this.emit('status', this.getStatus());
-
-    try {
-      console.log(`[Scheduler] Posting queued item ${item.id}...`);
-      item.status = 'processing';
-      storage.updateQueue(queue);
-      this.emit('queue_updated', queue);
-
-      let imagePath = null;
-      let imageUrl = item.imageUrl;
-      if (imageUrl && imageUrl.startsWith('/uploads/')) {
-        const local = path.join(__dirname, '..', imageUrl);
-        if (fs.existsSync(local)) {
-          imagePath = local;
-          imageUrl = null;
-        }
-      }
-
-      const result = await facebook.publishPost({
-        message: item.message,
-        imagePath: imagePath,
-        imageUrl: imageUrl,
-        source: 'scheduler'
-      });
-
-      item.status = 'completed';
-      item.completedAt = new Date().toISOString();
-      item.postId = result.postId;
-      storage.updateQueue(queue);
-
-      this.emit('post_success', { item, result, source: 'scheduler' });
-      this.emit('queue_updated', queue);
-      this.emit('history_updated', storage.getHistory());
-    } catch (err) {
-      console.error(`[Scheduler] Failed to post item ${item.id}:`, err.message);
-      item.status = 'failed';
-      item.error = err.message;
-      storage.updateQueue(queue);
-
-      this.emit('post_failed', { item, error: err.message, source: 'scheduler' });
-      this.emit('queue_updated', queue);
-      this.emit('history_updated', storage.getHistory());
-    } finally {
-      this.isProcessing = false;
-      this.emit('status', this.getStatus());
-    }
-  }
-
-  /**
-   * Generate and publish an AI post + thumbnail card (Auto-Pilot)
-   */
-  async triggerAIAutoPilot(customTopic = '') {
-    if (this.isProcessing) return;
-    this.isProcessing = true;
-    this.emit('status', this.getStatus());
-    this.emit('autopilot_generating', { timestamp: new Date().toISOString() });
-
-    const settings = storage.getSettings();
-
-    // Select category: Rotate or randomly pick from user's active categories
-    const categories = settings.selectedCategories && settings.selectedCategories.length > 0
-      ? settings.selectedCategories
-      : ['trending_news', 'science_nature', 'history_civilization', 'psychology_mind', 'world_geography', 'tech_inventions', 'philosophy_wisdom'];
-    
-    const selectedCategoryId = categories[Math.floor(Math.random() * categories.length)];
-
-    try {
-      console.log(`[AI Auto-Pilot] Auto-generating viral post for category: ${selectedCategoryId}...`);
-      
-      const bundle = await ai.generateFullPostBundle({
-        topic: customTopic,
-        categoryId: selectedCategoryId,
-        includeImage: settings.includeAiImage !== false
-      });
-
-      console.log('[AI Auto-Pilot] Publishing post to Facebook Page...');
-      
-      const result = await facebook.publishPost({
-        message: bundle.message,
-        imagePath: bundle.image?.localPath || null,
-        imageUrl: bundle.image?.url || null,
-        source: 'ai_autopilot'
-      });
-
-      this.lastAutoPostTime = Date.now();
-
-      this.emit('post_success', {
-        result,
-        source: 'ai_autopilot',
-        message: bundle.message,
-        imageUrl: bundle.image?.url
-      });
-      this.emit('history_updated', storage.getHistory());
-
-      return { success: true, result, bundle };
-    } catch (err) {
-      console.error('[AI Auto-Pilot] Error during generation & publish:', err.message);
-      this.emit('post_failed', { error: err.message, source: 'ai_autopilot' });
-      this.emit('history_updated', storage.getHistory());
-      throw err;
-    } finally {
-      this.isProcessing = false;
-      this.emit('status', this.getStatus());
-    }
-  }
-
-  /**
-   * Run immediate trigger manually
-   */
-  async runNow() {
-    await this.triggerAIAutoPilot();
+  } catch {
+    console.warn('[Scheduler] Tick failed; persistent jobs will be revisited');
+  } finally {
+    busy = false;
   }
 }
-
-module.exports = new SchedulerService();
+async function init() {
+  if (!ENABLE_AUTOMATION) return;
+  stopping = false;
+  await jobs.recover();
+  timer = setInterval(tick, 15000);
+  timer.unref();
+  void tick();
+}
+async function shutdown() {
+  stopping = true;
+  if (timer) clearInterval(timer);
+  timer = null;
+  const deadline = Date.now() + 30000;
+  while (busy && Date.now() < deadline)
+    await new Promise((resolve) => setTimeout(resolve, 100));
+}
+async function runNow(topic = '', key) {
+  const job = await enqueueAuto(topic, key);
+  return job.id
+    ? require('./publishing').processJob(job.id, { forceDue: true })
+    : job;
+}
+module.exports = {
+  sync,
+  start: sync,
+  stop: sync,
+  init,
+  shutdown,
+  tick,
+  materializeDue,
+  getStatus,
+  enqueueAuto,
+  triggerAIAutoPilot: runNow,
+  runNow,
+  processManualQueueItem: async (item) =>
+    require('./publishing').processJob(item.id, { forceDue: true })
+};

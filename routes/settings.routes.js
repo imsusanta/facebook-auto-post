@@ -7,18 +7,24 @@ const ai = require('../services/ai');
 const { broadcastSSE } = require('../middleware/sse');
 
 // GET /api/settings
-router.get('/', (req, res) => {
-  res.json(storage.getSettings());
+router.get('/', async (req, res) => {
+  res.json((await storage.getSettings()));
 });
 
 // POST /api/settings
-router.post('/', (req, res, next) => {
+router.post('/', async (req, res, next) => {
   try {
-    const updated = storage.saveSettings(req.body);
+    if (req.body.accessToken) {
+      const active = await storage.getActivePage();
+      if (!active) return res.status(400).json({error:'Connect a page first'});
+      const info = await facebook.verifyConnection(active.id, req.body.accessToken);
+      if (info.pageId !== active.id) return res.status(400).json({error:'Token does not match the active page'});
+    }
+    const updated = (await storage.saveSettings(req.body));
     if (updated.autoPostEnabled || updated.autoPilotEnabled) {
-      scheduler.start();
+      (await scheduler.start());
     } else {
-      scheduler.stop();
+      (await scheduler.stop());
     }
     broadcastSSE('settings_updated', updated);
     res.json({ success: true, settings: updated });
@@ -29,13 +35,15 @@ router.post('/', (req, res, next) => {
 
 // POST /api/settings/verify
 router.post('/verify', async (req, res) => {
-  const { pageId, accessToken } = req.body;
+  const current = await storage.getSettings();
+  const pageId = req.body.pageId || current.pageId;
+  const accessToken = req.body.accessToken || current.accessToken;
   try {
     const info = await facebook.verifyConnection(pageId, accessToken);
-    storage.saveSettings({ pageName: info.pageName, pageId: info.pageId });
+    (await storage.saveSettings({ pageName: info.pageName, pageId: info.pageId }));
     res.json({ success: true, info });
   } catch (err) {
-    res.status(400).json({ success: false, error: err.message });
+    res.status(400).json({ success: false, error: 'Operation failed. Check settings and try again.' });
   }
 });
 
@@ -44,17 +52,17 @@ router.post('/verify-gemini', async (req, res) => {
   const { apiKey } = req.body;
   try {
     const info = await ai.verifyGeminiKey(apiKey);
-    storage.saveSettings({ geminiApiKey: apiKey });
+    (await storage.saveSettings({ geminiApiKey: apiKey }));
     res.json({ success: true, info });
   } catch (err) {
-    res.status(400).json({ success: false, error: err.message });
+    res.status(400).json({ success: false, error: 'Operation failed. Check settings and try again.' });
   }
 });
 
 // POST /api/settings/reset-prompt
-router.post('/reset-prompt', (req, res) => {
-  const defaultPrompt = storage.getDefaultSystemPrompt();
-  storage.saveSettings({ customSystemPrompt: defaultPrompt });
+router.post('/reset-prompt', async (req, res) => {
+  const defaultPrompt = (await storage.getDefaultSystemPrompt());
+  (await storage.saveSettings({ customSystemPrompt: defaultPrompt }));
   res.json({ success: true, customSystemPrompt: defaultPrompt });
 });
 

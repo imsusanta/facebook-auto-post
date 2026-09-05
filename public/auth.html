@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AutoPost — Account</title><link rel="stylesheet" href="/auth.css"></head>
+<body><main><h1>AutoPost</h1><p>Sign in to your private Facebook automation workspace.</p>
+<form id="accountForm"><h2 id="formTitle">Sign in</h2><label id="nameLabel" hidden>Name<input id="name" autocomplete="name" maxlength="100"></label><label id="emailLabel">Email<input id="email" type="email" autocomplete="username" maxlength="254" required></label><label id="passwordLabel">Password<input id="password" type="password" autocomplete="current-password" minlength="12" maxlength="128" required></label><button id="submit" type="submit">Sign in</button></form>
+<p id="message" role="status" aria-live="polite"></p><nav><button type="button" data-mode="login">Sign in</button><button type="button" data-mode="signup">Create account</button><button type="button" data-mode="forgot-password">Forgot password</button><button type="button" data-mode="resend-verification">Resend verification</button></nav>
+<p class="note">Use at least 12 characters for your password. Verify your email before signing in.</p></main><script src="/auth.js"></script></body></html>

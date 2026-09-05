@@ -1,16 +1,33 @@
-/**
- * Centralized SaaS Error Handling Middleware
- */
-function errorHandler(err, req, res, next) {
-  console.error(`[Error] ${req.method} ${req.originalUrl}:`, err.message || err);
-
-  const statusCode = err.statusCode || (res.statusCode !== 200 ? res.statusCode : 500);
-
-  res.status(statusCode).json({
-    success: false,
-    error: err.message || 'Internal Server Error',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
-  });
-}
-
-module.exports = errorHandler;
+const { randomUUID } = require('node:crypto');
+module.exports = (err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const requestId = randomUUID();
+  const status =
+    err.type === 'entity.too.large'
+      ? 413
+      : err.name === 'MulterError'
+        ? 400
+        : err.statusCode || err.status || 500;
+  // Do not log messages, request bodies, URLs with query strings, or upstream error objects.
+  console.error(
+    JSON.stringify({
+      event: 'request_failed',
+      requestId,
+      method: req.method,
+      status
+    })
+  );
+  res
+    .status(status >= 400 && status <= 599 ? status : 500)
+    .json({
+      success: false,
+      error: err.expose
+        ? err.message
+        : status === 413
+          ? 'Request too large'
+          : status < 500
+            ? 'Invalid request'
+            : 'Request failed. Please try again.',
+      requestId
+    });
+};

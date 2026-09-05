@@ -5,31 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AutoPost - Facebook Post Automation</title>
   
-  <!-- Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            brand: {
-              50: '#EEF2FF',
-              100: '#E0E7FF',
-              500: '#6366F1',
-              600: '#4F46E5',
-              700: '#4338CA',
-            }
-          },
-          fontFamily: {
-            sans: ['Inter', 'system-ui', 'sans-serif'],
-          }
-        }
-      }
-    }
-  </script>
-
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="/tailwind.css">
+  <script src="/vendor/lucide.js" defer></script>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body class="bg-[#F8FAFC] text-slate-900 flex h-screen overflow-hidden font-sans">
@@ -306,137 +283,8 @@
               </div>
 
               <!-- Week Calendar Grid Container -->
-              <div id="dashboardWeekContainer">
-                <div class="grid grid-cols-8 text-center text-xs pb-3 border-b border-slate-100">
-                  <div class="text-slate-400 font-medium">Time</div>
-                  <div><div class="text-slate-500 font-medium">Mon</div><div class="text-slate-800 font-semibold text-xs mt-0.5">26 May</div></div>
-                  <div><div class="text-slate-500 font-medium">Tue</div><div class="text-slate-800 font-semibold text-xs mt-0.5">27 May</div></div>
-                  <div><div class="text-indigo-600 font-bold">Wed</div><div class="text-indigo-600 font-bold text-xs mt-0.5">28 May</div></div>
-                  <div><div class="text-slate-500 font-medium">Thu</div><div class="text-slate-800 font-semibold text-xs mt-0.5">29 May</div></div>
-                  <div><div class="text-slate-500 font-medium">Fri</div><div class="text-slate-800 font-semibold text-xs mt-0.5">30 May</div></div>
-                  <div><div class="text-slate-500 font-medium">Sat</div><div class="text-slate-800 font-semibold text-xs mt-0.5">31 May</div></div>
-                  <div><div class="text-slate-500 font-medium">Sun</div><div class="text-slate-800 font-semibold text-xs mt-0.5">1 Jun</div></div>
-                </div>
+              <div id="dashboardWeekContainer" class="p-4 text-xs text-slate-500">Loading this week’s schedule…</div>
 
-                <!-- Time slots -->
-                <div class="relative">
-                  <!-- 09:00 AM -->
-                  <div class="grid grid-cols-8 calendar-time-slot">
-                    <div class="text-slate-400 text-xs font-medium pl-1">09:00 AM</div>
-                    <div class="calendar-cell relative" data-date="2024-05-26" data-time="09:30">
-                      <div class="cal-event-card bg-sky-50 border border-sky-100 text-sky-900" title="Morning Motivation">
-                        <span class="text-[10px] font-semibold text-sky-600">09:30 AM</span>
-                        <span class="text-[11px] font-bold text-slate-800 line-clamp-1 leading-tight">Morning Motivation</span>
-                        <div class="flex items-center justify-between mt-1">
-                          <img src="https://images.unsplash.com/photo-1470240731273-7821a6eeb6bd?w=100&auto=format&fit=crop&q=80" class="w-4 h-4 rounded-md object-cover">
-                          <div class="w-3.5 h-3.5 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-[8px] font-bold">f</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="calendar-cell" data-date="2024-05-27" data-time="09:00"></div>
-                    <div class="calendar-cell relative" data-date="2024-05-28" data-time="09:15">
-                      <div class="cal-event-card bg-indigo-50 border border-indigo-100 text-indigo-900" title="New Blog Post">
-                        <span class="text-[10px] font-semibold text-indigo-600">09:15 AM</span>
-                        <span class="text-[11px] font-bold text-slate-800 line-clamp-1 leading-tight">New Blog Post</span>
-                        <div class="flex items-center justify-between mt-1">
-                          <img src="https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=100&auto=format&fit=crop&q=80" class="w-4 h-4 rounded-md object-cover">
-                          <div class="w-3.5 h-3.5 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-[8px] font-bold">f</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="calendar-cell" data-date="2024-05-29" data-time="09:00"></div>
-                    <div class="calendar-cell" data-date="2024-05-30" data-time="09:00"></div>
-                    <div class="calendar-cell" data-date="2024-05-31" data-time="09:00"></div>
-                    <div class="calendar-cell" data-date="2024-06-01" data-time="09:00"></div>
-                  </div>
-
-                  <!-- 12:00 PM -->
-                  <div class="grid grid-cols-8 calendar-time-slot">
-                    <div class="text-slate-400 text-xs font-medium pl-1">12:00 PM</div>
-                    <div class="calendar-cell" data-date="2024-05-26" data-time="12:00"></div>
-                    <div class="calendar-cell relative" data-date="2024-05-27" data-time="12:00">
-                      <div class="cal-event-card bg-emerald-50 border border-emerald-100 text-emerald-900" title="Tips & Tricks">
-                        <span class="text-[10px] font-semibold text-emerald-600">12:00 PM</span>
-                        <span class="text-[11px] font-bold text-slate-800 line-clamp-1 leading-tight">Tips & Tricks</span>
-                        <div class="flex items-center justify-between mt-1">
-                          <img src="https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=100&auto=format&fit=crop&q=80" class="w-4 h-4 rounded-md object-cover">
-                          <div class="w-3.5 h-3.5 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-[8px] font-bold">f</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="calendar-cell" data-date="2024-05-28" data-time="12:00"></div>
-                    <div class="calendar-cell" data-date="2024-05-29" data-time="12:00"></div>
-                    <div class="calendar-cell" data-date="2024-05-30" data-time="12:00"></div>
-                    <div class="calendar-cell relative" data-date="2024-05-31" data-time="12:30">
-                      <div class="cal-event-card bg-rose-50 border border-rose-100 text-rose-900" title="Weekend Offer">
-                        <span class="text-[10px] font-semibold text-rose-600">12:30 PM</span>
-                        <span class="text-[11px] font-bold text-slate-800 line-clamp-1 leading-tight">Weekend Offer</span>
-                        <div class="flex items-center justify-between mt-1">
-                          <img src="https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=100&auto=format&fit=crop&q=80" class="w-4 h-4 rounded-md object-cover">
-                          <div class="w-3.5 h-3.5 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-[8px] font-bold">f</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="calendar-cell" data-date="2024-06-01" data-time="12:00"></div>
-                  </div>
-
-                  <!-- 03:00 PM -->
-                  <div class="grid grid-cols-8 calendar-time-slot">
-                    <div class="text-slate-400 text-xs font-medium pl-1">03:00 PM</div>
-                    <div class="calendar-cell" data-date="2024-05-26" data-time="15:00"></div>
-                    <div class="calendar-cell" data-date="2024-05-27" data-time="15:00"></div>
-                    <div class="calendar-cell" data-date="2024-05-28" data-time="15:00"></div>
-                    <div class="calendar-cell relative" data-date="2024-05-29" data-time="15:00">
-                      <div class="cal-event-card bg-amber-50 border border-amber-100 text-amber-900" title="Product Update">
-                        <span class="text-[10px] font-semibold text-amber-600">03:00 PM</span>
-                        <span class="text-[11px] font-bold text-slate-800 line-clamp-1 leading-tight">Product Update</span>
-                        <div class="flex items-center justify-between mt-1">
-                          <img src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=100&auto=format&fit=crop&q=80" class="w-4 h-4 rounded-md object-cover">
-                          <div class="w-3.5 h-3.5 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-[8px] font-bold">f</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="calendar-cell" data-date="2024-05-30" data-time="15:00"></div>
-                    <div class="calendar-cell" data-date="2024-05-31" data-time="15:00"></div>
-                    <div class="calendar-cell" data-date="2024-06-01" data-time="15:00"></div>
-                  </div>
-
-                  <!-- 06:00 PM -->
-                  <div class="grid grid-cols-8 calendar-time-slot">
-                    <div class="text-slate-400 text-xs font-medium pl-1">06:00 PM</div>
-                    <div class="calendar-cell" data-date="2024-05-26" data-time="18:00"></div>
-                    <div class="calendar-cell" data-date="2024-05-27" data-time="18:00"></div>
-                    <div class="calendar-cell" data-date="2024-05-28" data-time="18:00"></div>
-                    <div class="calendar-cell" data-date="2024-05-29" data-time="18:00"></div>
-                    <div class="calendar-cell relative" data-date="2024-05-30" data-time="18:00">
-                      <div class="cal-event-card bg-sky-50 border border-sky-100 text-sky-900" title="Customer Story">
-                        <span class="text-[10px] font-semibold text-sky-600">06:00 PM</span>
-                        <span class="text-[11px] font-bold text-slate-800 line-clamp-1 leading-tight">Customer Story</span>
-                        <div class="flex items-center justify-between mt-1">
-                          <img src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=100&auto=format&fit=crop&q=80" class="w-4 h-4 rounded-md object-cover">
-                          <div class="w-3.5 h-3.5 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-[8px] font-bold">f</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="calendar-cell" data-date="2024-05-31" data-time="18:00"></div>
-                    <div class="calendar-cell" data-date="2024-06-01" data-time="18:00"></div>
-                  </div>
-
-                  <!-- 09:00 PM -->
-                  <div class="grid grid-cols-8 calendar-time-slot">
-                    <div class="text-slate-400 text-xs font-medium pl-1">09:00 PM</div>
-                    <div class="calendar-cell" data-date="2024-05-26" data-time="21:00"></div>
-                    <div class="calendar-cell" data-date="2024-05-27" data-time="21:00"></div>
-                    <div class="calendar-cell" data-date="2024-05-28" data-time="21:00"></div>
-                    <div class="calendar-cell" data-date="2024-05-29" data-time="21:00"></div>
-                    <div class="calendar-cell" data-date="2024-05-30" data-time="21:00"></div>
-                    <div class="calendar-cell" data-date="2024-05-31" data-time="21:00"></div>
-                    <div class="calendar-cell" data-date="2024-06-01" data-time="21:00"></div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Month Calendar View (Hidden by default) -->
               <div id="dashboardMonthContainer" class="hidden">
                 <div class="grid grid-cols-7 text-center text-xs font-semibold text-slate-500 pb-2 border-b border-slate-100">
                   <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
@@ -531,7 +379,7 @@
                     <div class="flex items-center justify-between px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-700 shadow-sm cursor-pointer hover:border-slate-300">
                       <div class="flex items-center gap-2.5">
                         <i data-lucide="calendar" class="w-4 h-4 text-slate-400"></i>
-                        <span id="quickScheduleDateLabel">28 May 2024</span>
+                        <span id="quickScheduleDateLabel">Choose date</span>
                       </div>
                       <i data-lucide="chevron-down" class="w-4 h-4 text-slate-400"></i>
                     </div>
@@ -1024,7 +872,7 @@
                 <button class="queue-filter-btn px-3 py-1 font-medium rounded-lg text-slate-600 hover:text-slate-900" data-filter="pending">Pending</button>
                 <button class="queue-filter-btn px-3 py-1 font-medium rounded-lg text-slate-600 hover:text-slate-900" data-filter="completed">Completed</button>
               </div>
-              <button class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-sm" onclick="document.getElementById('openComposerBtn').click()">
+              <button class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-sm" id="scheduleComposerShortcut">
                 <i data-lucide="plus" class="w-3.5 h-3.5"></i>
                 <span>Add Post</span>
               </button>
@@ -1049,7 +897,7 @@
               </div>
             </div>
             <div class="flex items-center gap-3">
-              <span id="calendarCurrentMonthLabel" class="text-sm font-bold text-slate-800">May 2024</span>
+              <span id="calendarCurrentMonthLabel" class="text-sm font-bold text-slate-800">Schedule</span>
               <div class="flex items-center gap-1">
                 <button class="cal-nav-prev w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-50"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
                 <button class="cal-nav-next w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-50"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
@@ -1829,6 +1677,9 @@
   </div>
 
   <!-- Load Main Application Logic -->
-  <script src="app.js"></script>
+  <script src="/vendor/dompurify.js"></script>
+  <script src="/security-ui.js"></script>
+  <script src="/publishing-ui.js"></script>
+  <script src="/app.js"></script>
 </body>
 </html>

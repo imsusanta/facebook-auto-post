@@ -9,10 +9,10 @@ const { PORT } = require('../config/env');
 router.get('/events', handleSSEConnection);
 
 // GET /api/status - Complete System Status
-router.get('/status', (req, res) => {
-  const settings = storage.getSettings();
-  const history = storage.getHistory();
-  const queue = storage.getQueue();
+router.get('/status', async (req, res) => {
+  const settings = (await storage.getSettings());
+  const history = (await storage.getHistory());
+  const queue = (await storage.getQueue());
 
   const total = history.length;
   const success = history.filter(h => h.status === 'success').length;
@@ -31,7 +31,7 @@ router.get('/status', (req, res) => {
       intervalMinutes: settings.intervalMinutes,
       hasToken: !!settings.accessToken
     },
-    scheduler: scheduler.getStatus(),
+    scheduler: (await scheduler.getStatus()),
     stats: {
       total,
       success,
@@ -42,9 +42,9 @@ router.get('/status', (req, res) => {
 });
 
 // GET /api/stats
-router.get('/stats', (req, res) => {
-  const history = storage.getHistory();
-  const queue = storage.getQueue();
+router.get('/stats', async (req, res) => {
+  const history = (await storage.getHistory());
+  const queue = (await storage.getQueue());
   res.json({
     totalPosts: history.length,
     successfulPosts: history.filter(h => h.status === 'success').length,
@@ -54,50 +54,50 @@ router.get('/stats', (req, res) => {
 });
 
 // GET /api/history
-router.get('/history', (req, res) => {
-  res.json(storage.getHistory());
+router.get('/history', async (req, res) => {
+  res.json((await storage.getHistory()));
 });
 
 // DELETE /api/history
-router.delete('/history', (req, res) => {
-  const cleared = storage.clearHistory();
+router.delete('/history', async (req, res) => {
+  const cleared = (await storage.clearHistory());
   broadcastSSE('history_updated', cleared);
   res.json({ success: true, history: cleared });
 });
 
 // Category Management
-router.get('/categories', (req, res) => {
-  res.json(storage.getCategories());
+router.get('/categories', async (req, res) => {
+  res.json((await storage.getCategories()));
 });
 
-router.post('/categories', (req, res) => {
+router.post('/categories', async (req, res) => {
   const { title, promptContext, icon, badge } = req.body;
   if (!title || !title.trim()) {
     return res.status(400).json({ success: false, error: 'Category name is required' });
   }
-  const newCat = storage.addCategory({ title: title.trim(), promptContext, icon, badge });
-  res.json({ success: true, category: newCat, categories: storage.getCategories() });
+  const newCat = (await storage.addCategory({ title: title.trim(), promptContext, icon, badge }));
+  res.json({ success: true, category: newCat, categories: (await storage.getCategories()) });
 });
 
-router.put('/categories/:id', (req, res) => {
+router.put('/categories/:id', async (req, res) => {
   const { id } = req.params;
   const { title, promptContext, icon, badge } = req.body;
-  const updated = storage.updateCategory(id, { title, promptContext, icon, badge });
+  const updated = (await storage.updateCategory(id, { title, promptContext, icon, badge }));
   if (!updated) {
     return res.status(404).json({ success: false, error: 'Category not found' });
   }
-  res.json({ success: true, category: updated, categories: storage.getCategories() });
+  res.json({ success: true, category: updated, categories: (await storage.getCategories()) });
 });
 
-router.delete('/categories/:id', (req, res) => {
+router.delete('/categories/:id', async (req, res) => {
   const { id } = req.params;
-  const remaining = storage.deleteCategory(id);
+  const remaining = (await storage.deleteCategory(id));
   res.json({ success: true, categories: remaining });
 });
 
 // GET /api/integrations
-router.get('/integrations', (req, res) => {
-  const settings = storage.getSettings();
+router.get('/integrations', async (req, res) => {
+  const settings = (await storage.getSettings());
   res.json({
     meta: {
       connected: !!settings.accessToken,
@@ -115,7 +115,7 @@ router.get('/integrations', (req, res) => {
       port: PORT,
       status: 'healthy'
     },
-    scheduler: scheduler.getStatus()
+    scheduler: (await scheduler.getStatus())
   });
 });
 

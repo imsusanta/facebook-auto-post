@@ -1,6 +1,7 @@
 // AutoPost - Complete Modern Facebook Automation UI Engine
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  await window.authReady;
   // Global State
   let state = {
     settings: {},
@@ -8,16 +9,12 @@ document.addEventListener('DOMContentLoaded', () => {
     history: [],
     queue: [],
     media: [],
-    notifications: [
-      { id: 'notif_1', text: 'Auto-pilot scheduler initialized successfully.', time: 'Just now', type: 'info' },
-      { id: 'notif_2', text: 'Facebook Page automation module initialized.', time: '5m ago', type: 'success' },
-      { id: 'notif_3', text: 'Google Gemini 3.1 Flash AI engine ready for content generation.', time: '10m ago', type: 'success' }
-    ],
+    notifications: [],
     selectedFile: null,
     generatedAiImage: null,
     currentView: 'dashboard',
     calendarViewMode: 'week',
-    calendarDate: new Date(2024, 4, 28), // May 28, 2024 default matching reference design
+    calendarDate: new Date(),
     pages: [],
     activePageId: null,
     activeTemplate: null,
@@ -243,8 +240,8 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const cfg = headerConfigs[viewName] || headerConfigs['dashboard'];
-    headerTitle.innerHTML = cfg.title;
-    headerSubtitle.innerHTML = cfg.subtitle;
+    setSafeHTML(headerTitle, cfg.title);
+    setSafeHTML(headerSubtitle, cfg.subtitle);
 
     // Trigger view-specific renderers
     if (viewName === 'create-post') {
@@ -300,21 +297,21 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderNotifications() {
-    notificationsList.innerHTML = '';
+    setSafeHTML(notificationsList, '');
     if (state.notifications.length === 0) {
-      notificationsList.innerHTML = '<div class="text-xs text-slate-400 text-center py-6">No notifications</div>';
+      setSafeHTML(notificationsList, '<div class="text-xs text-slate-400 text-center py-6">No notifications</div>');
       return;
     }
     state.notifications.forEach(n => {
       const item = document.createElement('div');
       item.className = 'p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-start gap-2.5 text-xs';
-      item.innerHTML = `
+      setSafeHTML(item, `
         <div class="w-2 h-2 rounded-full ${n.type === 'success' ? 'bg-emerald-500' : 'bg-indigo-500'} mt-1.5 shrink-0"></div>
         <div class="min-w-0 flex-1">
           <p class="text-slate-800 font-medium leading-snug">${n.text}</p>
           <span class="text-[10px] text-slate-400 mt-0.5 block">${n.time}</span>
         </div>
-      `;
+      `);
       notificationsList.appendChild(item);
     });
   }
@@ -563,11 +560,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (regenerateCardImageBtn) {
       regenerateCardImageBtn.disabled = true;
-      regenerateCardImageBtn.innerHTML = `<span class="animate-spin text-xs">⌛</span> <span>ছবি তৈরি হচ্ছে...</span>`;
+      setSafeHTML(regenerateCardImageBtn, `<span class="animate-spin text-xs">⌛</span> <span>ছবি তৈরি হচ্ছে...</span>`);
     }
     if (fbPreviewRegenImgBtn) {
       fbPreviewRegenImgBtn.disabled = true;
-      fbPreviewRegenImgBtn.innerHTML = `<span class="animate-spin text-xs">⌛</span> <span>ছবি হচ্ছে...</span>`;
+      setSafeHTML(fbPreviewRegenImgBtn, `<span class="animate-spin text-xs">⌛</span> <span>ছবি হচ্ছে...</span>`);
     }
     refreshIcons();
 
@@ -613,11 +610,11 @@ document.addEventListener('DOMContentLoaded', () => {
     } finally {
       if (regenerateCardImageBtn) {
         regenerateCardImageBtn.disabled = false;
-        regenerateCardImageBtn.innerHTML = origCardBtnText;
+        setSafeHTML(regenerateCardImageBtn, origCardBtnText);
       }
       if (fbPreviewRegenImgBtn) {
         fbPreviewRegenImgBtn.disabled = false;
-        fbPreviewRegenImgBtn.innerHTML = origFbBtnText;
+        setSafeHTML(fbPreviewRegenImgBtn, origFbBtnText);
       }
       if (generatingBox) generatingBox.classList.add('hidden');
       updateLivePreview();
@@ -633,11 +630,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (regenerateCaptionBtn) {
       regenerateCaptionBtn.disabled = true;
-      regenerateCaptionBtn.innerHTML = `<span class="animate-spin text-xs">⌛</span> <span>নতুন ক্যাপশন লেখা হচ্ছে...</span>`;
+      setSafeHTML(regenerateCaptionBtn, `<span class="animate-spin text-xs">⌛</span> <span>নতুন ক্যাপশন লেখা হচ্ছে...</span>`);
     }
     if (fbPreviewRegenTextBtn) {
       fbPreviewRegenTextBtn.disabled = true;
-      fbPreviewRegenTextBtn.innerHTML = `<span class="animate-spin text-xs">⌛</span> <span>ক্যাপশন হচ্ছে...</span>`;
+      setSafeHTML(fbPreviewRegenTextBtn, `<span class="animate-spin text-xs">⌛</span> <span>ক্যাপশন হচ্ছে...</span>`);
     }
     refreshIcons();
 
@@ -679,11 +676,11 @@ document.addEventListener('DOMContentLoaded', () => {
     } finally {
       if (regenerateCaptionBtn) {
         regenerateCaptionBtn.disabled = false;
-        regenerateCaptionBtn.innerHTML = origCaptionBtnText;
+        setSafeHTML(regenerateCaptionBtn, origCaptionBtnText);
       }
       if (fbPreviewRegenTextBtn) {
         fbPreviewRegenTextBtn.disabled = false;
-        fbPreviewRegenTextBtn.innerHTML = origFbTextBtnText;
+        setSafeHTML(fbPreviewRegenTextBtn, origFbTextBtnText);
       }
       refreshIcons();
     }
@@ -712,12 +709,12 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       publishNowBtn.disabled = true;
-      publishNowBtn.innerHTML = `<span class="animate-spin mr-1">⌛</span> Publishing...`;
+      setSafeHTML(publishNowBtn, `<span class="animate-spin mr-1">⌛</span> Publishing...`);
 
       try {
         const formData = new FormData();
         formData.append('message', text);
-        formData.append('category', composerCategorySelect ? composerCategorySelect.value : 'general');
+        formData.append('facebookPageId', state.activePageId || state.settings.pageId || '');
 
         if (state.selectedFile) {
           formData.append('image', state.selectedFile);
@@ -725,14 +722,17 @@ document.addEventListener('DOMContentLoaded', () => {
           formData.append('imageUrl', state.generatedAiImage);
         }
 
+        const operationKey=await window.publicationUI.key('/api/post',formData);
         const res = await fetch('/api/post', {
           method: 'POST',
+          headers: {'Idempotency-Key': operationKey},
           body: formData
         });
 
         const result = await res.json();
-        if (result.success) {
-          alert('🎉 Post published successfully to Facebook Page!');
+        window.publicationUI.settled(operationKey,result);
+        if (result.published === true) {
+          alert(window.publicationUI.message(result));
           postMessage.value = '';
           state.selectedFile = null;
           state.generatedAiImage = null;
@@ -749,14 +749,15 @@ document.addEventListener('DOMContentLoaded', () => {
           fetchStatus();
           switchView('dashboard');
         } else {
-          alert('Publish Failed: ' + (result.error || 'Facebook Graph API error'));
+          alert(window.publicationUI.message(result));
+          await fetchStatus();
         }
       } catch (err) {
         console.error('Publish error:', err);
-        alert('Error publishing post.');
+        alert('Response unavailable. Check the queue first; retrying unchanged content uses the same operation key.');
       } finally {
         publishNowBtn.disabled = false;
-        publishNowBtn.innerHTML = `<i data-lucide="send" class="w-3.5 h-3.5"></i><span>Publish Now</span>`;
+        setSafeHTML(publishNowBtn, `<i data-lucide="send" class="w-3.5 h-3.5"></i><span>Publish Now</span>`);
         refreshIcons();
       }
     });
@@ -778,7 +779,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const formData = new FormData();
         formData.append('message', text);
         if (enableScheduleCheck.checked && composerScheduleDateTime.value) {
-          formData.append('scheduledAt', new Date(composerScheduleDateTime.value).toISOString());
+          formData.append('scheduledLocal', composerScheduleDateTime.value);
         }
         if (state.selectedFile) {
           formData.append('image', state.selectedFile);
@@ -786,14 +787,19 @@ document.addEventListener('DOMContentLoaded', () => {
           formData.append('imageUrl', state.generatedAiImage);
         }
 
+        formData.append('facebookPageId', state.activePageId || state.settings.pageId || '');
+        formData.append('timeZone', state.settings.timeZone || 'UTC');
+        const operationKey=await window.publicationUI.key('/api/queue',formData);
         const res = await fetch('/api/queue', {
           method: 'POST',
+          headers: {'Idempotency-Key': operationKey},
           body: formData
         });
 
         const result = await res.json();
+        window.publicationUI.settled(operationKey,{accepted:result.success===true});
         if (result.success) {
-          alert('✅ Post successfully scheduled and added to queue!');
+          alert(result.replayed ? 'This operation already exists. Check its current status in the queue.' : 'Saved to queue, not yet published. Scheduled delivery requires an active worker and queue automation.');
           postMessage.value = '';
           state.selectedFile = null;
           state.generatedAiImage = null;
@@ -809,7 +815,7 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('Failed to add post to queue.');
       } finally {
         saveToQueueBtn.disabled = false;
-        saveToQueueBtn.innerHTML = `<i data-lucide="layers" class="w-3.5 h-3.5 text-slate-500"></i><span>Add to Queue</span>`;
+        setSafeHTML(saveToQueueBtn, `<i data-lucide="layers" class="w-3.5 h-3.5 text-slate-500"></i><span>Add to Queue</span>`);
         refreshIcons();
       }
     });
@@ -852,7 +858,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderMonthGrid(container) {
     if (!container) return;
-    container.innerHTML = '';
+    setSafeHTML(container, '');
     const year = state.calendarDate.getFullYear();
     const month = state.calendarDate.getMonth();
     const firstDay = new Date(year, month, 1).getDay();
@@ -868,7 +874,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Days 1 to totalDays
     for (let day = 1; day <= totalDays; day++) {
       const cell = document.createElement('div');
-      const isToday = day === 28 && month === 4; // May 28 reference day
+      const today=new Date(); const isToday=day===today.getDate()&&month===today.getMonth()&&year===today.getFullYear();
       cell.className = `cal-month-cell ${isToday ? 'bg-indigo-50/40 ring-1 ring-indigo-500' : ''}`;
       
       const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -876,27 +882,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
       let contentHtml = `<span class="text-xs font-bold ${isToday ? 'text-indigo-600' : 'text-slate-700'}">${day}</span>`;
 
-      // Check if scheduled posts fall on this day
-      if (day === 28) {
-        contentHtml += `
-          <div class="mt-1.5 p-1 bg-indigo-100 text-indigo-700 text-[10px] font-semibold rounded leading-tight truncate">
-            09:15 AM - New Blog Post
-          </div>
-          <div class="mt-1 p-1 bg-emerald-100 text-emerald-700 text-[10px] font-semibold rounded leading-tight truncate">
-            12:00 PM - Tips & Tricks
-          </div>
-        `;
-      } else if (day === 26) {
-        contentHtml += `<div class="mt-1.5 p-1 bg-sky-100 text-sky-700 text-[10px] font-semibold rounded leading-tight truncate">09:30 AM - Motivation</div>`;
-      } else if (day === 29) {
-        contentHtml += `<div class="mt-1.5 p-1 bg-amber-100 text-amber-700 text-[10px] font-semibold rounded leading-tight truncate">03:00 PM - Product Update</div>`;
-      } else if (day === 30) {
-        contentHtml += `<div class="mt-1.5 p-1 bg-sky-100 text-sky-700 text-[10px] font-semibold rounded leading-tight truncate">06:00 PM - Customer Story</div>`;
-      } else if (day === 31) {
-        contentHtml += `<div class="mt-1.5 p-1 bg-rose-100 text-rose-700 text-[10px] font-semibold rounded leading-tight truncate">12:30 PM - Weekend Offer</div>`;
+      const zone=state.settings.timeZone||'UTC';
+      for(const item of state.queue.filter(q=>q.scheduledAt)){
+        const parts=new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(item.scheduledAt));
+        const get=t=>parts.find(p=>p.type===t).value;
+        if(`${get('year')}-${get('month')}-${get('day')}`===dateStr)contentHtml+=`<div class="mt-1 p-1 text-[10px] rounded truncate">${window.publicationUI.date(item.scheduledAt,zone)} · ${item.status} · ${item.message||'AI post'}</div>`;
       }
 
-      cell.innerHTML = contentHtml;
+      setSafeHTML(cell, contentHtml);
 
       // Click cell to open composer with pre-filled date
       cell.addEventListener('click', () => {
@@ -924,7 +917,7 @@ document.addEventListener('DOMContentLoaded', () => {
         alert(`📅 Scheduled Event: "${cardTitle}"\nStatus: Scheduled to post automatically.`);
         return;
       }
-      const d = cell.getAttribute('data-date') || '2024-05-28';
+      const d = cell.getAttribute('data-date') || new Date().toISOString().slice(0,10);
       const t = cell.getAttribute('data-time') || '09:00';
       openComposer(`${d}T${t}`);
     });
@@ -949,7 +942,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Quick Schedule Form Click
   if (quickScheduleBtn) {
     quickScheduleBtn.addEventListener('click', () => {
-      const d = quickScheduleDateInput.value || '2024-05-28';
+      const d = quickScheduleDateInput.value || new Date().toISOString().slice(0,10);
       const t = quickScheduleTimeInput.value || '09:00';
       openComposer(`${d}T${t}`);
     });
@@ -966,63 +959,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!container) return;
 
     // Sample default items matching the screenshot
-    const defaultItems = [
-      {
-        id: 'mock_1',
-        title: 'Start Your Day with Positive Vibes ☕',
-        snippet: 'Good morning! Make today amazing...',
-        date: '28 May 2024',
-        time: '09:15 AM',
-        thumb: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=120&auto=format&fit=crop&q=80'
-      },
-      {
-        id: 'mock_2',
-        title: '5 Productivity Tips That Actually Work',
-        snippet: 'Boost your productivity with these simple...',
-        date: '28 May 2024',
-        time: '12:00 PM',
-        thumb: 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=120&auto=format&fit=crop&q=80'
-      },
-      {
-        id: 'mock_3',
-        title: 'Exciting News! 🎉',
-        snippet: 'We have something great to share...',
-        date: '28 May 2024',
-        time: '03:00 PM',
-        thumb: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=120&auto=format&fit=crop&q=80'
-      },
-      {
-        id: 'mock_4',
-        title: 'Customer Success Story',
-        snippet: 'See how our solution helped...',
-        date: '28 May 2024',
-        time: '06:00 PM',
-        thumb: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=120&auto=format&fit=crop&q=80'
-      }
-    ];
-
-    container.innerHTML = '';
-    const pendingItems = state.queue.filter(q => q.status === 'pending');
-    const itemsToDisplay = pendingItems.length > 0 ? pendingItems.slice(0, 4) : defaultItems;
-
-    itemsToDisplay.forEach((item, idx) => {
-      const isReal = !!item.scheduledAt;
-      const title = isReal ? (item.message.slice(0, 36) + (item.message.length > 36 ? '...' : '')) : item.title;
-      const snippet = isReal ? (item.message.slice(36, 80) + '...') : item.snippet;
-      const thumb = (isReal && item.imageUrl) ? item.imageUrl : (item.thumb || '/pariksha_notes_logo.jpg');
-      
-      let dateText = item.date || '28 May 2024';
-      let timeText = item.time || '09:15 AM';
-      if (isReal && item.scheduledAt) {
-        const d = new Date(item.scheduledAt);
-        dateText = `${d.getDate()} ${monthShort[d.getMonth()]} ${d.getFullYear()}`;
-        const h = d.getHours();
-        timeText = `${String(h % 12 || 12).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
-      }
+    setSafeHTML(container, '');
+    const itemsToDisplay=state.queue.filter(q=>q.status!=='completed').slice(0,4);
+    if(!itemsToDisplay.length){container.textContent='No pending publications.';return;}
+    itemsToDisplay.forEach(item=>{
+      const title=(item.message||item.topic||'AI post pending generation').slice(0,60);
+      const snippet='Page: '+item.facebookPageId+' · '+item.status;
+      const thumb=item.imageUrl||'/pariksha_notes_logo.jpg';
+      const dateText=window.publicationUI.date(item.scheduledAt,item.timeZone||state.settings.timeZone||'UTC');
+      const timeText=item.error||'';
 
       const row = document.createElement('div');
       row.className = 'py-3.5 flex items-center justify-between gap-4 group';
-      row.innerHTML = `
+      setSafeHTML(row, `
         <div class="flex items-center gap-3.5 min-w-0">
           <img src="${thumb}" class="w-12 h-12 rounded-xl object-cover shrink-0 shadow-sm border border-slate-100">
           <div class="min-w-0">
@@ -1035,45 +984,31 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="text-xs font-medium text-slate-800">${dateText}</div>
             <div class="text-[11px] text-slate-400 mt-0.5">${timeText}</div>
           </div>
-          <span class="bg-blue-50 text-blue-600 border border-blue-100 font-semibold px-3 py-1 rounded-full text-xs">Scheduled</span>
+          <span class="bg-blue-50 text-blue-600 border border-blue-100 font-semibold px-3 py-1 rounded-full text-xs">${item.status}</span>
           <div class="flex items-center gap-1.5 text-slate-400">
-            <button class="queue-edit-btn p-1 hover:text-slate-700 transition" title="Edit Post" data-id="${item.id}"><i data-lucide="edit-2" class="w-4 h-4"></i></button>
+
             <button class="queue-delete-btn p-1 hover:text-rose-600 transition" title="Delete Post" data-id="${item.id}"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
             <button class="queue-publish-btn p-1 hover:text-indigo-600 transition" title="Publish Right Now" data-id="${item.id}"><i data-lucide="send" class="w-4 h-4"></i></button>
           </div>
         </div>
-      `;
+      `);
       container.appendChild(row);
     });
 
-    // Attach actions
     container.querySelectorAll('.queue-delete-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        const id = btn.getAttribute('data-id');
-        if (confirm('Are you sure you want to remove this scheduled post?')) {
-          if (!id.startsWith('mock_')) {
-            await fetch(`/api/queue/${id}`, { method: 'DELETE' });
-            fetchStatus();
-          } else {
-            btn.closest('.py-3\\.5').remove();
-          }
-        }
+        if (!confirm('Remove this queued post? This does not delete a post already on Facebook.')) return;
+        try { const res=await fetch(`/api/queue/${btn.dataset.id}`,{method:'DELETE'});const result=await res.json();if(!res.ok)alert(result.error||'Could not remove job');await fetchStatus(); }
+        catch { alert('Response unavailable. Refresh the queue.'); }
       });
     });
-
     container.querySelectorAll('.queue-publish-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        const id = btn.getAttribute('data-id');
-        if (confirm('Publish this post immediately to Facebook?')) {
-          if (!id.startsWith('mock_')) {
-            btn.disabled = true;
-            await fetch(`/api/queue/${id}/publish-now`, { method: 'POST' });
-            alert('🚀 Post published immediately to Facebook!');
-            fetchStatus();
-          } else {
-            alert('🚀 Post simulated and published to Facebook!');
-          }
-        }
+        if (!confirm('Publish this post to its recorded Facebook Page now?')) return;
+        btn.disabled=true;
+        try {const res=await fetch(`/api/queue/${btn.dataset.id}/publish-now`,{method:'POST'});alert(window.publicationUI.message(await res.json()));await fetchStatus();}
+        catch {alert('Response unavailable. Check the queue before retrying.');}
+        finally {btn.disabled=false;}
       });
     });
 
@@ -1084,34 +1019,38 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderFullQueueView() {
     const container = document.getElementById('fullQueueListContainer');
     if (!container) return;
-    container.innerHTML = '';
+    setSafeHTML(container, '');
 
     if (state.queue.length === 0) {
-      container.innerHTML = `
+      setSafeHTML(container, `
         <div class="text-center py-12 text-slate-400 text-xs">
           <i data-lucide="layers" class="w-10 h-10 mx-auto mb-3 text-slate-300"></i>
           No items in queue. Click "+ Add Post" to schedule your next update.
-        </div>`;
+        </div>`);
       refreshIcons();
       return;
     }
 
     state.queue.forEach(item => {
       const isPending = item.status === 'pending';
-      const d = item.scheduledAt ? new Date(item.scheduledAt).toLocaleString() : 'Autopilot Queue';
+      const d = window.publicationUI.date(item.scheduledAt,item.timeZone||state.settings.timeZone||'UTC');
       const card = document.createElement('div');
       card.className = 'py-4 flex flex-wrap items-center justify-between gap-4';
-      card.innerHTML = `
+      setSafeHTML(card, `
         <div class="flex items-center gap-4 min-w-0 max-w-xl">
           <img src="${item.imageUrl || '/pariksha_notes_logo.jpg'}" class="w-14 h-14 rounded-xl object-cover border border-slate-100 shadow-sm shrink-0">
           <div class="min-w-0">
             <h4 class="text-sm font-semibold text-slate-900 line-clamp-1">${item.message || 'Post without text'}</h4>
             <p class="text-xs text-slate-400 mt-1 flex items-center gap-2">
               <span>📅 ${d}</span>
-              <span class="${isPending ? 'text-blue-600 bg-blue-50' : 'text-emerald-600 bg-emerald-50'} px-2 py-0.5 rounded-full font-bold text-[10px]">
+              <span class="${item.status === 'completed' ? 'text-emerald-600 bg-emerald-50' : 'text-blue-600 bg-blue-50'} px-2 py-0.5 rounded-full font-bold text-[10px]">
                 ${(item.status || 'pending').toUpperCase()}
               </span>
             </p>
+            <p class="text-xs text-slate-500 mt-1">Page: ${item.facebookPageId} · Attempts: ${item.attemptCount || 0}/${item.maxAttempts || 5}</p>
+            ${item.error ? `<p class="text-xs text-rose-600 mt-1">${item.errorCode}: ${item.error}</p>` : ''}
+            ${item.nextAttemptAt ? `<p class="text-xs mt-1">Retry: ${window.publicationUI.date(item.nextAttemptAt,item.timeZone||'UTC')}</p>` : ''}
+            ${item.status==='needs_review' ? '<p class="text-xs text-rose-600 mt-1">Check Facebook manually. Do not create a replacement until you confirm whether this was published.</p>' : ''}
           </div>
         </div>
         <div class="flex items-center gap-2">
@@ -1121,11 +1060,12 @@ document.addEventListener('DOMContentLoaded', () => {
               <span>Publish Now</span>
             </button>
           ` : ''}
+          ${item.status==='failed' && item.attemptCount<item.maxAttempts ? `<button class="fullqueue-retry-btn px-3 py-2 text-xs" data-id="${item.id}">Retry after fixing issue</button>` : ''}
           <button class="fullqueue-delete-btn p-2 text-rose-600 hover:bg-rose-50 rounded-xl transition" data-id="${item.id}" title="Delete">
             <i data-lucide="trash-2" class="w-4 h-4"></i>
           </button>
         </div>
-      `;
+      `);
       container.appendChild(card);
     });
 
@@ -1140,13 +1080,18 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
+    container.querySelectorAll('.fullqueue-retry-btn').forEach(btn => btn.addEventListener('click', async () => {
+      btn.disabled=true;
+      try { const r=await fetch(`/api/queue/${btn.dataset.id}/retry`,{method:'POST'}); alert(window.publicationUI.message(await r.json())); await fetchStatus(); }
+      catch { alert('Retry response unavailable. Check the queue.'); } finally {btn.disabled=false;}
+    }));
+
     container.querySelectorAll('.fullqueue-publish-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const id = btn.getAttribute('data-id');
         btn.disabled = true;
         btn.textContent = 'Publishing...';
-        await fetch(`/api/queue/${id}/publish-now`, { method: 'POST' });
-        alert('🚀 Post published directly to Facebook!');
+        try { const r=await fetch(`/api/queue/${id}/publish-now`, { method: 'POST' }); alert(window.publicationUI.message(await r.json())); } catch { alert('Response unavailable. Check the queue before retrying.'); } finally { btn.disabled=false; btn.textContent='Publish Now'; }
         fetchStatus();
         renderFullQueueView();
       });
@@ -1238,20 +1183,20 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderTemplatesView() {
     const grid = document.getElementById('templatesGrid');
     if (!grid) return;
-    grid.innerHTML = '';
+    setSafeHTML(grid, '');
 
     const templates = (state.templates && state.templates.length > 0) ? state.templates : VIRAL_TEMPLATES;
 
     templates.forEach(t => {
       const card = document.createElement('div');
       card.className = 'saas-card overflow-hidden flex flex-col justify-between hover:border-indigo-300 hover:shadow-md transition group relative';
-      card.innerHTML = `
+      setSafeHTML(card, `
         <div>
           <!-- Visual Template Image Banner -->
           <div class="relative h-44 w-full bg-slate-900 overflow-hidden">
             <img src="${t.imageUrl}" alt="${t.title}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500 opacity-90">
             <div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent"></div>
-            
+
             <!-- Category Badge -->
             <div class="absolute top-3 left-3 flex items-center gap-2">
               <span class="text-[11px] font-bold px-2.5 py-1 bg-black/70 text-amber-300 rounded-full border border-amber-400/30 backdrop-blur-sm shadow-sm">${t.badge || '📌 টেমপ্লেট'}</span>
@@ -1292,7 +1237,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <span>Use Template Style</span>
           </button>
         </div>
-      `;
+      `);
 
       // Custom Image Upload Listener
       const fileInput = card.querySelector('.custom-template-img-input');
@@ -1301,16 +1246,16 @@ document.addEventListener('DOMContentLoaded', () => {
           const file = e.target.files[0];
           if (file) {
             const formData = new FormData();
-            formData.append('file', file);
+            formData.append('image', file);
             try {
               const res = await fetch('/api/media/upload', { method: 'POST', body: formData });
               const d = await res.json();
-              if (d.success && d.media) {
-                t.imageUrl = d.media.url;
+              if (d.success && d.url) {
+                t.imageUrl = d.url;
                 await fetch(`/api/templates/${t.id}`, {
                   method: 'PUT',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ imageUrl: d.media.url })
+                  body: JSON.stringify({ imageUrl: d.url })
                 });
                 renderTemplatesView();
                 alert(`Uploaded custom template image for "${t.title}"!`);
@@ -1408,18 +1353,18 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       submitAddTemplateBtn.disabled = true;
-      submitAddTemplateBtn.innerHTML = `<span class="animate-spin mr-1">⌛</span> Saving...`;
+      setSafeHTML(submitAddTemplateBtn, `<span class="animate-spin mr-1">⌛</span> Saving...`);
 
       try {
         let imageUrl = newTemplateImageUrlInput ? newTemplateImageUrlInput.value.trim() : '';
         const file = newTemplateImageFileInput?.files?.[0];
         if (file) {
           const formData = new FormData();
-          formData.append('file', file);
+          formData.append('image', file);
           const uploadRes = await fetch('/api/media/upload', { method: 'POST', body: formData });
           const uploadData = await uploadRes.json();
-          if (uploadData.success && uploadData.media?.url) {
-            imageUrl = uploadData.media.url;
+          if (uploadData.success && uploadData.url?.url) {
+            imageUrl = uploadData.url;
           }
         }
 
@@ -1474,7 +1419,7 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('Network error while saving template.');
       } finally {
         submitAddTemplateBtn.disabled = false;
-        submitAddTemplateBtn.innerHTML = `<i data-lucide="check" class="w-3.5 h-3.5"></i><span>Save Template</span>`;
+        setSafeHTML(submitAddTemplateBtn, `<i data-lucide="check" class="w-3.5 h-3.5"></i><span>Save Template</span>`);
         refreshIcons();
       }
     });
@@ -1484,23 +1429,23 @@ document.addEventListener('DOMContentLoaded', () => {
   async function fetchAndRenderMedia() {
     const grid = document.getElementById('mediaGridContainer');
     if (!grid) return;
-    grid.innerHTML = '<div class="col-span-full py-10 text-center text-xs text-slate-400">Loading media...</div>';
+    setSafeHTML(grid, '<div class="col-span-full py-10 text-center text-xs text-slate-400">Loading media...</div>');
 
     try {
       const res = await fetch('/api/media');
       const mediaList = await res.json();
       state.media = mediaList || [];
 
-      grid.innerHTML = '';
+      setSafeHTML(grid, '');
       if (state.media.length === 0) {
-        grid.innerHTML = '<div class="col-span-full py-12 text-center text-xs text-slate-400">No media uploaded yet.</div>';
+        setSafeHTML(grid, '<div class="col-span-full py-12 text-center text-xs text-slate-400">No media uploaded yet.</div>');
         return;
       }
 
       state.media.forEach(m => {
         const card = document.createElement('div');
         card.className = 'saas-card overflow-hidden group relative border border-slate-200/80';
-        card.innerHTML = `
+        setSafeHTML(card, `
           <div class="aspect-square bg-slate-100 relative overflow-hidden">
             <img src="${m.url}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300">
             <div class="absolute inset-0 bg-slate-900/60 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2 p-2">
@@ -1516,7 +1461,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <p class="font-medium text-slate-800 truncate">${m.fileName}</p>
             <span class="text-slate-400 text-[10px]">${(m.size / 1024).toFixed(0)} KB</span>
           </div>
-        `;
+        `);
         grid.appendChild(card);
       });
 
@@ -1544,7 +1489,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       refreshIcons();
     } catch (e) {
-      grid.innerHTML = '<div class="col-span-full py-10 text-center text-xs text-rose-500">Failed to load media</div>';
+      setSafeHTML(grid, '<div class="col-span-full py-10 text-center text-xs text-rose-500">Failed to load media</div>');
     }
   }
 
@@ -1557,7 +1502,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch('/api/integrations');
       const data = await res.json();
 
-      grid.innerHTML = `
+      setSafeHTML(grid, `
         <!-- Meta Facebook -->
         <div class="saas-card p-5 flex items-start gap-4">
           <div class="w-12 h-12 rounded-2xl bg-[#1877F2]/10 text-[#1877F2] flex items-center justify-center font-bold text-xl shrink-0">
@@ -1625,10 +1570,10 @@ document.addEventListener('DOMContentLoaded', () => {
             <p class="text-[11px] text-slate-400 mt-0.5">Instant realtime push updates for queue and status.</p>
           </div>
         </div>
-      `;
+      `);
       refreshIcons();
     } catch (e) {
-      grid.innerHTML = '<div class="text-xs text-rose-500">Failed to load integrations status</div>';
+      setSafeHTML(grid, '<div class="text-xs text-rose-500">Failed to load integrations status</div>');
     }
   }
 
@@ -1636,10 +1581,10 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderActivityLogsView() {
     const list = document.getElementById('activityLogsList');
     if (!list) return;
-    list.innerHTML = '';
+    setSafeHTML(list, '');
 
     if (state.history.length === 0) {
-      list.innerHTML = '<div class="text-center py-10 text-xs text-slate-400">No activity recorded yet.</div>';
+      setSafeHTML(list, '<div class="text-center py-10 text-xs text-slate-400">No activity recorded yet.</div>');
       return;
     }
 
@@ -1647,7 +1592,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const isSuccess = item.status === 'success';
       const div = document.createElement('div');
       div.className = 'p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl flex items-center justify-between gap-3 text-xs';
-      div.innerHTML = `
+      setSafeHTML(div, `
         <div class="flex items-center gap-3 min-w-0">
           <div class="w-8 h-8 rounded-lg ${isSuccess ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'} flex items-center justify-center shrink-0">
             <i data-lucide="${isSuccess ? 'check-circle' : 'alert-triangle'}" class="w-4 h-4"></i>
@@ -1663,7 +1608,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <span class="${isSuccess ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'} px-2.5 py-0.5 rounded-full text-[10px] font-bold">
           ${item.status.toUpperCase()}
         </span>
-      `;
+      `);
       list.appendChild(div);
     });
 
@@ -1760,11 +1705,11 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderCommentRulesList() {
     const container = document.getElementById('commentRulesList');
     if (!container) return;
-    container.innerHTML = '';
+    setSafeHTML(container, '');
 
     const rules = autoRulesState.commentRules || [];
     if (rules.length === 0) {
-      container.innerHTML = `<div class="p-6 text-center text-xs text-slate-400">No keyword rules added yet. Click "+ Add New Rule" to create one.</div>`;
+      setSafeHTML(container, `<div class="p-6 text-center text-xs text-slate-400">No keyword rules added yet. Click "+ Add New Rule" to create one.</div>`);
       return;
     }
 
@@ -1774,7 +1719,7 @@ document.addEventListener('DOMContentLoaded', () => {
       
       const keywordsBadges = (rule.keywords || []).map(k => `<span class="bg-white border border-slate-200 text-slate-700 font-mono text-[10px] px-2 py-0.5 rounded-md font-semibold">${k}</span>`).join(' ');
 
-      card.innerHTML = `
+      setSafeHTML(card, `
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             <span class="w-2 h-2 rounded-full ${rule.isActive ? 'bg-emerald-500' : 'bg-slate-300'}"></span>
@@ -1806,7 +1751,7 @@ document.addEventListener('DOMContentLoaded', () => {
           ${rule.autoLike ? '<span class="flex items-center gap-1 text-emerald-600 font-semibold"><i data-lucide="thumbs-up" class="w-3 h-3"></i> Auto-Like enabled</span>' : ''}
           ${rule.sendPrivateDm ? '<span class="flex items-center gap-1 text-indigo-600 font-semibold"><i data-lucide="mail" class="w-3 h-3"></i> Auto-DM enabled</span>' : ''}
         </div>
-      `;
+      `);
       container.appendChild(card);
     });
 
@@ -1972,7 +1917,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       runCommentSimBtn.disabled = true;
-      runCommentSimBtn.innerHTML = `<span class="animate-spin mr-1">⌛</span> Testing Bot...`;
+      setSafeHTML(runCommentSimBtn, `<span class="animate-spin mr-1">⌛</span> Testing Bot...`);
 
       try {
         const res = await fetch('/api/automation/test-comment', {
@@ -2007,7 +1952,7 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('Error during comment simulation');
       } finally {
         runCommentSimBtn.disabled = false;
-        runCommentSimBtn.innerHTML = `<i data-lucide="send" class="w-3.5 h-3.5"></i><span>Simulate & Test Comment Bot</span>`;
+        setSafeHTML(runCommentSimBtn, `<i data-lucide="send" class="w-3.5 h-3.5"></i><span>Simulate & Test Comment Bot</span>`);
         refreshIcons();
       }
     });
@@ -2028,25 +1973,25 @@ document.addEventListener('DOMContentLoaded', () => {
     // Append user message bubble
     const userBubble = document.createElement('div');
     userBubble.className = 'flex items-start justify-end gap-2.5';
-    userBubble.innerHTML = `
+    setSafeHTML(userBubble, `
       <div class="p-3 rounded-2xl bg-purple-600 text-white text-xs shadow-sm max-w-[85%] leading-relaxed">
         ${text}
       </div>
-    `;
+    `);
     chatMessagesContainer.appendChild(userBubble);
     chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
 
     // Typing indicator
     const typingIndicator = document.createElement('div');
     typingIndicator.className = 'flex items-start gap-2.5 chat-typing-indicator';
-    typingIndicator.innerHTML = `
+    setSafeHTML(typingIndicator, `
       <img src="/pariksha_notes_logo.jpg" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5">
       <div class="p-3 rounded-2xl bg-white border border-slate-200/80 text-xs text-slate-400 shadow-sm flex items-center gap-1.5">
         <span class="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce"></span>
         <span class="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style="animation-delay: 0.2s"></span>
         <span class="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style="animation-delay: 0.4s"></span>
       </div>
-    `;
+    `);
     chatMessagesContainer.appendChild(typingIndicator);
     chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
 
@@ -2062,12 +2007,12 @@ document.addEventListener('DOMContentLoaded', () => {
       const botReplyText = data.result?.botReply || data.error || 'ধন্যবাদ আপনার মেসেজের জন্য!';
       const botBubble = document.createElement('div');
       botBubble.className = 'flex items-start gap-2.5';
-      botBubble.innerHTML = `
+      setSafeHTML(botBubble, `
         <img src="/pariksha_notes_logo.jpg" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5">
         <div class="p-3 rounded-2xl bg-white border border-slate-200/80 text-xs text-slate-800 shadow-sm max-w-[85%] leading-relaxed whitespace-pre-line">
           ${botReplyText}
         </div>
-      `;
+      `);
       chatMessagesContainer.appendChild(botBubble);
       chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
     } catch (err) {
@@ -2087,14 +2032,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (resetChatSimBtn) {
     resetChatSimBtn.addEventListener('click', () => {
-      chatMessagesContainer.innerHTML = `
+      setSafeHTML(chatMessagesContainer, `
         <div class="flex items-start gap-2.5">
           <img src="/pariksha_notes_logo.jpg" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5">
           <div class="p-3 rounded-2xl bg-white border border-slate-200/80 text-xs text-slate-800 shadow-sm max-w-[85%] leading-relaxed">
             স্বাগতম আমাদের পেজে! 👋 আমরা আপনাকে কীভাবে সাহায্য করতে পারি? আপনার যেকোনো প্রশ্ন লিখুন।
           </div>
         </div>
-      `;
+      `);
     });
   }
 
@@ -2106,7 +2051,7 @@ document.addEventListener('DOMContentLoaded', () => {
     div.className = 'p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3 text-xs';
     
     if (type === 'comment') {
-      div.innerHTML = `
+      setSafeHTML(div, `
         <div class="flex items-center gap-2.5 min-w-0">
           <span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
           <div class="min-w-0">
@@ -2115,9 +2060,9 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
         <span class="text-[10px] text-slate-400 shrink-0">Just now</span>
-      `;
+      `);
     } else {
-      div.innerHTML = `
+      setSafeHTML(div, `
         <div class="flex items-center gap-2.5 min-w-0">
           <span class="w-2 h-2 rounded-full bg-purple-500 shrink-0"></span>
           <div class="min-w-0">
@@ -2126,7 +2071,7 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
         <span class="text-[10px] text-slate-400 shrink-0">Just now</span>
-      `;
+      `);
     }
     list.prepend(div);
   }
@@ -2139,23 +2084,21 @@ document.addEventListener('DOMContentLoaded', () => {
       triggerAutoPilotNowBtn.textContent = 'Generating & Posting...';
 
       try {
+        const operationKey=await window.publicationUI.key('/api/ai/autopilot/trigger',{topic:'',page:state.settings.autoPilotPageId||state.activePageId});
         const res = await fetch('/api/ai/autopilot/trigger', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': operationKey },
           body: JSON.stringify({ topic: '' })
         });
         const data = await res.json();
-        if (data.success) {
-          alert('🚀 Auto-Pilot Post generated and published to Facebook successfully!');
-          fetchStatus();
-        } else {
-          alert('Auto-Pilot error: ' + (data.error || 'Check settings'));
-        }
+        window.publicationUI.settled(operationKey,data);
+        alert(window.publicationUI.message(data));
+        await fetchStatus();
       } catch (e) {
         alert('Network error triggering Auto-Pilot.');
       } finally {
         triggerAutoPilotNowBtn.disabled = false;
-        triggerAutoPilotNowBtn.innerHTML = `<i data-lucide="zap" class="w-3.5 h-3.5"></i><span>Trigger Post Now</span>`;
+        setSafeHTML(triggerAutoPilotNowBtn, `<i data-lucide="zap" class="w-3.5 h-3.5"></i><span>Trigger Post Now</span>`);
         refreshIcons();
       }
     });
@@ -2164,7 +2107,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (automationToggleSwitch) {
     automationToggleSwitch.addEventListener('change', async () => {
       try {
-        const res = await fetch('/api/scheduler/toggle', { method: 'POST' });
+        const res = await fetch('/api/automation/toggle', { method: 'POST' });
         const data = await res.json();
         updateAutomationUI(data.autoPostEnabled);
       } catch (err) {
@@ -2239,6 +2182,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  if (pageSettingsPageId) {
+    const label=document.createElement('label'); label.textContent='Scheduling timezone (IANA, e.g. Asia/Kolkata)'; label.className='block text-xs mt-3';
+    const input=document.createElement('input'); input.id='workspaceTimeZone'; input.value='UTC'; input.className='w-full p-2 border rounded-xl';
+    label.appendChild(input); pageSettingsPageId.parentElement.appendChild(label);
+    const targetLabel=document.createElement('label');targetLabel.textContent='Autopilot destination Page ID (independent of page switcher)';targetLabel.className='block text-xs mt-3';const target=document.createElement('input');target.id='autopilotTargetPage';target.className='w-full p-2 border rounded-xl';targetLabel.appendChild(target);pageSettingsPageId.parentElement.appendChild(targetLabel);
+    const hint=document.createElement('p'); hint.id='scheduleZoneHint'; hint.className='text-xs text-slate-500'; composerScheduleDateTime?.parentElement.appendChild(hint);
+  }
+
   if (savePageSettingsBtn) {
     savePageSettingsBtn.addEventListener('click', async () => {
       savePageSettingsBtn.disabled = true;
@@ -2249,7 +2200,9 @@ document.addEventListener('DOMContentLoaded', () => {
           pageId: pageSettingsPageId.value.trim(),
           accessToken: pageSettingsAccessToken.value.trim(),
           geminiApiKey: pageSettingsGeminiKey.value.trim(),
-          isDemoMode: pageSettingsDemoMode.checked
+          isDemoMode: pageSettingsDemoMode.checked,
+          timeZone: document.getElementById('workspaceTimeZone').value.trim(),
+          ...(document.getElementById('autopilotTargetPage').value.trim()?{autoPilotPageId:document.getElementById('autopilotTargetPage').value.trim()}:{})
         };
 
         const res = await fetch('/api/settings', {
@@ -2264,7 +2217,7 @@ document.addEventListener('DOMContentLoaded', () => {
           pageSettingsStatusMsg.className = 'p-2.5 rounded-xl text-xs font-medium bg-emerald-50 text-emerald-700';
           pageSettingsStatusMsg.textContent = '✅ Settings saved successfully!';
           fetchStatus();
-        }
+        } else { alert(data.error||'Settings were not saved'); }
       } catch (err) {
         alert('Failed to save settings');
       } finally {
@@ -2364,12 +2317,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (headerPagesList) {
-      headerPagesList.innerHTML = '';
+      setSafeHTML(headerPagesList, '');
       pages.forEach(p => {
         const isActive = p.id === state.activePageId;
         const row = document.createElement('div');
         row.className = `flex items-center justify-between p-2 rounded-xl cursor-pointer transition text-xs ${isActive ? 'bg-indigo-50/80 font-bold text-indigo-900' : 'hover:bg-slate-50 text-slate-700'}`;
-        row.innerHTML = `
+        setSafeHTML(row, `
           <div class="flex items-center gap-2.5 min-w-0">
             <img src="${p.pictureUrl || '/pariksha_notes_logo.jpg'}" class="w-6 h-6 rounded-full object-cover ring-1 ${isActive ? 'ring-indigo-500' : 'ring-slate-200'} shrink-0">
             <div class="min-w-0 truncate">
@@ -2378,7 +2331,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </div>
           ${isActive ? '<span class="text-indigo-600 font-bold shrink-0 ml-2">✓ Active</span>' : '<span class="text-[10px] text-slate-400 shrink-0 ml-2 hover:text-indigo-600">Switch</span>'}
-        `;
+        `);
         row.addEventListener('click', (e) => {
           e.stopPropagation();
           if (!isActive) {
@@ -2428,11 +2381,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const grid = document.getElementById('accountsPageGrid');
     if (!grid) return;
 
-    grid.innerHTML = '';
+    setSafeHTML(grid, '');
     const pages = state.pages || [];
 
     if (pages.length === 0) {
-      grid.innerHTML = `<div class="col-span-full py-12 text-center text-slate-400 text-xs">No pages connected yet. Click "+ Connect New Facebook Page" above to add one.</div>`;
+      setSafeHTML(grid, `<div class="col-span-full py-12 text-center text-slate-400 text-xs">No pages connected yet. Click "+ Connect New Facebook Page" above to add one.</div>`);
       return;
     }
 
@@ -2440,7 +2393,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const isActive = p.id === state.activePageId;
       const card = document.createElement('div');
       card.className = `p-5 rounded-2xl border transition-all ${isActive ? 'bg-gradient-to-br from-white via-indigo-50/20 to-purple-50/20 border-indigo-200 shadow-md ring-2 ring-indigo-500/20' : 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'}`;
-      card.innerHTML = `
+      setSafeHTML(card, `
         <div class="flex items-start justify-between gap-3 mb-4">
           <div class="flex items-center gap-3.5 min-w-0">
             <img src="${p.pictureUrl || '/pariksha_notes_logo.jpg'}" class="w-12 h-12 rounded-full object-cover ring-2 ${isActive ? 'ring-indigo-500' : 'ring-slate-200'} shrink-0">
@@ -2498,7 +2451,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </button>
           `}
         </div>
-      `;
+      `);
 
       card.querySelectorAll('.switch-page-btn').forEach(btn => {
         btn.addEventListener('click', () => switchActivePage(btn.getAttribute('data-id')));
@@ -2584,7 +2537,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       submitEditPageBtn.disabled = true;
-      submitEditPageBtn.innerHTML = `<span class="animate-spin mr-1">⌛</span> Saving...`;
+      setSafeHTML(submitEditPageBtn, `<span class="animate-spin mr-1">⌛</span> Saving...`);
 
       try {
         const payload = { name, category, systemPrompt };
@@ -2618,7 +2571,7 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('Error updating page: ' + err.message);
       } finally {
         submitEditPageBtn.disabled = false;
-        submitEditPageBtn.innerHTML = `<i data-lucide="check" class="w-3.5 h-3.5"></i><span>Save Page & Guidelines</span>`;
+        setSafeHTML(submitEditPageBtn, `<i data-lucide="check" class="w-3.5 h-3.5"></i><span>Save Page & Guidelines</span>`);
         refreshIcons();
       }
     });
@@ -2675,7 +2628,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       submitAddPageBtn.disabled = true;
-      submitAddPageBtn.innerHTML = `<span class="animate-spin mr-1">⌛</span> Verifying with Meta...`;
+      setSafeHTML(submitAddPageBtn, `<span class="animate-spin mr-1">⌛</span> Verifying with Meta...`);
 
       try {
         const res = await fetch('/api/facebook/pages', {
@@ -2700,7 +2653,7 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('Network error connecting page: ' + err.message);
       } finally {
         submitAddPageBtn.disabled = false;
-        submitAddPageBtn.innerHTML = `<i data-lucide="check" class="w-3.5 h-3.5"></i><span>Verify & Connect Page</span>`;
+        setSafeHTML(submitAddPageBtn, `<i data-lucide="check" class="w-3.5 h-3.5"></i><span>Verify & Connect Page</span>`);
         refreshIcons();
       }
     });
@@ -2717,13 +2670,16 @@ document.addEventListener('DOMContentLoaded', () => {
       ]);
 
       state.settings = settingsRes || {};
+      const zoneInput=document.getElementById('workspaceTimeZone'); if(zoneInput && document.activeElement!==zoneInput)zoneInput.value=state.settings.timeZone||'UTC';
+      const targetInput=document.getElementById('autopilotTargetPage');if(targetInput&&document.activeElement!==targetInput)targetInput.value=state.settings.autoPilotPageId||state.settings.pageId||'';
+      const zoneHint=document.getElementById('scheduleZoneHint'); if(zoneHint)zoneHint.textContent='Time in '+(state.settings.timeZone||'UTC')+'. Existing jobs keep their original page and time.';
       state.queue = queueRes || [];
       state.history = historyRes || [];
 
       // Update fields
       if (pageSettingsPageId) pageSettingsPageId.value = state.settings.pageId || '';
-      if (pageSettingsAccessToken) pageSettingsAccessToken.value = state.settings.accessToken || '';
-      if (pageSettingsGeminiKey) pageSettingsGeminiKey.value = state.settings.geminiApiKey || '';
+      if (pageSettingsAccessToken) { pageSettingsAccessToken.value = ''; pageSettingsAccessToken.placeholder = state.settings.hasAccessToken ? 'Saved securely — leave blank to keep' : 'Enter page access token'; }
+      if (pageSettingsGeminiKey) { pageSettingsGeminiKey.value = ''; pageSettingsGeminiKey.placeholder = state.settings.hasGeminiApiKey ? 'Saved securely — leave blank to keep' : 'Enter Gemini API key'; }
       if (pageSettingsDemoMode) pageSettingsDemoMode.checked = !!state.settings.isDemoMode;
 
       // Update Profile & Accounts view
@@ -2748,16 +2704,20 @@ document.addEventListener('DOMContentLoaded', () => {
       const statScheduledPosts = document.getElementById('statScheduledPosts');
       const badgeQueueCount = document.getElementById('badgeQueueCount');
 
-      if (statTotalPosts) statTotalPosts.textContent = totalHistory > 0 ? (totalHistory + 128) : 128;
-      if (statPublishedPosts) statPublishedPosts.textContent = successPosts > 0 ? (successPosts + 98) : 98;
-      if (statScheduledPosts) statScheduledPosts.textContent = pendingQueueCount > 0 ? pendingQueueCount : 24;
+      if (statTotalPosts) statTotalPosts.textContent = totalHistory;
+      if (statPublishedPosts) statPublishedPosts.textContent = successPosts;
+      if (statScheduledPosts) statScheduledPosts.textContent = pendingQueueCount;
       if (badgeQueueCount) badgeQueueCount.textContent = pendingQueueCount;
 
       // Update automation switch
       updateAutomationUI(state.settings.autoPostEnabled);
 
-      // Render upcoming queue on dashboard
+      // Render current durable state, not optimistic publication success.
       renderDashboardQueue();
+      if(state.currentView==='queue')renderFullQueueView();
+      renderFullMonthCalendar();
+      if(dashboardWeekContainer){setSafeHTML(dashboardWeekContainer,'');const upcoming=state.queue.filter(q=>q.scheduledAt&&Date.parse(q.scheduledAt)>=Date.now()&&Date.parse(q.scheduledAt)<Date.now()+7*86400000);if(!upcoming.length)dashboardWeekContainer.textContent='No posts scheduled in the next 7 days.';for(const job of upcoming){const row=document.createElement('p');row.className='p-2 border-b';row.textContent=window.publicationUI.date(job.scheduledAt,job.timeZone||'UTC')+' · '+job.status+' · '+(job.message||'AI post');dashboardWeekContainer.appendChild(row);}}
+      if(state.calendarViewMode==='month')renderMonthGrid(monthGridCells);
 
     } catch (err) {
       console.warn('Status sync notice:', err);
@@ -2768,6 +2728,9 @@ document.addEventListener('DOMContentLoaded', () => {
   function connectSSE() {
     try {
       const eventSource = new EventSource('/api/events');
+      const refreshWorkspace = () => { fetchStatus(); fetchConnectedPages(); fetchTemplates(); fetchAutomationRules(); };
+      eventSource.addEventListener('state_invalidated', refreshWorkspace);
+      eventSource.addEventListener('connected', refreshWorkspace);
 
       eventSource.onopen = () => {
         if (liveStatusPing) liveStatusPing.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75';
