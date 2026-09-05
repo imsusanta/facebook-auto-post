@@ -15,9 +15,7 @@ async function getStatus() {
     cronSchedule: s.cronSchedule,
     cronLabel: s.cronLabel || '',
     nextRun: runner?.getNextRun()?.toISOString() || null,
-    isProcessing: (await storage.getQueue()).some(
-      (j) => j.status === 'processing'
-    )
+    isProcessing: await storage.hasProcessingJobs()
   };
 }
 async function processManualQueueItem(item) {
@@ -143,7 +141,7 @@ async function init() {
   for (const row of rows) await context.run(row.id, start);
   // Preserve uncertain jobs for human reconciliation instead of publishing duplicates after a restart.
   await db.query(
-    `UPDATE scheduled_posts SET data=jsonb_set(data,'{status}','"needs_review"') WHERE data->>'status'='processing' AND (data->>'processingAt')::timestamptz<now()-interval '15 minutes'`
+    `UPDATE scheduled_posts SET status='needs_review',data=jsonb_set(data,'{status}','"needs_review"') WHERE status='processing' AND processing_at<now()-interval '15 minutes'`
   );
   let busy = false;
   poller = setInterval(async () => {
@@ -155,11 +153,7 @@ async function init() {
         await context.run(w.id, async () => {
           const s = await storage.getSettings();
           if (!s.autoPostEnabled) return;
-          const item = (await storage.getQueue()).find(
-            (j) =>
-              j.status === 'pending' &&
-              (!j.scheduledAt || Date.parse(j.scheduledAt) <= Date.now())
-          );
+          const item = await storage.getNextDueQueueItem();
           if (item)
             try {
               await processManualQueueItem(item);

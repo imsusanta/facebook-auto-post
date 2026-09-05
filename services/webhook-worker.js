@@ -13,7 +13,7 @@ async function tick() {
     );
     if (!rows[0]) return;
     const row = rows[0],
-      data = JSON.parse(row.data.payload);
+      data = { ...JSON.parse(row.data.payload), pageId: row.facebook_page_id };
     try {
       await context.run(
         row.workspace_id,

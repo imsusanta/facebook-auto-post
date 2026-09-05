@@ -72,10 +72,10 @@ Do not point a public deployment at existing global data and let the first signu
 4. Import into an empty workspace:
 
    ```sh
-   npm run db:import-legacy -- /absolute/old-repository WORKSPACE_UUID owner@example.com EXPLICIT_QUEUE_PAGE_ID
+   npm run db:import-legacy -- /absolute/old-repository WORKSPACE_UUID owner@example.com EXPLICIT_LEGACY_PAGE_ID
    ```
 
-   The last argument is mandatory when the old queue is non-empty. It assigns the reviewed legacy queue to that one destination. Split/review mixed-page data manually before importing.
+   The last argument is mandatory when legacy queue **or history** entries lack a Facebook Page ID. It assigns only those reviewed unattributed entries to the specified destination; explicit existing destinations are validated. Split/review mixed-page data manually before importing.
 
 5. Check imported pages, media, queue destinations and history. Test connections again. Automation remains disabled after import.
 6. Keep plaintext legacy backups access-controlled and remove them according to your retention policy only after verifying the new data and backups.
@@ -115,3 +115,7 @@ The suite uses synthetic accounts/data, a test email sink, and blocked/mocked ex
 - Test backups **and restoration**, including the encryption key and media files.
 - Add operational monitoring, delivery reconciliation, key rotation procedures, user export/deletion, billing/quotas, support and privacy/legal workflows as subsequent phases.
 - Do not describe this phase as a completed or independently security-audited SaaS.
+
+## Phase 2 follow-up
+
+See [Database/backend checklist](BACKEND_PHASE2.md) for relational page constraints, immutable ownership, migration checksums, verified database environment settings and cross-process SSE. Live migration still requires operator configuration and staging review.

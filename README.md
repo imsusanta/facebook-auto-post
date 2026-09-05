@@ -40,11 +40,14 @@ npm ci
 cp .env.example .env
 # Configure PostgreSQL, encryption key, APP_ORIGIN and SMTP first.
 npm run db:migrate
+npm run db:status
 npm run build:css
 npm start
 ```
 
 Create an account, verify the email, then log in. Connect each customer's Facebook Page and Gemini key inside that customer's authenticated workspace. Automation and webhooks are disabled by default pending staging checks.
+
+For the database/backend implementation checklist and upgrade steps, see [Phase 2](docs/BACKEND_PHASE2.md).
 
 ## Development checks
 

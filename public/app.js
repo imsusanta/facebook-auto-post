@@ -2769,6 +2769,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   function connectSSE() {
     try {
       const eventSource = new EventSource('/api/events');
+      const refreshWorkspace = () => { fetchStatus(); fetchConnectedPages(); fetchTemplates(); fetchAutomationRules(); };
+      eventSource.addEventListener('state_invalidated', refreshWorkspace);
+      eventSource.addEventListener('connected', refreshWorkspace);
 
       eventSource.onopen = () => {
         if (liveStatusPing) liveStatusPing.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75';

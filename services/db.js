@@ -1,21 +1,22 @@
-// No seeded users or default passwords. All SQL values use parameters.
 const { Pool } = require('pg');
 const { AsyncLocalStorage } = require('node:async_hooks');
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: 10,
-  ssl:
-    process.env.DATABASE_SSL === 'require'
-      ? { rejectUnauthorized: true }
-      : undefined
-});
+const config = require('../config/env');
+const pool = new Pool(config.database);
+pool.on('error', () => console.error('[Database] Idle connection failed'));
 const transactionContext = new AsyncLocalStorage();
 function query(text, values) {
-  return (transactionContext.getStore() || pool).query(text, values);
+  return (transactionContext.getStore()?.client || pool).query(text, values);
 }
 async function transaction(fn, workspaceId) {
-  if (transactionContext.getStore()) return fn();
+  const parent = transactionContext.getStore();
+  if (parent) {
+    if (workspaceId && parent.workspaceId && workspaceId !== parent.workspaceId)
+      throw new Error('Cannot change workspace within a transaction');
+    return fn();
+  }
   const client = await pool.connect();
+  const state = { client, workspaceId, hooks: [] };
+  let result;
   try {
     await client.query('BEGIN');
     if (workspaceId)
@@ -23,14 +24,28 @@ async function transaction(fn, workspaceId) {
         'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
         [workspaceId]
       );
-    const result = await transactionContext.run(client, fn);
+    result = await transactionContext.run(state, fn);
     await client.query('COMMIT');
-    return result;
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
   } finally {
     client.release();
   }
+  for (const hook of state.hooks)
+    try {
+      await hook();
+    } catch {
+      console.warn('[Database] Post-commit notification failed');
+    }
+  return result;
 }
-module.exports = { query, transaction, pool };
+function afterCommit(fn) {
+  const state = transactionContext.getStore();
+  if (state) {
+    state.hooks.push(fn);
+    return;
+  }
+  return fn();
+}
+module.exports = { query, transaction, afterCommit, pool };

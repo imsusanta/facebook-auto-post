@@ -36,6 +36,15 @@ function createApp() {
     })
   );
   app.get('/healthz', (req, res) => res.json({ status: 'ok' }));
+  app.get('/readyz', async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    try {
+      await require('./scripts/migrate').assertCurrent();
+      res.json({ status: 'ready' });
+    } catch {
+      res.status(503).json({ status: 'not_ready' });
+    }
+  });
   app.use(
     '/api/webhook',
     limit('webhook-ip', 300, 60),
@@ -131,7 +140,8 @@ function createApp() {
 }
 async function start() {
   const app = createApp();
-  await db.query('SELECT 1 FROM schema_migrations LIMIT 1');
+  await require('./scripts/migrate').assertCurrent();
+  await require('./services/event-bus').start();
   await require('./services/scheduler').init();
   require('./services/webhook-worker').start();
   const cleanup = setInterval(
@@ -149,6 +159,7 @@ async function start() {
     clearInterval(cleanup);
     require('./services/webhook-worker').stop();
     require('./middleware/sse').closeAll();
+    await require('./services/event-bus').stop();
     await require('./services/scheduler').shutdown();
     server.close(async () => {
       await db.pool.end();

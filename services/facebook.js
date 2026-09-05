@@ -105,6 +105,7 @@ class FacebookService {
 
       const mockPostId = `${settings.pageId || '100088992233'}_${Date.now()}`;
       const log = (await storage.addHistory({
+        facebookPageId: settings.pageId,
         status: 'success',
         message: message || '(Demo post)',
         imageUrl: imagePath ? '/uploads/' + imagePath.split('/').pop() : imageUrl,
@@ -126,6 +127,7 @@ class FacebookService {
     if (!accessToken) {
       const errMsg = 'Facebook Access Token is not configured in Settings.';
       (await storage.addHistory({
+        facebookPageId: settings.pageId,
         status: 'failed',
         message: message || '',
         imageUrl: imagePath ? '/uploads/' + imagePath.split('/').pop() : imageUrl,
@@ -185,6 +187,7 @@ class FacebookService {
 
       const postId = result.id || result.post_id;
       const log = (await storage.addHistory({
+        facebookPageId: settings.pageId,
         status: 'success',
         message: message || '',
         imageUrl: imagePath ? '/uploads/' + imagePath.split('/').pop() : imageUrl,
@@ -207,6 +210,7 @@ class FacebookService {
       }
 
       (await storage.addHistory({
+        facebookPageId: settings.pageId,
         status: 'failed',
         message: message || '',
         imageUrl: imagePath ? '/uploads/' + imagePath.split('/').pop() : imageUrl,

@@ -35,9 +35,13 @@ async function main() {
     templates = await read('templates.json', []),
     categories = await read('categories.json', []),
     rules = await read('automation_rules.json', {});
-  if (queue.length && !queuePageId)
+  if (
+    (queue.some((item) => !item.facebookPageId) ||
+      history.some((item) => !item.facebookPageId)) &&
+    !queuePageId
+  )
     throw new Error(
-      'Legacy queue lacks destinations. Supply an explicit queue-page-id after reviewing every queued post.'
+      'Legacy posts/jobs lack destinations. Supply an explicit legacy-page-id after reviewing history and queued posts.'
     );
   const mapped = new Map();
   await context.run(workspaceId, () =>
@@ -100,17 +104,21 @@ async function main() {
       for (const item of history)
         await storage.addHistory({
           ...item,
+          facebookPageId: item.facebookPageId || queuePageId,
           imageUrl: await image(item.imageUrl)
         });
       for (const item of queue) {
         const added = await storage.addToQueue({
           ...item,
-          facebookPageId: queuePageId,
+          facebookPageId: item.facebookPageId || queuePageId,
           imageUrl: await image(item.imageUrl)
         });
         if (item.status && item.status !== 'pending')
           await storage.updateQueueItem(added.id, {
-            status: item.status === 'processing' ? 'needs_review' : item.status
+            status: item.status === 'processing' ? 'needs_review' : item.status,
+            postId: item.postId || null,
+            completedAt: item.completedAt || null,
+            error: item.error || null
           });
       }
       await storage.saveAutomationRules({

@@ -32,13 +32,43 @@ async function list(table) {
     )
   ).rows.map((r) => secrets.open(r.data));
 }
+async function getRecord(table, id) {
+  if (!TABLES.has(table)) throw new Error('Invalid table');
+  const row = (
+    await db.query(
+      `SELECT data FROM ${table} WHERE workspace_id=$1 AND id=$2`,
+      [workspace(), id]
+    )
+  ).rows[0];
+  return row ? secrets.open(row.data) : null;
+}
 async function put(table, value) {
   if (!TABLES.has(table)) throw new Error('Invalid table');
   if (table === 'scheduled_posts')
     await db.query(
-      `INSERT INTO scheduled_posts(workspace_id,id,facebook_page_id,data) VALUES($1,$2,$3,$4)
- ON CONFLICT(workspace_id,id) DO UPDATE SET data=excluded.data`,
-      [workspace(), value.id, value.facebookPageId, secrets.seal(value)]
+      `INSERT INTO scheduled_posts(workspace_id,id,facebook_page_id,status,scheduled_at,created_at,processing_at,data)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(workspace_id,id) DO UPDATE SET status=excluded.status,scheduled_at=excluded.scheduled_at,processing_at=excluded.processing_at,data=excluded.data`,
+      [
+        workspace(),
+        value.id,
+        value.facebookPageId,
+        value.status,
+        value.scheduledAt,
+        value.createdAt,
+        value.processingAt || null,
+        secrets.seal(value)
+      ]
+    );
+  else if (table === 'post_history')
+    await db.query(
+      `INSERT INTO post_history(workspace_id,id,facebook_page_id,occurred_at,data) VALUES($1,$2,$3,$4,$5)`,
+      [
+        workspace(),
+        value.id,
+        value.facebookPageId,
+        value.timestamp,
+        secrets.seal(value)
+      ]
     );
   else
     await db.query(
@@ -125,7 +155,9 @@ const storage = {
     return this.getSettings();
   },
   async getConnectedPages() {
-    const pages = await list('facebook_pages'),
+    const pages = (await list('facebook_pages')).filter(
+        (p) => p.connected !== false
+      ),
       settings = await document('workspace_settings');
     return pages.map((p) => ({
       ...p,
@@ -134,14 +166,17 @@ const storage = {
   },
   async getActivePage() {
     const s = await document('workspace_settings'),
-      pages = await list('facebook_pages');
+      pages = (await list('facebook_pages')).filter(
+        (p) => p.connected !== false
+      );
     const target = context.current().targetPageId || s.activePageId;
     return (
       pages.find((p) => p.id === target) || (!target ? pages[0] : null) || null
     );
   },
   async getPageById(id) {
-    return (await list('facebook_pages')).find((p) => p.id === id) || null;
+    const page = await getRecord('facebook_pages', id);
+    return page?.connected !== false ? page : null;
   },
   async getPageSystemPrompt(id) {
     const page = id ? await this.getPageById(id) : await this.getActivePage();
@@ -156,9 +191,10 @@ const storage = {
     );
     if (elsewhere.rows[0] && elsewhere.rows[0].workspace_id !== workspace())
       fail('Page cannot be connected', 409);
-    const existing = await this.getPageById(data.id);
+    const existing = await getRecord('facebook_pages', data.id);
     const page = {
       ...existing,
+      connected: true,
       id: data.id,
       name: data.name || 'Facebook Page',
       accessToken: data.accessToken,
@@ -192,8 +228,17 @@ const storage = {
   async removeConnectedPage(id) {
     if ((await this.getQueue()).some((j) => j.facebookPageId === id))
       fail('Remove queued jobs for this page before disconnecting');
-    await remove('facebook_pages', id);
-    const pages = await list('facebook_pages');
+    const existing = await getRecord('facebook_pages', id);
+    if (!existing) fail('Connected page not found', 404);
+    await put('facebook_pages', {
+      ...existing,
+      connected: false,
+      accessToken: '',
+      disconnectedAt: new Date().toISOString()
+    });
+    const pages = (await list('facebook_pages')).filter(
+      (p) => p.connected !== false
+    );
     const s = await document('workspace_settings');
     if (s.activePageId === id)
       await saveDocument('workspace_settings', {
@@ -222,18 +267,32 @@ const storage = {
     return this.getCategories();
   },
   async getHistory() {
-    return (await list('post_history')).sort((a, b) =>
-      b.timestamp.localeCompare(a.timestamp)
-    );
+    return (
+      await db.query(
+        'SELECT data,facebook_page_id,occurred_at,legacy_unattributed FROM post_history WHERE workspace_id=$1 ORDER BY occurred_at DESC,id',
+        [workspace()]
+      )
+    ).rows.map((row) => ({
+      ...secrets.open(row.data),
+      facebookPageId: row.facebook_page_id,
+      timestamp: row.occurred_at.toISOString(),
+      legacyUnattributed: row.legacy_unattributed
+    }));
   },
   async addHistory(entry) {
+    const page = entry.facebookPageId
+      ? await this.getPageById(entry.facebookPageId)
+      : await this.getActivePage();
+    if (!page) fail('A connected Facebook Page is required for post history');
+    const timestamp = entry.timestamp ? new Date(entry.timestamp) : new Date();
+    if (!Number.isFinite(timestamp.getTime()))
+      fail('Invalid history timestamp');
     return put('post_history', {
       ...entry,
       id: 'hist_' + randomUUID(),
-      timestamp: new Date().toISOString(),
+      timestamp: timestamp.toISOString(),
       status: entry.status || 'success',
-      facebookPageId:
-        entry.facebookPageId || (await this.getActivePage())?.id || null
+      facebookPageId: page.id
     });
   },
   async clearHistory() {
@@ -243,9 +302,29 @@ const storage = {
     return [];
   },
   async getQueue() {
-    return (await list('scheduled_posts')).sort((a, b) =>
-      a.createdAt.localeCompare(b.createdAt)
-    );
+    return (
+      await db.query(
+        'SELECT data FROM scheduled_posts WHERE workspace_id=$1 ORDER BY created_at,id',
+        [workspace()]
+      )
+    ).rows.map((row) => secrets.open(row.data));
+  },
+  async getNextDueQueueItem() {
+    const row = (
+      await db.query(
+        "SELECT data FROM scheduled_posts WHERE workspace_id=$1 AND status='pending' AND (scheduled_at IS NULL OR scheduled_at<=now()) ORDER BY scheduled_at NULLS FIRST,created_at,id LIMIT 1",
+        [workspace()]
+      )
+    ).rows[0];
+    return row ? secrets.open(row.data) : null;
+  },
+  async hasProcessingJobs() {
+    return !!(
+      await db.query(
+        "SELECT 1 FROM scheduled_posts WHERE workspace_id=$1 AND status='processing' LIMIT 1",
+        [workspace()]
+      )
+    ).rowCount;
   },
   async addToQueue(data) {
     const page = data.facebookPageId
@@ -266,7 +345,7 @@ const storage = {
     return put('scheduled_posts', item);
   },
   async updateQueueItem(id, updates) {
-    const item = (await this.getQueue()).find((j) => j.id === id);
+    const item = await getRecord('scheduled_posts', id);
     if (!item) return null;
     return put('scheduled_posts', {
       ...item,
@@ -276,7 +355,7 @@ const storage = {
     });
   },
   async claimQueueItem(id) {
-    const item = (await this.getQueue()).find((j) => j.id === id);
+    const item = await getRecord('scheduled_posts', id);
     if (!item || item.status !== 'pending') return null;
     return this.updateQueueItem(id, {
       status: 'processing',
@@ -284,7 +363,7 @@ const storage = {
     });
   },
   async removeFromQueue(id) {
-    const item = (await this.getQueue()).find((j) => j.id === id);
+    const item = await getRecord('scheduled_posts', id);
     if (item?.status === 'processing')
       fail('Cannot remove a processing job', 409);
     await remove('scheduled_posts', id);

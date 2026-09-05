@@ -97,6 +97,7 @@ before(async () => {
   storage = require('../services/storage');
   context = require('../security/context');
   await require('../scripts/migrate')();
+  await require('../services/event-bus').start();
   await db.query('DELETE FROM rate_limits');
   require('../services/mail').setTestDelivery((message) =>
     mailbox.push(message)
@@ -113,6 +114,7 @@ before(async () => {
 });
 after(async () => {
   require('../middleware/sse').closeAll();
+  await require('../services/event-bus').stop();
   if (server) await new Promise((resolve) => server.close(resolve));
   if (db) {
     for (const item of ids) {
@@ -597,6 +599,327 @@ test('security and database integration', async (t) => {
     }
   );
   await t.test(
+    'relational history preserves page attribution and timestamps',
+    async () => {
+      const timestamp = '2024-04-05T06:07:08.000Z';
+      const post = await context.run(a.workspace, () =>
+        storage.addHistory({
+          message: 'Historical post',
+          facebookPageId: '11111',
+          timestamp,
+          status: 'success'
+        })
+      );
+      const row = (
+        await db.query(
+          'SELECT facebook_page_id,occurred_at,legacy_unattributed FROM post_history WHERE workspace_id=$1 AND id=$2',
+          [a.workspace, post.id]
+        )
+      ).rows[0];
+      assert.equal(row.facebook_page_id, '11111');
+      assert.equal(row.occurred_at.toISOString(), timestamp);
+      assert.equal(row.legacy_unattributed, false);
+      await assert.rejects(
+        context.run(b.workspace, () =>
+          storage.addHistory({ facebookPageId: '11111', message: 'forbidden' })
+        )
+      );
+      assert.ok(
+        !(await context.run(b.workspace, () => storage.getHistory())).some(
+          (p) => p.id === post.id
+        )
+      );
+    }
+  );
+  await t.test(
+    'database foreign keys and immutable job ownership cannot be bypassed',
+    async () => {
+      const job = (await context.run(a.workspace, () => storage.getQueue()))[0];
+      await assert.rejects(
+        db.query(
+          'UPDATE scheduled_posts SET workspace_id=$1 WHERE workspace_id=$2 AND id=$3',
+          [b.workspace, a.workspace, job.id]
+        ),
+        { code: '23514' }
+      );
+      await assert.rejects(
+        db.query(
+          `UPDATE scheduled_posts SET facebook_page_id='33333',data=jsonb_set(data,'{facebookPageId}','"33333"') WHERE workspace_id=$1 AND id=$2`,
+          [a.workspace, job.id]
+        ),
+        { code: '23514' }
+      );
+      await assert.rejects(
+        db.query(
+          'INSERT INTO post_history(workspace_id,id,facebook_page_id,data) VALUES($1,$2,$3,$4)',
+          [
+            b.workspace,
+            'forbidden-history',
+            '11111',
+            { facebookPageId: '11111' }
+          ]
+        ),
+        { code: '23503' }
+      );
+      await assert.rejects(
+        db.query(
+          'INSERT INTO scheduled_posts(workspace_id,id,facebook_page_id,data) VALUES($1,$2,$3,$4)',
+          [a.workspace, 'malformed-job', '11111', {}]
+        ),
+        { code: '23514' }
+      );
+    }
+  );
+  await t.test(
+    'SQL due-job lookup skips future and processing jobs',
+    async () => {
+      const future = await context.run(b.workspace, () =>
+        storage.addToQueue({
+          message: 'future',
+          scheduledAt: '2099-01-01T00:00:00Z'
+        })
+      );
+      assert.equal(
+        await context.run(b.workspace, () => storage.getNextDueQueueItem()),
+        null
+      );
+      const now = await context.run(b.workspace, () =>
+        storage.addToQueue({ message: 'due now' })
+      );
+      assert.equal(
+        (await context.run(b.workspace, () => storage.getNextDueQueueItem()))
+          .id,
+        now.id
+      );
+      await context.run(b.workspace, () => storage.claimQueueItem(now.id));
+      assert.equal(
+        await context.run(b.workspace, () => storage.getNextDueQueueItem()),
+        null
+      );
+      await context.run(b.workspace, () =>
+        storage.updateQueueItem(now.id, { status: 'completed' })
+      );
+      await context.run(b.workspace, () => storage.removeFromQueue(now.id));
+      await context.run(b.workspace, () => storage.removeFromQueue(future.id));
+    }
+  );
+  await t.test(
+    'disconnect retains page ownership for history but clears credentials',
+    async () => {
+      await context.run(b.workspace, () =>
+        storage.addHistory({
+          facebookPageId: '22222',
+          message: 'Before disconnect'
+        })
+      );
+      await context.run(b.workspace, () =>
+        storage.removeConnectedPage('22222')
+      );
+      assert.equal(
+        await context.run(b.workspace, () => storage.getPageById('22222')),
+        null
+      );
+      assert.equal(
+        (await context.run(b.workspace, () => storage.getConnectedPages()))
+          .length,
+        0
+      );
+      const row = (
+        await db.query(
+          "SELECT data FROM facebook_pages WHERE workspace_id=$1 AND id='22222'",
+          [b.workspace]
+        )
+      ).rows[0];
+      assert.equal(row.data.accessToken, '');
+      await context.run(b.workspace, () =>
+        storage.addConnectedPage({
+          id: '22222',
+          name: 'Reconnected',
+          accessToken: 'NEW_SYNTHETIC',
+          setAsActive: true
+        })
+      );
+    }
+  );
+  await t.test(
+    'SSE publishes only after commit and never after rollback',
+    async () => {
+      const bus = require('../services/event-bus'),
+        events = [];
+      const off = bus.subscribe((e) => {
+        if (e.data?.marker) events.push(e.data.marker);
+      });
+      try {
+        await assert.rejects(
+          context.run(a.workspace, () =>
+            db.transaction(async () => {
+              require('../middleware/sse').broadcastSSE('queue_updated', {
+                marker: 'rolled_back'
+              });
+              throw new Error('rollback-event-fixture');
+            }, a.workspace)
+          ),
+          /rollback-event-fixture/
+        );
+        assert.deepEqual(events, []);
+        await context.run(a.workspace, () =>
+          db.transaction(async () => {
+            require('../middleware/sse').broadcastSSE('queue_updated', {
+              marker: 'committed'
+            });
+            assert.deepEqual(events, []);
+          }, a.workspace)
+        );
+        assert.deepEqual(events, ['committed']);
+      } finally {
+        off();
+      }
+    }
+  );
+  await t.test(
+    'events from a separate process reach only the owning SSE connection',
+    async () => {
+      const controller = new AbortController();
+      const response = await fetch(base + '/api/events', {
+        headers: { Cookie: a.cookie },
+        signal: controller.signal
+      });
+      const reader = response.body.getReader();
+      await reader.read();
+      try {
+        const run = require('node:util').promisify(
+          require('node:child_process').execFile
+        );
+        const code = `const bus=require('./services/event-bus'),db=require('./services/db');(async()=>{await bus.publish({kind:'event',workspaceId:${JSON.stringify(b.workspace)},event:'queue_updated',data:{marker:'OTHER'}});await bus.publish({kind:'event',workspaceId:${JSON.stringify(a.workspace)},event:'queue_updated',data:{marker:'REMOTE_OWN'}});await db.pool.end();})().catch(()=>process.exit(1));`;
+        await run(process.execPath, ['-e', code], {
+          cwd: path.join(__dirname, '..'),
+          env: process.env,
+          timeout: 10000
+        });
+        const event = await Promise.race([
+          reader.read(),
+          new Promise((_, reject) => {
+            const timer = setTimeout(
+              () => reject(new Error('remote SSE timeout')),
+              5000
+            );
+            timer.unref();
+          })
+        ]);
+        const text = new TextDecoder().decode(event.value);
+        assert.ok(text.includes('REMOTE_OWN'));
+        assert.ok(!text.includes('OTHER'));
+      } finally {
+        controller.abort();
+      }
+    }
+  );
+  await t.test(
+    'oversized live updates become bounded refresh notifications',
+    async () => {
+      const bus = require('../services/event-bus');
+      let value;
+      const off = bus.subscribe((e) => {
+        value = e;
+      });
+      try {
+        await context.run(a.workspace, () =>
+          require('../middleware/sse').broadcastSSE('queue_updated', {
+            large: 'x'.repeat(10000)
+          })
+        );
+        assert.equal(value.event, 'state_invalidated');
+        assert.ok(JSON.stringify(value).length < 1000);
+      } finally {
+        off();
+      }
+    }
+  );
+  await t.test(
+    'migration checksums and readiness reject schema drift',
+    async () => {
+      const migration = require('../scripts/migrate');
+      await migration();
+      assert.ok((await migration.status()).every((r) => r.state === 'applied'));
+      assert.equal((await request('/readyz')).status, 200);
+      const row = (
+        await db.query(
+          "SELECT checksum FROM schema_migrations WHERE name='002_backend_integrity.sql'"
+        )
+      ).rows[0];
+      try {
+        await db.query(
+          "UPDATE schema_migrations SET checksum='tampered' WHERE name='002_backend_integrity.sql'"
+        );
+        assert.equal((await request('/readyz')).status, 503);
+        await assert.rejects(migration());
+      } finally {
+        await db.query(
+          "UPDATE schema_migrations SET checksum=$1 WHERE name='002_backend_integrity.sql'",
+          [row.checksum]
+        );
+      }
+      assert.equal((await request('/readyz')).status, 200);
+      const indexes = (
+        await db.query(
+          "SELECT indexname FROM pg_indexes WHERE schemaname=current_schema() AND indexname IN ('scheduled_due','history_workspace_time','media_workspace_time')"
+        )
+      ).rows;
+      assert.equal(indexes.length, 3);
+    }
+  );
+  await t.test(
+    '001 to 002 migration preserves explicitly unattributed legacy history',
+    async () => {
+      const schema = 'upgrade_' + crypto.randomUUID().replaceAll('-', '');
+      await assert.rejects(
+        db.transaction(async () => {
+          await db.query(`CREATE SCHEMA "${schema}"`);
+          await db.query(`SET LOCAL search_path TO "${schema}", public`);
+          await db.query(
+            await fs.readFile(
+              path.join(
+                __dirname,
+                '../db/migrations/001_security_foundation.sql'
+              ),
+              'utf8'
+            )
+          );
+          await db.query('INSERT INTO workspaces(id,name) VALUES($1,$2)', [
+            a.workspace,
+            'Upgrade fixture'
+          ]);
+          await db.query(
+            'INSERT INTO post_history(workspace_id,id,data) VALUES($1,$2,$3)',
+            [
+              a.workspace,
+              'legacy',
+              { message: 'Unknown page', timestamp: '2024-01-01T00:00:00Z' }
+            ]
+          );
+          await db.query(
+            await fs.readFile(
+              path.join(
+                __dirname,
+                '../db/migrations/002_backend_integrity.sql'
+              ),
+              'utf8'
+            )
+          );
+          const row = (
+            await db.query(
+              "SELECT facebook_page_id,legacy_unattributed FROM post_history WHERE id='legacy'"
+            )
+          ).rows[0];
+          assert.equal(row.facebook_page_id, null);
+          assert.equal(row.legacy_unattributed, true);
+          throw new Error('rollback-upgrade-fixture');
+        }),
+        /rollback-upgrade-fixture/
+      );
+    }
+  );
+  await t.test(
     'request limits work across database-backed counters',
     async () => {
       for (let i = 0; i < 20; i++)
@@ -712,26 +1035,84 @@ test('security and database integration', async (t) => {
   );
   await t.test('expired verification tokens cannot be consumed', async () => {
     const token = require('../security/auth').random();
-    await db.query("INSERT INTO auth_tokens(token_hash,user_id,purpose,expires_at) VALUES($1,$2,'verify',now()-interval '1 second')", [require('../security/auth').hash(token), a.user]);
-    assert.equal((await request('/api/auth/verify-email', {method:'POST',body:{token}})).status,400);
+    await db.query(
+      "INSERT INTO auth_tokens(token_hash,user_id,purpose,expires_at) VALUES($1,$2,'verify',now()-interval '1 second')",
+      [require('../security/auth').hash(token), a.user]
+    );
+    assert.equal(
+      (
+        await request('/api/auth/verify-email', {
+          method: 'POST',
+          body: { token }
+        })
+      ).status,
+      400
+    );
   });
-  await t.test('media quota is enforced before persisting a new image', async () => {
-    const buffer=await require('sharp')({create:{width:10,height:10,channels:3,background:'#ffffff'}}).png().toBuffer();
-    process.env.MAX_WORKSPACE_MEDIA_BYTES='1';
-    try {await assert.rejects(context.run(a.workspace,()=>require('../security/media').store(buffer)),/media limit/);}finally{delete process.env.MAX_WORKSPACE_MEDIA_BYTES;}
-  });
-  await t.test('explicit legacy importer preserves ownership and disables automation', async () => {
-    await db.query('DELETE FROM rate_limits');
-    const c=await account('LegacyOwner'),root=path.join(dataDir,'legacy-fixture');
-    await fs.mkdir(path.join(root,'data'),{recursive:true});
-    await fs.writeFile(path.join(root,'data/settings.json'),JSON.stringify({pageId:'44444',pageName:'Legacy page',accessToken:'LEGACY_SYNTHETIC',geminiApiKey:'LEGACY_AI_SYNTHETIC',autoPostEnabled:true}));
-    await fs.writeFile(path.join(root,'data/queue.json'),JSON.stringify([{message:'Imported queued post',status:'pending'}]));
-    const argv=process.argv;process.argv=['node','import',root,c.workspace,c.email,'44444'];
-    try {await require('../scripts/import-legacy')();}finally{process.argv=argv;}
-    const settings=await context.run(c.workspace,()=>storage.getSettings());assert.equal(settings.autoPostEnabled,false);assert.equal(settings.accessToken,'LEGACY_SYNTHETIC');
-    const queue=await context.run(c.workspace,()=>storage.getQueue());assert.equal(queue.length,1);assert.equal(queue[0].facebookPageId,'44444');
-    const encrypted=await db.query('SELECT data FROM facebook_pages WHERE workspace_id=$1',[c.workspace]);assert.ok(!JSON.stringify(encrypted.rows).includes('LEGACY_SYNTHETIC'));
-  });
+  await t.test(
+    'media quota is enforced before persisting a new image',
+    async () => {
+      const buffer = await require('sharp')({
+        create: { width: 10, height: 10, channels: 3, background: '#ffffff' }
+      })
+        .png()
+        .toBuffer();
+      process.env.MAX_WORKSPACE_MEDIA_BYTES = '1';
+      try {
+        await assert.rejects(
+          context.run(a.workspace, () =>
+            require('../security/media').store(buffer)
+          ),
+          /media limit/
+        );
+      } finally {
+        delete process.env.MAX_WORKSPACE_MEDIA_BYTES;
+      }
+    }
+  );
+  await t.test(
+    'explicit legacy importer preserves ownership and disables automation',
+    async () => {
+      await db.query('DELETE FROM rate_limits');
+      const c = await account('LegacyOwner'),
+        root = path.join(dataDir, 'legacy-fixture');
+      await fs.mkdir(path.join(root, 'data'), { recursive: true });
+      await fs.writeFile(
+        path.join(root, 'data/settings.json'),
+        JSON.stringify({
+          pageId: '44444',
+          pageName: 'Legacy page',
+          accessToken: 'LEGACY_SYNTHETIC',
+          geminiApiKey: 'LEGACY_AI_SYNTHETIC',
+          autoPostEnabled: true
+        })
+      );
+      await fs.writeFile(
+        path.join(root, 'data/queue.json'),
+        JSON.stringify([{ message: 'Imported queued post', status: 'pending' }])
+      );
+      const argv = process.argv;
+      process.argv = ['node', 'import', root, c.workspace, c.email, '44444'];
+      try {
+        await require('../scripts/import-legacy')();
+      } finally {
+        process.argv = argv;
+      }
+      const settings = await context.run(c.workspace, () =>
+        storage.getSettings()
+      );
+      assert.equal(settings.autoPostEnabled, false);
+      assert.equal(settings.accessToken, 'LEGACY_SYNTHETIC');
+      const queue = await context.run(c.workspace, () => storage.getQueue());
+      assert.equal(queue.length, 1);
+      assert.equal(queue[0].facebookPageId, '44444');
+      const encrypted = await db.query(
+        'SELECT data FROM facebook_pages WHERE workspace_id=$1',
+        [c.workspace]
+      );
+      assert.ok(!JSON.stringify(encrypted.rows).includes('LEGACY_SYNTHETIC'));
+    }
+  );
   await t.test('logout revokes the server session', async () => {
     const r = await request('/api/auth/logout', {
       method: 'POST',

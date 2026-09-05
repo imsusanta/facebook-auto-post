@@ -11,7 +11,8 @@
     "db:migrate": "node scripts/migrate.js",
     "db:import-legacy": "node scripts/import-legacy.js",
     "build:css": "tailwindcss -i public/tailwind.input.css -o public/tailwind.css --minify",
-    "check": "node scripts/check.js"
+    "check": "node scripts/check.js",
+    "db:status": "node scripts/migrate.js --status"
   },
   "dependencies": {
     "axios": "^1.7.9",
