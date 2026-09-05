@@ -4,10 +4,16 @@ require('dotenv').config();
 const { runMigrations, getMigrationStatus, rollbackLatestMigration } = require('../db/migrator');
 const { closePool } = require('../db/index');
 
+function sanitizeError(msg) {
+  if (!msg || typeof msg !== 'string') return 'Unknown error';
+  return msg.replace(/postgres:\/\/[^@\s]+:[^@\s]+@/g, 'postgres://[REDACTED]:[REDACTED]@');
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const isStatus = args.includes('--status');
   const isRollback = args.includes('--rollback');
+  const isConfirm = args.includes('--confirm');
 
   try {
     if (isStatus) {
@@ -21,7 +27,7 @@ async function main() {
       })));
     } else if (isRollback) {
       console.log('⚠️ Rolling back latest applied PostgreSQL migration...');
-      const result = await rollbackLatestMigration();
+      const result = await rollbackLatestMigration({ confirm: isConfirm });
       console.log(`✅ Rollback result: ${result.status} (${result.version || 'none'})`);
     } else {
       console.log('🚀 Running pending PostgreSQL migrations...');
@@ -32,7 +38,7 @@ async function main() {
       console.log('✅ All migrations verified and up to date.');
     }
   } catch (err) {
-    console.error('❌ Migration failed:', err.message);
+    console.error('❌ Migration failed:', sanitizeError(err.message));
     process.exitCode = 1;
   } finally {
     await closePool();

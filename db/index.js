@@ -11,6 +11,10 @@ let pool = null;
  * @returns {Pool}
  */
 function getPool(overrideConfig = null) {
+  if (overrideConfig && pool) {
+    throw new Error('Cannot reinitialize connection pool with overrideConfig while an active pool exists. Call await resetPool() first.');
+  }
+
   if (!pool) {
     const config = overrideConfig || getDatabaseConfig();
     pool = new Pool({
@@ -76,16 +80,22 @@ async function withTransaction(callback) {
  */
 async function closePool() {
   if (pool) {
-    await pool.end();
+    const active = pool;
     pool = null;
+    await active.end();
   }
 }
 
 /**
- * Resets the active pool instance (primarily for tests).
+ * Resets the active pool instance cleanly, draining all open clients.
+ * @returns {Promise<void>}
  */
-function resetPool() {
-  pool = null;
+async function resetPool() {
+  if (pool) {
+    const active = pool;
+    pool = null;
+    await active.end();
+  }
 }
 
 module.exports = {
