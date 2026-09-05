@@ -4,12 +4,8 @@ const path = require('path');
 const sharp = require('sharp');
 const storage = require('./storage');
 
-const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-}
+const media = require('../security/media');
 
-// Curated Ultra-HD Thematic Background Pools
 const THEMATIC_BG_POOLS = {
   sports: [
     'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?auto=format&fit=crop&w=1080&h=1080&q=85',
@@ -272,9 +268,9 @@ const STYLE_GUIDES = {
 /**
  * Extract recent topics from history to prevent repetitive generation
  */
-function getRecentTopicsFromHistory() {
+async function getRecentTopicsFromHistory() {
   try {
-    const history = storage.getHistory() || [];
+    const history = (await storage.getHistory()) || [];
     const recent = history.slice(0, 25);
     const words = [];
     for (const h of recent) {
@@ -320,12 +316,12 @@ Respond ONLY with a valid JSON object:
       if (text) {
         const parsed = extractJson(text);
         if (parsed && parsed.angle) {
-          console.log(`[AI Service] Fresh dynamic topic via Gemini: "${parsed.angle}"`);
+          console.log('[ai] operation event');
           return parsed;
         }
       }
     } catch (e) {
-      console.log('[AI Service] Gemini dynamic topic generation notice:', e.message);
+      console.log('[ai] operation event');
     }
   }
 
@@ -590,7 +586,7 @@ class AIService {
           contents: [{ parts: [{ text: 'Reply: OK' }] }]
         }, { timeout: 8000 });
 
-        console.log(`[Gemini Verify] Verified using model: ${model}`);
+        console.log('[ai] operation event');
         return { valid: true, model: model, message: `Connected with Google Gemini (${model})` };
       } catch (err) {
         lastError = err;
@@ -616,7 +612,7 @@ class AIService {
    * Extracts visual layout, color palette, headline structure, and writing voice from an uploaded reference template
    */
   async analyzeTemplate(imageBufferOrUrl, sampleText = '') {
-    const settings = storage.getSettings();
+    const settings = (await storage.getSettings());
     const geminiApiKey = settings.geminiApiKey ? settings.geminiApiKey.trim() : '';
 
     let extracted = {
@@ -642,28 +638,7 @@ class AIService {
         let mimeType = 'image/jpeg';
 
         if (imageBufferOrUrl) {
-          if (Buffer.isBuffer(imageBufferOrUrl)) {
-            base64Image = imageBufferOrUrl.toString('base64');
-          } else if (typeof imageBufferOrUrl === 'string') {
-            if (imageBufferOrUrl.startsWith('data:image')) {
-              const matches = imageBufferOrUrl.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-              if (matches) {
-                mimeType = matches[1];
-                base64Image = matches[2];
-              }
-            } else if (imageBufferOrUrl.startsWith('http://') || imageBufferOrUrl.startsWith('https://')) {
-              const imgRes = await axios.get(imageBufferOrUrl, { responseType: 'arraybuffer', timeout: 10000 });
-              base64Image = Buffer.from(imgRes.data).toString('base64');
-            } else {
-              let localPath = imageBufferOrUrl;
-              if (imageBufferOrUrl.startsWith('/uploads/')) {
-                localPath = path.join(__dirname, '..', imageBufferOrUrl);
-              }
-              if (fs.existsSync(localPath)) {
-                base64Image = fs.readFileSync(localPath).toString('base64');
-              }
-            }
-          }
+          base64Image = (await media.load(imageBufferOrUrl)).toString('base64');
         }
 
         if (base64Image) {
@@ -704,12 +679,12 @@ Respond ONLY with a valid JSON object matching this schema:
           const parsed = extractJson(raw);
           if (parsed && (parsed.visualStructure || parsed.writingVoice)) {
             extracted = { ...extracted, ...parsed };
-            console.log(`[AI Service] Successfully analyzed template via ${model}:`, extracted.summary);
+            console.log('[ai] operation event');
             break;
           }
         }
       } catch (err) {
-        console.log(`[AI Service] analyzeTemplate error with ${model}:`, err.message);
+        console.log('[ai] operation event');
       }
     }
 
@@ -737,9 +712,9 @@ Respond ONLY with a valid JSON object matching this schema:
       topic = optionsOrTopic || '';
     }
 
-    const settings = storage.getSettings();
+    const settings = (await storage.getSettings());
     const geminiApiKey = settings.geminiApiKey ? settings.geminiApiKey.trim() : '';
-    const categories = storage.getCategories();
+    const categories = (await storage.getCategories());
 
     let activeCategory = null;
     if (category) {
@@ -752,20 +727,20 @@ Respond ONLY with a valid JSON object matching this schema:
     const isAutoTopic = !effectiveTopic;
 
     if (isAutoTopic) {
-      const recentTopics = getRecentTopicsFromHistory();
+      const recentTopics = (await getRecentTopicsFromHistory());
       const dynamicTopicObj = await pickOrGenerateDynamicTopic(activeCategory?.title || '', recentTopics, geminiApiKey);
       effectiveTopic = dynamicTopicObj.angle;
       defaultBadge = activeCategory?.badge || dynamicTopicObj.badge;
     }
 
     // 1. Identify Target Page & its dedicated System Prompt
-    const targetPage = targetPageId ? (storage.getPageById(targetPageId) || storage.getActivePage()) : storage.getActivePage();
+    const targetPage = targetPageId ? ((await storage.getPageById(targetPageId)) || (await storage.getActivePage())) : (await storage.getActivePage());
     const pageName = targetPage?.name || settings.pageName || 'Facebook Page';
-    const pageSystemPrompt = storage.getPageSystemPrompt(targetPage?.id);
+    const pageSystemPrompt = (await storage.getPageSystemPrompt(targetPage?.id));
 
     // 2. Identify Reference Template & its Learned Profile
     if (!template && targetTemplateId) {
-      template = storage.getTemplateById(targetTemplateId);
+      template = (await storage.getTemplateById(targetTemplateId));
     }
 
     let templateGuidelines = '';
@@ -779,7 +754,7 @@ ${template.sample ? `- Reference Caption Structure Example:\n"""\n${template.sam
 Make sure the post caption and card headline mimic this exact structure and formatting!`;
     }
 
-    console.log(`[AI Service] Generating post for page "${pageName}" (Template: "${template?.title || 'None'}"), Topic: "${effectiveTopic}"`);
+    console.log('[ai] operation event');
 
     const isCustomRequest = !isAutoTopic;
     const customIntentRule = isCustomRequest
@@ -844,7 +819,7 @@ Respond ONLY with the JSON object.`;
       const candidateModels = ['gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash'];
       for (const model of candidateModels) {
         try {
-          console.log(`[AI Service] Generating structured post using Google Gemini (${model})...`);
+          console.log('[ai] operation event');
           const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
           const response = await axios.post(geminiUrl, {
             systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -861,47 +836,17 @@ Respond ONLY with the JSON object.`;
             const parsed = extractJson(rawText);
             if (parsed && parsed.line1_red && parsed.post_caption) {
               result = parsed;
-              console.log(`[AI Service] Successfully generated structured post using ${model}!`);
+              console.log('[ai] operation event');
               break;
             }
           }
         } catch (err) {
-          console.log(`[AI Service] Gemini ${model} notice:`, err.response?.data?.error?.message || err.message);
+          console.log('[ai] operation event');
         }
       }
     }
 
-    // 2. Fallback via Pollinations OpenAI JSON
-    if (!result) {
-      try {
-        console.log('[AI Service] Attempting fallback AI generator...');
-        const res = await axios.post('https://text.pollinations.ai/', {
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-          ],
-          model: 'openai',
-          temperature: 0.95
-        }, { timeout: 12000 });
-
-        let text = typeof res.data === 'string' ? res.data : res.data?.choices?.[0]?.message?.content;
-        if (text) {
-          const parsed = extractJson(text);
-          if (parsed && parsed.line1_red && parsed.post_caption) {
-            result = parsed;
-          }
-        }
-      } catch (err) {
-        console.log('[AI Service] Online fallback notice:', err.message);
-      }
-    }
-
-    // 3. Fallback to Rich Dynamic Curated Library
-    if (!result) {
-      const picked = FALLBACK_VIRAL_POSTS[Math.floor(Math.random() * FALLBACK_VIRAL_POSTS.length)];
-      result = JSON.parse(JSON.stringify(picked));
-      console.log(`[AI Service] Using diverse dynamic curated post: "${result.line1_red}"`);
-    }
+    if (!result) throw Object.assign(new Error('AI generation failed. Check your Gemini key and retry.'), { statusCode: 502, expose: true });
 
     return result;
   }
@@ -911,7 +856,7 @@ Respond ONLY with the JSON object.`;
    */
   async fetchSmartBackground(searchTerm, topic = '', variation = 0, styleMode = 'auto', customPrompt = '') {
     const term = (customPrompt || searchTerm || topic || 'athletics stadium').trim();
-    console.log(`[Smart Photo Fetcher] Looking for photo for: "${term}" (Mode: ${styleMode}, Var: #${variation})...`);
+    console.log('[ai] operation event');
 
     const BROWSER_HEADERS = {
       'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -927,13 +872,13 @@ Respond ONLY with the JSON object.`;
         const seed = Math.floor(Math.random() * 1000000) + variation * 7919;
         const fluxPrompt = `professional hyperrealistic cinematic photograph of ${term}, 8k sharp focus, high detail, dramatic lighting, award-winning national geographic style`;
         const fluxUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(fluxPrompt)}?width=1080&height=1080&model=flux&nologo=true&seed=${seed}`;
-        const fluxRes = await axios.get(fluxUrl, { headers: BROWSER_HEADERS, responseType: 'arraybuffer', timeout: 18000 });
+        const fluxRes = await Promise.resolve({data: await media.remoteImage(fluxUrl)});
         if (fluxRes.data && fluxRes.data.length > 5000) {
-          console.log(`[Smart Photo Fetcher] Generated Flux AI photo for "${term}"`);
+          console.log('[ai] operation event');
           return Buffer.from(fluxRes.data);
         }
       } catch (err) {
-        console.log('[Smart Photo Fetcher] Flux mode notice:', err.message);
+        console.log('[ai] operation event');
       }
     }
 
@@ -949,8 +894,8 @@ Respond ONLY with the JSON object.`;
             const chosenPage = validPages[variation % validPages.length];
             const imgUrl = chosenPage?.thumbnail?.source;
             if (imgUrl) {
-              console.log(`[Smart Photo Fetcher] Found Wikipedia photo for "${chosenPage.title}": ${imgUrl}`);
-              const imgRes = await axios.get(imgUrl, { headers: BROWSER_HEADERS, responseType: 'arraybuffer', timeout: 15000 });
+              console.log('[ai] operation event');
+              const imgRes = await Promise.resolve({data: await media.remoteImage(imgUrl)});
               if (imgRes.data && imgRes.data.length > 5000) {
                 return Buffer.from(imgRes.data);
               }
@@ -958,16 +903,16 @@ Respond ONLY with the JSON object.`;
           }
         }
       } catch (wikiErr) {
-        console.log('[Smart Photo Fetcher] Wikipedia search notice:', wikiErr.message);
+        console.log('[ai] operation event');
       }
     }
 
     // Mode C: Try Unsplash targeted keyword fetch with variation seed
     try {
       const unsplashUrl = `https://images.unsplash.com/featured/?${encodeURIComponent(term)}&sig=${Date.now() + variation * 888}`;
-      const unsplashRes = await axios.get(unsplashUrl, { headers: BROWSER_HEADERS, responseType: 'arraybuffer', timeout: 8000 });
+      const unsplashRes = await Promise.resolve({data: await media.remoteImage(unsplashUrl)});
       if (unsplashRes.data && unsplashRes.data.length > 10000) {
-        console.log(`[Smart Photo Fetcher] Got photo from Unsplash feature search for "${term}"`);
+        console.log('[ai] operation event');
         return Buffer.from(unsplashRes.data);
       }
     } catch (e) {
@@ -994,22 +939,22 @@ Respond ONLY with the JSON object.`;
     try {
       const pickIndex = (Math.floor(Math.random() * pool.length) + variation) % pool.length;
       const randomUrl = pool[pickIndex];
-      const res = await axios.get(randomUrl, { headers: BROWSER_HEADERS, responseType: 'arraybuffer', timeout: 10000 });
+      const res = await Promise.resolve({data: await media.remoteImage(randomUrl)});
       return Buffer.from(res.data);
     } catch (poolErr) {
-      console.log('[Smart Photo Fetcher] Pool error, attempting Flux fallback...');
+      console.log('[ai] operation event');
     }
 
     // Mode E: Photorealistic AI generation fallback (Flux) with seed variation
     try {
       const seed = Math.floor(Math.random() * 1000000) + variation * 1337;
       const fluxUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent("professional high quality realistic photography of " + term + ", 8k sharp, natural lighting")}?width=1080&height=1080&model=flux&nologo=true&seed=${seed}`;
-      const fluxRes = await axios.get(fluxUrl, { headers: BROWSER_HEADERS, responseType: 'arraybuffer', timeout: 15000 });
+      const fluxRes = await Promise.resolve({data: await media.remoteImage(fluxUrl)});
       if (fluxRes.data && fluxRes.data.length > 5000) {
         return Buffer.from(fluxRes.data);
       }
     } catch (fluxErr) {
-      console.log('[Smart Photo Fetcher] Flux fallback error:', fluxErr.message);
+      console.log('[ai] operation event');
     }
 
     // Final Canvas fallback
@@ -1046,45 +991,18 @@ Respond ONLY with the JSON object.`;
       }
     }
 
-    const fileName = `thumb_${effectiveLayout}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.jpg`;
-    const localFilePath = path.join(UPLOADS_DIR, fileName);
-
-    console.log(`[Thumbnail Card] Compositing card (Layout: ${effectiveLayout}, Var #${variation}): "${line1Red} ${line1White}" (TemplateImage: ${!!templateImage})...`);
-
-    // Fetch matching background photo (using templateImage if provided!)
-    let rawBg = null;
-    if (templateImage) {
-      try {
-        console.log(`[Thumbnail Card] Loading provided template image: ${templateImage}`);
-        if (templateImage.startsWith('http://') || templateImage.startsWith('https://')) {
-          const tRes = await axios.get(templateImage, { responseType: 'arraybuffer', timeout: 12000 });
-          if (tRes.data && tRes.data.length > 2000) {
-            rawBg = Buffer.from(tRes.data);
-          }
-        } else {
-          let localPath = templateImage;
-          if (templateImage.startsWith('/uploads/')) {
-            localPath = path.join(__dirname, '..', templateImage);
-          }
-          if (fs.existsSync(localPath)) {
-            rawBg = fs.readFileSync(localPath);
-          }
-        }
-      } catch (err) {
-        console.warn('[Thumbnail Card] Template image notice:', err.message);
-      }
-    }
+    let rawBg = templateImage ? await media.load(templateImage) : null;
 
     if (!rawBg) {
       rawBg = await this.fetchSmartBackground(cardData.search_term, topic, variation, styleMode, customPrompt);
     }
 
-    const resizedBg = await sharp(rawBg)
+    const resizedBg = await sharp(rawBg, { limitInputPixels: 25000000 })
       .resize(width, height, { fit: 'cover' })
       .toBuffer();
 
-    const activePage = storage.getActivePage();
-    const settings = storage.getSettings();
+    const activePage = (await storage.getActivePage());
+    const settings = (await storage.getSettings());
     const watermarkText = (activePage?.name || settings.pageName || 'FACEBOOK').toUpperCase();
 
     const svgParams = {
@@ -1116,21 +1034,15 @@ Respond ONLY with the JSON object.`;
     }
 
     try {
-      await sharp(resizedBg)
+      const output = await sharp(resizedBg)
         .composite([{ input: Buffer.from(svgOverlay), top: 0, left: 0 }])
         .jpeg({ quality: 95 })
-        .toFile(localFilePath);
+        .toBuffer();
 
-      console.log(`[Thumbnail Card] Successfully created (${effectiveLayout}): ${localFilePath}`);
-      return {
-        success: true,
-        fileName: fileName,
-        localPath: localFilePath,
-        url: `/uploads/${fileName}`,
-        layout: effectiveLayout
-      };
+      const asset = await media.store(output);
+      return { success: true, ...asset, layout: effectiveLayout };
     } catch (err) {
-      console.error('[Thumbnail Card] Render error:', err.message);
+      console.log('[ai] operation event');
       return null;
     }
   }
@@ -1140,16 +1052,16 @@ Respond ONLY with the JSON object.`;
    */
   async generateFullPostBundle(options = {}) {
     const { topic = '', categoryId = '', pageId = '', templateId = '', templateImage = null, includeImage = true, templateObj = null } = options;
-    const categories = storage.getCategories();
+    const categories = (await storage.getCategories());
     const category = categoryId ? categories.find(c => c.id === categoryId) : null;
 
     let targetTemplate = templateObj;
     if (!targetTemplate && templateId) {
-      targetTemplate = storage.getTemplateById(templateId);
+      targetTemplate = (await storage.getTemplateById(templateId));
     }
     const effectiveTemplateImage = templateImage || targetTemplate?.imageUrl || null;
 
-    console.log(`[AI Service] Generating full post bundle (PageId: "${pageId || 'active'}", Category: ${category?.title || 'Auto'}, Template: "${targetTemplate?.title || 'None'}")...`);
+    console.log('[ai] operation event');
 
     // Generate structured data using Page System Prompt and Template Learning
     const structuredData = await this.generateStructuredPost({
@@ -1201,7 +1113,7 @@ Respond ONLY with the JSON object.`;
     
     let targetTemplate = null;
     if (templateId) {
-      targetTemplate = storage.getTemplateById(templateId);
+      targetTemplate = (await storage.getTemplateById(templateId));
     }
     const effectiveTemplateImage = templateImage || targetTemplate?.imageUrl || null;
 
@@ -1220,7 +1132,7 @@ Respond ONLY with the JSON object.`;
       activeCardData.search_term = customPrompt;
     }
 
-    console.log(`[AI Service] Regenerating thumbnail only (Var #${variation}, Page: ${pageId || 'active'}, Template: ${targetTemplate?.title || 'None'})...`);
+    console.log('[ai] operation event');
     const imageResult = await this.generateThumbnailCardFromData(activeCardData, topic, variation, styleMode, customPrompt, effectiveTemplateImage);
     return {
       cardData: activeCardData,
@@ -1235,15 +1147,15 @@ Respond ONLY with the JSON object.`;
    */
   async regenerateCaptionOnly(options = {}) {
     const { topic = '', currentMessage = '', pageId = '', templateId = '', variation = 1 } = options;
-    const settings = storage.getSettings();
-    const targetPage = pageId ? (storage.getPageById(pageId) || storage.getActivePage()) : storage.getActivePage();
+    const settings = (await storage.getSettings());
+    const targetPage = pageId ? ((await storage.getPageById(pageId)) || (await storage.getActivePage())) : (await storage.getActivePage());
     const pageName = targetPage?.name || settings.pageName || 'Facebook Page';
-    const pageSystemPrompt = storage.getPageSystemPrompt(targetPage?.id);
+    const pageSystemPrompt = (await storage.getPageSystemPrompt(targetPage?.id));
     const geminiApiKey = settings.geminiApiKey ? settings.geminiApiKey.trim() : '';
 
     let templateGuidelines = '';
     if (templateId) {
-      const template = storage.getTemplateById(templateId);
+      const template = (await storage.getTemplateById(templateId));
       if (template) {
         templateGuidelines = `\n\nREFERENCE TEMPLATE: "${template.title}".
 Adopt this template's writing voice: ${template.learnedStyle?.writingVoice || ''}
@@ -1288,12 +1200,12 @@ Write a completely fresh, brand new engaging post in natural Bengali.`;
             break;
           }
         } catch (e) {
-          console.log(`[Regenerate Caption] Gemini ${m} notice:`, e.message);
+          console.log('[ai] operation event');
         }
       }
     }
 
-    if (!newCaption) {
+    if (!newCaption && process.env.ALLOW_EXTERNAL_AI_FALLBACK === 'true') {
       try {
         const res = await axios.post('https://text.pollinations.ai/', {
           messages: [
@@ -1308,14 +1220,15 @@ Write a completely fresh, brand new engaging post in natural Bengali.`;
           newCaption = text.trim();
         }
       } catch (e) {
-        console.log('[Regenerate Caption] Fallback notice:', e.message);
+        console.log('[ai] operation event');
       }
     }
 
-    if (!newCaption) {
+    if (!newCaption && process.env.ALLOW_EXTERNAL_AI_FALLBACK === 'true') {
       newCaption = topic ? `📢 ${topic}\n\nআজকের আলোচিত ঘটনার পেছনের মূল তথ্য ও বিস্তারিত আপডেট। বিস্তারিত জানতে এবং নতুন কনটেন্টের জন্য পেজে সঙ্গে থাকুন! ✨\n\n#Trending #ViralPost #FacebookUpdate` : currentMessage;
     }
 
+    if (!newCaption) throw Object.assign(new Error('Caption generation failed. Check your Gemini key and retry.'), {statusCode:502,expose:true});
     return { success: true, message: newCaption };
   }
 
@@ -1323,11 +1236,11 @@ Write a completely fresh, brand new engaging post in natural Bengali.`;
    * Generates a curated list of viral, high-CTR content topic ideas
    */
   async generateTopicIdeas({ category = '', keyword = '', count = 6 } = {}) {
-    const settings = storage.getSettings();
+    const settings = (await storage.getSettings());
     const geminiApiKey = settings.geminiApiKey ? settings.geminiApiKey.trim() : '';
-    const categories = storage.getCategories();
+    const categories = (await storage.getCategories());
 
-    const activePage = storage.getActivePage();
+    const activePage = (await storage.getActivePage());
     const pageName = activePage?.name || settings.pageName || "Facebook Page";
     let targetCategory = null;
     if (category) {
@@ -1365,7 +1278,7 @@ Make sure each topic is completely distinct and engaging. Return ONLY the JSON a
       const models = ['gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-3.5-flash-lite'];
       for (const model of models) {
         try {
-          console.log(`[AI Service] Generating topic ideas using Gemini (${model})...`);
+          console.log('[ai] operation event');
           const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
           const response = await axios.post(geminiUrl, {
             systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -1382,18 +1295,18 @@ Make sure each topic is completely distinct and engaging. Return ONLY the JSON a
             const parsed = extractJson(rawText);
             if (Array.isArray(parsed) && parsed.length > 0) {
               topics = parsed;
-              console.log(`[AI Service] Successfully generated ${topics.length} topic ideas!`);
+              console.log('[ai] operation event');
               break;
             }
           }
         } catch (err) {
-          console.log(`[AI Service] Gemini topic ideas notice (${model}):`, err.response?.data?.error?.message || err.message);
+          console.log('[ai] operation event');
         }
       }
     }
 
     // Fallback Pollinations
-    if (!topics || topics.length === 0) {
+    if ((!topics || topics.length === 0) && process.env.ALLOW_EXTERNAL_AI_FALLBACK === 'true') {
       try {
         const res = await axios.post('https://text.pollinations.ai/', {
           messages: [
@@ -1410,12 +1323,12 @@ Make sure each topic is completely distinct and engaging. Return ONLY the JSON a
           }
         }
       } catch (err) {
-        console.log('[AI Service] Fallback topics error:', err.message);
+        console.log('[ai] operation event');
       }
     }
 
     // Curated dynamic fallback if API fails
-    if (!topics || topics.length === 0) {
+    if ((!topics || topics.length === 0) && process.env.ALLOW_EXTERNAL_AI_FALLBACK === 'true') {
       const shuffled = [...DYNAMIC_TOPIC_ANGLES].sort(() => 0.5 - Math.random()).slice(0, count);
       topics = shuffled.map((item, idx) => ({
         id: `idea_${Date.now()}_${idx}`,
@@ -1427,6 +1340,7 @@ Make sure each topic is completely distinct and engaging. Return ONLY the JSON a
       }));
     }
 
+    if (!topics?.length) throw Object.assign(new Error('Topic generation failed. Check your Gemini key and retry.'), {statusCode:502,expose:true});
     return topics;
   }
 

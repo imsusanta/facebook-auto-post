@@ -5,31 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AutoPost - Facebook Post Automation</title>
   
-  <!-- Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            brand: {
-              50: '#EEF2FF',
-              100: '#E0E7FF',
-              500: '#6366F1',
-              600: '#4F46E5',
-              700: '#4338CA',
-            }
-          },
-          fontFamily: {
-            sans: ['Inter', 'system-ui', 'sans-serif'],
-          }
-        }
-      }
-    }
-  </script>
-
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="/tailwind.css">
+  <script src="/vendor/lucide.js" defer></script>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body class="bg-[#F8FAFC] text-slate-900 flex h-screen overflow-hidden font-sans">
@@ -1024,7 +1001,7 @@
                 <button class="queue-filter-btn px-3 py-1 font-medium rounded-lg text-slate-600 hover:text-slate-900" data-filter="pending">Pending</button>
                 <button class="queue-filter-btn px-3 py-1 font-medium rounded-lg text-slate-600 hover:text-slate-900" data-filter="completed">Completed</button>
               </div>
-              <button class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-sm" onclick="document.getElementById('openComposerBtn').click()">
+              <button class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-sm" id="scheduleComposerShortcut">
                 <i data-lucide="plus" class="w-3.5 h-3.5"></i>
                 <span>Add Post</span>
               </button>
@@ -1829,6 +1806,8 @@
   </div>
 
   <!-- Load Main Application Logic -->
-  <script src="app.js"></script>
+  <script src="/vendor/dompurify.js"></script>
+  <script src="/security-ui.js"></script>
+  <script src="/app.js"></script>
 </body>
 </html>

@@ -15,7 +15,7 @@ class CommentBotService {
       senderId = 'user_123'
     } = data;
 
-    const rulesData = storage.getAutomationRules();
+    const rulesData = (await storage.getAutomationRules());
     if (!rulesData.commentAutomationEnabled) {
       return { handled: false, reason: 'Comment automation is currently paused.' };
     }
@@ -80,7 +80,7 @@ class CommentBotService {
           privateDmRes = await facebook.sendPrivateReply(commentId, privateDmText);
           privateDmSent = true;
         } catch (dmErr) {
-          console.warn('[CommentBot] Private DM notice:', dmErr.message);
+          console.log('[comment_bot] operation event');
         }
       }
 
@@ -97,11 +97,11 @@ class CommentBotService {
         status: 'success'
       };
 
-      storage.addHistory({
+      (await storage.addHistory({
         status: 'success',
         message: `[Comment Auto-Reply to ${senderName}]: "${publicReplyText.slice(0, 80)}..."`,
         source: 'comment_bot'
-      });
+      }));
 
       return {
         handled: true,
@@ -114,8 +114,8 @@ class CommentBotService {
         timestamp: new Date().toISOString()
       };
     } catch (err) {
-      console.error('[CommentBot] Error executing comment reply:', err.message);
-      return { handled: false, error: err.message };
+      console.log('[comment_bot] operation event');
+      return { handled: false, error: 'Operation failed. Check settings and try again.' };
     }
   }
 
@@ -123,7 +123,7 @@ class CommentBotService {
    * Use Google Gemini AI to formulate a contextual reply to a follower's comment
    */
   async generateAiCommentReply(commentText, senderName) {
-    const settings = storage.getSettings();
+    const settings = (await storage.getSettings());
     const geminiApiKey = settings.geminiApiKey ? settings.geminiApiKey.trim() : '';
 
     if (!geminiApiKey) {

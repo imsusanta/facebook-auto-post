@@ -5,8 +5,8 @@ const storage = require('../services/storage');
 const scheduler = require('../services/scheduler');
 
 // GET /api/ai/categories
-router.get('/categories', (req, res) => {
-  res.json(storage.getCategories());
+router.get('/categories', async (req, res) => {
+  res.json((await storage.getCategories()));
 });
 
 // POST /api/ai/generate-topics

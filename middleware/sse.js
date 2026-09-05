@@ -1,56 +1,70 @@
-/**
- * Server-Sent Events (SSE) Hub
- * Manages real-time client subscriptions and event broadcasting
- */
-
-const sseClients = new Set();
-
-/**
- * Handle new SSE client connection
- */
-function handleSSEConnection(req, res) {
+const context = require('../security/context');
+const { redact } = require('../security/secrets');
+const auth = require('../security/auth');
+const clients = new Map();
+async function handleSSEConnection(req, res) {
+  const id = context.current().workspaceId,
+    set = clients.get(id) || new Set();
+  if (set.size >= 20)
+    return res.status(429).json({ error: 'Too many live connections' });
+  res.sessionHash = req.user.token_hash;
+  res.userId = req.user.id;
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*'
+    'Cache-Control': 'no-store',
+    Connection: 'keep-alive'
   });
-
   res.write('event: connected\ndata: {"status":"connected"}\n\n');
-  sseClients.add(res);
-
-  // Keep-alive heartbeat every 25 seconds
-  const heartbeat = setInterval(() => {
+  set.add(res);
+  clients.set(id, set);
+  const clean = () => {
+    clearInterval(timer);
+    set.delete(res);
+    if (!set.size) clients.delete(id);
+  };
+  let checking = false;
+  const timer = setInterval(async () => {
+    if (checking) return;
+    checking = true;
     try {
+      const session = await auth.session(req);
+      if (!session || session.workspace_id !== id) {
+        res.end();
+        clean();
+        return;
+      }
       res.write(': heartbeat\n\n');
     } catch {
-      clearInterval(heartbeat);
-      sseClients.delete(res);
+      res.end();
+      clean();
+    } finally {
+      checking = false;
     }
-  }, 25000);
-
-  req.on('close', () => {
-    clearInterval(heartbeat);
-    sseClients.delete(res);
-  });
+  }, 10000);
+  req.on('close', clean);
 }
-
-/**
- * Broadcast an event to all connected SSE clients
- */
 function broadcastSSE(event, data) {
-  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  for (const client of sseClients) {
-    try {
-      client.write(payload);
-    } catch {
-      sseClients.delete(client);
-    }
-  }
+  const id = context.current().workspaceId;
+  const payload = `event: ${event}\ndata: ${JSON.stringify(redact(data))}\n\n`;
+  for (const res of clients.get(id) || [])
+    if (!res.destroyed) res.write(payload);
 }
-
+function closeAll() {
+  for (const set of clients.values()) for (const res of set) res.end();
+  clients.clear();
+}
+function revokeSession(hash) {
+  for (const set of clients.values())
+    for (const res of set) if (res.sessionHash === hash) res.end();
+}
+function revokeUser(id) {
+  for (const set of clients.values())
+    for (const res of set) if (res.userId === id) res.end();
+}
 module.exports = {
   handleSSEConnection,
   broadcastSSE,
-  getConnectedClientsCount: () => sseClients.size
+  closeAll,
+  revokeSession,
+  revokeUser
 };

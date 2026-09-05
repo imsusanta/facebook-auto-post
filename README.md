@@ -1,6 +1,6 @@
 # 🚀 Facebook Auto-Poster & Automation SaaS Engine
 
-An intelligent, full-featured Facebook Page Automation SaaS platform powered by **Node.js, Express, Sharp, Google Gemini AI, and Meta Graph API v20.0**.
+A Facebook Page automation application with a security and PostgreSQL foundation, powered by **Node.js, Express, Sharp, Google Gemini AI, and Meta Graph API v20.0**.
 
 ---
 
@@ -18,58 +18,44 @@ An intelligent, full-featured Facebook Page Automation SaaS platform powered by 
 
 ---
 
-## 🛠️ Tech Stack
+## Security and database foundation
 
-- **Backend**: Node.js, Express.js
-- **Database**: SQLite3 (`better-sqlite3`) & JSON File Storage
-- **Image Processing**: `sharp`
-- **AI Engine**: Google Gemini API (`gemini-3.1-flash-lite`, `gemini-2.5-flash`)
-- **APIs**: Meta Graph API v20.0
-- **Frontend**: Vanilla JavaScript (ES6+), Tailwind CSS, Lucide Icons
+The application now requires authenticated, email-verified accounts and PostgreSQL. The old shared JSON runtime, default-admin SQLite scaffold, public credential APIs and public uploads are no longer used.
 
----
+**Breaking setup change:** read [the migration and deployment guide](docs/SECURITY_SETUP.md) before running this branch against real data. No production deployment is performed automatically.
 
-## 📦 Installation & Setup
+## Tech stack
 
-### 1. Clone the Repository
-```bash
-git clone https://github.com/imsusanta/facebook-auto-post.git
-cd facebook-auto-post
-```
+- Node.js 22+ / Express 5
+- PostgreSQL 16+ with workspace-scoped repositories and versioned migrations
+- Opaque cookie sessions, scrypt password hashes, AES-256-GCM credential encryption
+- Sharp image decoding/re-encoding; protected workspace media
+- Gemini / Meta Graph API integration (live provider validation required)
+- Vanilla JavaScript, compiled Tailwind CSS, local Lucide and DOMPurify
 
-### 2. Install Dependencies
-```bash
-npm install
-```
+## Quick start
 
-### 3. Setup Environment Configuration
-Copy the sample environment file:
-```bash
+```sh
+npm ci
 cp .env.example .env
-```
-Fill in your credentials in `.env` or configure them directly from the web settings dashboard:
-- `GEMINI_API_KEY`: Your Google Gemini API Key.
-- `FB_PAGE_ID`: Your Facebook Page ID.
-- `FB_PAGE_ACCESS_TOKEN`: Your Page Access Token (with `pages_manage_posts`, `pages_read_engagement`, `pages_messaging` permissions).
-- `FB_VERIFY_TOKEN`: Verification token for Meta Webhooks.
-
-### 4. Start the Application
-```bash
+# Configure PostgreSQL, encryption key, APP_ORIGIN and SMTP first.
+npm run db:migrate
+npm run build:css
 npm start
 ```
-Or in development mode with auto-reload:
-```bash
-npm run dev
+
+Create an account, verify the email, then log in. Connect each customer's Facebook Page and Gemini key inside that customer's authenticated workspace. Automation and webhooks are disabled by default pending staging checks.
+
+## Development checks
+
+```sh
+npm run check
+npm run build:css
+TEST_DATABASE_URL=postgresql://user:password@localhost:5432/autopost_test npm test
+npm audit --omit=dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
----
-
-## 🔒 Security & Privacy Notice
-
-- Never commit your `.env` file or `data/settings.json` containing live tokens or API keys to version control.
-- Ensure your Facebook Page Access Token has appropriate expiry and security settings in the Meta Developer Portal.
+See [SECURITY.md](SECURITY.md) and [the setup guide](docs/SECURITY_SETUP.md) for role permissions, migration steps, test coverage and known limitations. Billing, OAuth onboarding, production job recovery and operational readiness remain later SaaS phases.
 
 ---
 

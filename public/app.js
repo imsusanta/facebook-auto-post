@@ -1,6 +1,7 @@
 // AutoPost - Complete Modern Facebook Automation UI Engine
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  await window.authReady;
   // Global State
   let state = {
     settings: {},
@@ -243,8 +244,8 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const cfg = headerConfigs[viewName] || headerConfigs['dashboard'];
-    headerTitle.innerHTML = cfg.title;
-    headerSubtitle.innerHTML = cfg.subtitle;
+    setSafeHTML(headerTitle, cfg.title);
+    setSafeHTML(headerSubtitle, cfg.subtitle);
 
     // Trigger view-specific renderers
     if (viewName === 'create-post') {
@@ -300,21 +301,21 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderNotifications() {
-    notificationsList.innerHTML = '';
+    setSafeHTML(notificationsList, '');
     if (state.notifications.length === 0) {
-      notificationsList.innerHTML = '<div class="text-xs text-slate-400 text-center py-6">No notifications</div>';
+      setSafeHTML(notificationsList, '<div class="text-xs text-slate-400 text-center py-6">No notifications</div>');
       return;
     }
     state.notifications.forEach(n => {
       const item = document.createElement('div');
       item.className = 'p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-start gap-2.5 text-xs';
-      item.innerHTML = `
+      setSafeHTML(item, `
         <div class="w-2 h-2 rounded-full ${n.type === 'success' ? 'bg-emerald-500' : 'bg-indigo-500'} mt-1.5 shrink-0"></div>
         <div class="min-w-0 flex-1">
           <p class="text-slate-800 font-medium leading-snug">${n.text}</p>
           <span class="text-[10px] text-slate-400 mt-0.5 block">${n.time}</span>
         </div>
-      `;
+      `);
       notificationsList.appendChild(item);
     });
   }
@@ -563,11 +564,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (regenerateCardImageBtn) {
       regenerateCardImageBtn.disabled = true;
-      regenerateCardImageBtn.innerHTML = `<span class="animate-spin text-xs">⌛</span> <span>ছবি তৈরি হচ্ছে...</span>`;
+      setSafeHTML(regenerateCardImageBtn, `<span class="animate-spin text-xs">⌛</span> <span>ছবি তৈরি হচ্ছে...</span>`);
     }
     if (fbPreviewRegenImgBtn) {
       fbPreviewRegenImgBtn.disabled = true;
-      fbPreviewRegenImgBtn.innerHTML = `<span class="animate-spin text-xs">⌛</span> <span>ছবি হচ্ছে...</span>`;
+      setSafeHTML(fbPreviewRegenImgBtn, `<span class="animate-spin text-xs">⌛</span> <span>ছবি হচ্ছে...</span>`);
     }
     refreshIcons();
 
@@ -613,11 +614,11 @@ document.addEventListener('DOMContentLoaded', () => {
     } finally {
       if (regenerateCardImageBtn) {
         regenerateCardImageBtn.disabled = false;
-        regenerateCardImageBtn.innerHTML = origCardBtnText;
+        setSafeHTML(regenerateCardImageBtn, origCardBtnText);
       }
       if (fbPreviewRegenImgBtn) {
         fbPreviewRegenImgBtn.disabled = false;
-        fbPreviewRegenImgBtn.innerHTML = origFbBtnText;
+        setSafeHTML(fbPreviewRegenImgBtn, origFbBtnText);
       }
       if (generatingBox) generatingBox.classList.add('hidden');
       updateLivePreview();
@@ -633,11 +634,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (regenerateCaptionBtn) {
       regenerateCaptionBtn.disabled = true;
-      regenerateCaptionBtn.innerHTML = `<span class="animate-spin text-xs">⌛</span> <span>নতুন ক্যাপশন লেখা হচ্ছে...</span>`;
+      setSafeHTML(regenerateCaptionBtn, `<span class="animate-spin text-xs">⌛</span> <span>নতুন ক্যাপশন লেখা হচ্ছে...</span>`);
     }
     if (fbPreviewRegenTextBtn) {
       fbPreviewRegenTextBtn.disabled = true;
-      fbPreviewRegenTextBtn.innerHTML = `<span class="animate-spin text-xs">⌛</span> <span>ক্যাপশন হচ্ছে...</span>`;
+      setSafeHTML(fbPreviewRegenTextBtn, `<span class="animate-spin text-xs">⌛</span> <span>ক্যাপশন হচ্ছে...</span>`);
     }
     refreshIcons();
 
@@ -679,11 +680,11 @@ document.addEventListener('DOMContentLoaded', () => {
     } finally {
       if (regenerateCaptionBtn) {
         regenerateCaptionBtn.disabled = false;
-        regenerateCaptionBtn.innerHTML = origCaptionBtnText;
+        setSafeHTML(regenerateCaptionBtn, origCaptionBtnText);
       }
       if (fbPreviewRegenTextBtn) {
         fbPreviewRegenTextBtn.disabled = false;
-        fbPreviewRegenTextBtn.innerHTML = origFbTextBtnText;
+        setSafeHTML(fbPreviewRegenTextBtn, origFbTextBtnText);
       }
       refreshIcons();
     }
@@ -712,7 +713,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       publishNowBtn.disabled = true;
-      publishNowBtn.innerHTML = `<span class="animate-spin mr-1">⌛</span> Publishing...`;
+      setSafeHTML(publishNowBtn, `<span class="animate-spin mr-1">⌛</span> Publishing...`);
 
       try {
         const formData = new FormData();
@@ -756,7 +757,7 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('Error publishing post.');
       } finally {
         publishNowBtn.disabled = false;
-        publishNowBtn.innerHTML = `<i data-lucide="send" class="w-3.5 h-3.5"></i><span>Publish Now</span>`;
+        setSafeHTML(publishNowBtn, `<i data-lucide="send" class="w-3.5 h-3.5"></i><span>Publish Now</span>`);
         refreshIcons();
       }
     });
@@ -809,7 +810,7 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('Failed to add post to queue.');
       } finally {
         saveToQueueBtn.disabled = false;
-        saveToQueueBtn.innerHTML = `<i data-lucide="layers" class="w-3.5 h-3.5 text-slate-500"></i><span>Add to Queue</span>`;
+        setSafeHTML(saveToQueueBtn, `<i data-lucide="layers" class="w-3.5 h-3.5 text-slate-500"></i><span>Add to Queue</span>`);
         refreshIcons();
       }
     });
@@ -852,7 +853,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderMonthGrid(container) {
     if (!container) return;
-    container.innerHTML = '';
+    setSafeHTML(container, '');
     const year = state.calendarDate.getFullYear();
     const month = state.calendarDate.getMonth();
     const firstDay = new Date(year, month, 1).getDay();
@@ -896,7 +897,7 @@ document.addEventListener('DOMContentLoaded', () => {
         contentHtml += `<div class="mt-1.5 p-1 bg-rose-100 text-rose-700 text-[10px] font-semibold rounded leading-tight truncate">12:30 PM - Weekend Offer</div>`;
       }
 
-      cell.innerHTML = contentHtml;
+      setSafeHTML(cell, contentHtml);
 
       // Click cell to open composer with pre-filled date
       cell.addEventListener('click', () => {
@@ -1001,7 +1002,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     ];
 
-    container.innerHTML = '';
+    setSafeHTML(container, '');
     const pendingItems = state.queue.filter(q => q.status === 'pending');
     const itemsToDisplay = pendingItems.length > 0 ? pendingItems.slice(0, 4) : defaultItems;
 
@@ -1022,7 +1023,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const row = document.createElement('div');
       row.className = 'py-3.5 flex items-center justify-between gap-4 group';
-      row.innerHTML = `
+      setSafeHTML(row, `
         <div class="flex items-center gap-3.5 min-w-0">
           <img src="${thumb}" class="w-12 h-12 rounded-xl object-cover shrink-0 shadow-sm border border-slate-100">
           <div class="min-w-0">
@@ -1042,7 +1043,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <button class="queue-publish-btn p-1 hover:text-indigo-600 transition" title="Publish Right Now" data-id="${item.id}"><i data-lucide="send" class="w-4 h-4"></i></button>
           </div>
         </div>
-      `;
+      `);
       container.appendChild(row);
     });
 
@@ -1084,14 +1085,14 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderFullQueueView() {
     const container = document.getElementById('fullQueueListContainer');
     if (!container) return;
-    container.innerHTML = '';
+    setSafeHTML(container, '');
 
     if (state.queue.length === 0) {
-      container.innerHTML = `
+      setSafeHTML(container, `
         <div class="text-center py-12 text-slate-400 text-xs">
           <i data-lucide="layers" class="w-10 h-10 mx-auto mb-3 text-slate-300"></i>
           No items in queue. Click "+ Add Post" to schedule your next update.
-        </div>`;
+        </div>`);
       refreshIcons();
       return;
     }
@@ -1101,7 +1102,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const d = item.scheduledAt ? new Date(item.scheduledAt).toLocaleString() : 'Autopilot Queue';
       const card = document.createElement('div');
       card.className = 'py-4 flex flex-wrap items-center justify-between gap-4';
-      card.innerHTML = `
+      setSafeHTML(card, `
         <div class="flex items-center gap-4 min-w-0 max-w-xl">
           <img src="${item.imageUrl || '/pariksha_notes_logo.jpg'}" class="w-14 h-14 rounded-xl object-cover border border-slate-100 shadow-sm shrink-0">
           <div class="min-w-0">
@@ -1125,7 +1126,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <i data-lucide="trash-2" class="w-4 h-4"></i>
           </button>
         </div>
-      `;
+      `);
       container.appendChild(card);
     });
 
@@ -1238,14 +1239,14 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderTemplatesView() {
     const grid = document.getElementById('templatesGrid');
     if (!grid) return;
-    grid.innerHTML = '';
+    setSafeHTML(grid, '');
 
     const templates = (state.templates && state.templates.length > 0) ? state.templates : VIRAL_TEMPLATES;
 
     templates.forEach(t => {
       const card = document.createElement('div');
       card.className = 'saas-card overflow-hidden flex flex-col justify-between hover:border-indigo-300 hover:shadow-md transition group relative';
-      card.innerHTML = `
+      setSafeHTML(card, `
         <div>
           <!-- Visual Template Image Banner -->
           <div class="relative h-44 w-full bg-slate-900 overflow-hidden">
@@ -1292,7 +1293,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <span>Use Template Style</span>
           </button>
         </div>
-      `;
+      `);
 
       // Custom Image Upload Listener
       const fileInput = card.querySelector('.custom-template-img-input');
@@ -1301,16 +1302,16 @@ document.addEventListener('DOMContentLoaded', () => {
           const file = e.target.files[0];
           if (file) {
             const formData = new FormData();
-            formData.append('file', file);
+            formData.append('image', file);
             try {
               const res = await fetch('/api/media/upload', { method: 'POST', body: formData });
               const d = await res.json();
-              if (d.success && d.media) {
-                t.imageUrl = d.media.url;
+              if (d.success && d.url) {
+                t.imageUrl = d.url;
                 await fetch(`/api/templates/${t.id}`, {
                   method: 'PUT',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ imageUrl: d.media.url })
+                  body: JSON.stringify({ imageUrl: d.url })
                 });
                 renderTemplatesView();
                 alert(`Uploaded custom template image for "${t.title}"!`);
@@ -1408,18 +1409,18 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       submitAddTemplateBtn.disabled = true;
-      submitAddTemplateBtn.innerHTML = `<span class="animate-spin mr-1">⌛</span> Saving...`;
+      setSafeHTML(submitAddTemplateBtn, `<span class="animate-spin mr-1">⌛</span> Saving...`);
 
       try {
         let imageUrl = newTemplateImageUrlInput ? newTemplateImageUrlInput.value.trim() : '';
         const file = newTemplateImageFileInput?.files?.[0];
         if (file) {
           const formData = new FormData();
-          formData.append('file', file);
+          formData.append('image', file);
           const uploadRes = await fetch('/api/media/upload', { method: 'POST', body: formData });
           const uploadData = await uploadRes.json();
-          if (uploadData.success && uploadData.media?.url) {
-            imageUrl = uploadData.media.url;
+          if (uploadData.success && uploadData.url?.url) {
+            imageUrl = uploadData.url;
           }
         }
 
@@ -1474,7 +1475,7 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('Network error while saving template.');
       } finally {
         submitAddTemplateBtn.disabled = false;
-        submitAddTemplateBtn.innerHTML = `<i data-lucide="check" class="w-3.5 h-3.5"></i><span>Save Template</span>`;
+        setSafeHTML(submitAddTemplateBtn, `<i data-lucide="check" class="w-3.5 h-3.5"></i><span>Save Template</span>`);
         refreshIcons();
       }
     });
@@ -1484,23 +1485,23 @@ document.addEventListener('DOMContentLoaded', () => {
   async function fetchAndRenderMedia() {
     const grid = document.getElementById('mediaGridContainer');
     if (!grid) return;
-    grid.innerHTML = '<div class="col-span-full py-10 text-center text-xs text-slate-400">Loading media...</div>';
+    setSafeHTML(grid, '<div class="col-span-full py-10 text-center text-xs text-slate-400">Loading media...</div>');
 
     try {
       const res = await fetch('/api/media');
       const mediaList = await res.json();
       state.media = mediaList || [];
 
-      grid.innerHTML = '';
+      setSafeHTML(grid, '');
       if (state.media.length === 0) {
-        grid.innerHTML = '<div class="col-span-full py-12 text-center text-xs text-slate-400">No media uploaded yet.</div>';
+        setSafeHTML(grid, '<div class="col-span-full py-12 text-center text-xs text-slate-400">No media uploaded yet.</div>');
         return;
       }
 
       state.media.forEach(m => {
         const card = document.createElement('div');
         card.className = 'saas-card overflow-hidden group relative border border-slate-200/80';
-        card.innerHTML = `
+        setSafeHTML(card, `
           <div class="aspect-square bg-slate-100 relative overflow-hidden">
             <img src="${m.url}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300">
             <div class="absolute inset-0 bg-slate-900/60 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2 p-2">
@@ -1516,7 +1517,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <p class="font-medium text-slate-800 truncate">${m.fileName}</p>
             <span class="text-slate-400 text-[10px]">${(m.size / 1024).toFixed(0)} KB</span>
           </div>
-        `;
+        `);
         grid.appendChild(card);
       });
 
@@ -1544,7 +1545,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       refreshIcons();
     } catch (e) {
-      grid.innerHTML = '<div class="col-span-full py-10 text-center text-xs text-rose-500">Failed to load media</div>';
+      setSafeHTML(grid, '<div class="col-span-full py-10 text-center text-xs text-rose-500">Failed to load media</div>');
     }
   }
 
@@ -1557,7 +1558,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch('/api/integrations');
       const data = await res.json();
 
-      grid.innerHTML = `
+      setSafeHTML(grid, `
         <!-- Meta Facebook -->
         <div class="saas-card p-5 flex items-start gap-4">
           <div class="w-12 h-12 rounded-2xl bg-[#1877F2]/10 text-[#1877F2] flex items-center justify-center font-bold text-xl shrink-0">
@@ -1625,10 +1626,10 @@ document.addEventListener('DOMContentLoaded', () => {
             <p class="text-[11px] text-slate-400 mt-0.5">Instant realtime push updates for queue and status.</p>
           </div>
         </div>
-      `;
+      `);
       refreshIcons();
     } catch (e) {
-      grid.innerHTML = '<div class="text-xs text-rose-500">Failed to load integrations status</div>';
+      setSafeHTML(grid, '<div class="text-xs text-rose-500">Failed to load integrations status</div>');
     }
   }
 
@@ -1636,10 +1637,10 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderActivityLogsView() {
     const list = document.getElementById('activityLogsList');
     if (!list) return;
-    list.innerHTML = '';
+    setSafeHTML(list, '');
 
     if (state.history.length === 0) {
-      list.innerHTML = '<div class="text-center py-10 text-xs text-slate-400">No activity recorded yet.</div>';
+      setSafeHTML(list, '<div class="text-center py-10 text-xs text-slate-400">No activity recorded yet.</div>');
       return;
     }
 
@@ -1647,7 +1648,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const isSuccess = item.status === 'success';
       const div = document.createElement('div');
       div.className = 'p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl flex items-center justify-between gap-3 text-xs';
-      div.innerHTML = `
+      setSafeHTML(div, `
         <div class="flex items-center gap-3 min-w-0">
           <div class="w-8 h-8 rounded-lg ${isSuccess ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'} flex items-center justify-center shrink-0">
             <i data-lucide="${isSuccess ? 'check-circle' : 'alert-triangle'}" class="w-4 h-4"></i>
@@ -1663,7 +1664,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <span class="${isSuccess ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'} px-2.5 py-0.5 rounded-full text-[10px] font-bold">
           ${item.status.toUpperCase()}
         </span>
-      `;
+      `);
       list.appendChild(div);
     });
 
@@ -1760,11 +1761,11 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderCommentRulesList() {
     const container = document.getElementById('commentRulesList');
     if (!container) return;
-    container.innerHTML = '';
+    setSafeHTML(container, '');
 
     const rules = autoRulesState.commentRules || [];
     if (rules.length === 0) {
-      container.innerHTML = `<div class="p-6 text-center text-xs text-slate-400">No keyword rules added yet. Click "+ Add New Rule" to create one.</div>`;
+      setSafeHTML(container, `<div class="p-6 text-center text-xs text-slate-400">No keyword rules added yet. Click "+ Add New Rule" to create one.</div>`);
       return;
     }
 
@@ -1774,7 +1775,7 @@ document.addEventListener('DOMContentLoaded', () => {
       
       const keywordsBadges = (rule.keywords || []).map(k => `<span class="bg-white border border-slate-200 text-slate-700 font-mono text-[10px] px-2 py-0.5 rounded-md font-semibold">${k}</span>`).join(' ');
 
-      card.innerHTML = `
+      setSafeHTML(card, `
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             <span class="w-2 h-2 rounded-full ${rule.isActive ? 'bg-emerald-500' : 'bg-slate-300'}"></span>
@@ -1806,7 +1807,7 @@ document.addEventListener('DOMContentLoaded', () => {
           ${rule.autoLike ? '<span class="flex items-center gap-1 text-emerald-600 font-semibold"><i data-lucide="thumbs-up" class="w-3 h-3"></i> Auto-Like enabled</span>' : ''}
           ${rule.sendPrivateDm ? '<span class="flex items-center gap-1 text-indigo-600 font-semibold"><i data-lucide="mail" class="w-3 h-3"></i> Auto-DM enabled</span>' : ''}
         </div>
-      `;
+      `);
       container.appendChild(card);
     });
 
@@ -1972,7 +1973,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       runCommentSimBtn.disabled = true;
-      runCommentSimBtn.innerHTML = `<span class="animate-spin mr-1">⌛</span> Testing Bot...`;
+      setSafeHTML(runCommentSimBtn, `<span class="animate-spin mr-1">⌛</span> Testing Bot...`);
 
       try {
         const res = await fetch('/api/automation/test-comment', {
@@ -2007,7 +2008,7 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('Error during comment simulation');
       } finally {
         runCommentSimBtn.disabled = false;
-        runCommentSimBtn.innerHTML = `<i data-lucide="send" class="w-3.5 h-3.5"></i><span>Simulate & Test Comment Bot</span>`;
+        setSafeHTML(runCommentSimBtn, `<i data-lucide="send" class="w-3.5 h-3.5"></i><span>Simulate & Test Comment Bot</span>`);
         refreshIcons();
       }
     });
@@ -2028,25 +2029,25 @@ document.addEventListener('DOMContentLoaded', () => {
     // Append user message bubble
     const userBubble = document.createElement('div');
     userBubble.className = 'flex items-start justify-end gap-2.5';
-    userBubble.innerHTML = `
+    setSafeHTML(userBubble, `
       <div class="p-3 rounded-2xl bg-purple-600 text-white text-xs shadow-sm max-w-[85%] leading-relaxed">
         ${text}
       </div>
-    `;
+    `);
     chatMessagesContainer.appendChild(userBubble);
     chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
 
     // Typing indicator
     const typingIndicator = document.createElement('div');
     typingIndicator.className = 'flex items-start gap-2.5 chat-typing-indicator';
-    typingIndicator.innerHTML = `
+    setSafeHTML(typingIndicator, `
       <img src="/pariksha_notes_logo.jpg" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5">
       <div class="p-3 rounded-2xl bg-white border border-slate-200/80 text-xs text-slate-400 shadow-sm flex items-center gap-1.5">
         <span class="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce"></span>
         <span class="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style="animation-delay: 0.2s"></span>
         <span class="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style="animation-delay: 0.4s"></span>
       </div>
-    `;
+    `);
     chatMessagesContainer.appendChild(typingIndicator);
     chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
 
@@ -2062,12 +2063,12 @@ document.addEventListener('DOMContentLoaded', () => {
       const botReplyText = data.result?.botReply || data.error || 'ধন্যবাদ আপনার মেসেজের জন্য!';
       const botBubble = document.createElement('div');
       botBubble.className = 'flex items-start gap-2.5';
-      botBubble.innerHTML = `
+      setSafeHTML(botBubble, `
         <img src="/pariksha_notes_logo.jpg" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5">
         <div class="p-3 rounded-2xl bg-white border border-slate-200/80 text-xs text-slate-800 shadow-sm max-w-[85%] leading-relaxed whitespace-pre-line">
           ${botReplyText}
         </div>
-      `;
+      `);
       chatMessagesContainer.appendChild(botBubble);
       chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
     } catch (err) {
@@ -2087,14 +2088,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (resetChatSimBtn) {
     resetChatSimBtn.addEventListener('click', () => {
-      chatMessagesContainer.innerHTML = `
+      setSafeHTML(chatMessagesContainer, `
         <div class="flex items-start gap-2.5">
           <img src="/pariksha_notes_logo.jpg" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5">
           <div class="p-3 rounded-2xl bg-white border border-slate-200/80 text-xs text-slate-800 shadow-sm max-w-[85%] leading-relaxed">
             স্বাগতম আমাদের পেজে! 👋 আমরা আপনাকে কীভাবে সাহায্য করতে পারি? আপনার যেকোনো প্রশ্ন লিখুন।
           </div>
         </div>
-      `;
+      `);
     });
   }
 
@@ -2106,7 +2107,7 @@ document.addEventListener('DOMContentLoaded', () => {
     div.className = 'p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3 text-xs';
     
     if (type === 'comment') {
-      div.innerHTML = `
+      setSafeHTML(div, `
         <div class="flex items-center gap-2.5 min-w-0">
           <span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
           <div class="min-w-0">
@@ -2115,9 +2116,9 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
         <span class="text-[10px] text-slate-400 shrink-0">Just now</span>
-      `;
+      `);
     } else {
-      div.innerHTML = `
+      setSafeHTML(div, `
         <div class="flex items-center gap-2.5 min-w-0">
           <span class="w-2 h-2 rounded-full bg-purple-500 shrink-0"></span>
           <div class="min-w-0">
@@ -2126,7 +2127,7 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
         <span class="text-[10px] text-slate-400 shrink-0">Just now</span>
-      `;
+      `);
     }
     list.prepend(div);
   }
@@ -2155,7 +2156,7 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('Network error triggering Auto-Pilot.');
       } finally {
         triggerAutoPilotNowBtn.disabled = false;
-        triggerAutoPilotNowBtn.innerHTML = `<i data-lucide="zap" class="w-3.5 h-3.5"></i><span>Trigger Post Now</span>`;
+        setSafeHTML(triggerAutoPilotNowBtn, `<i data-lucide="zap" class="w-3.5 h-3.5"></i><span>Trigger Post Now</span>`);
         refreshIcons();
       }
     });
@@ -2364,12 +2365,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (headerPagesList) {
-      headerPagesList.innerHTML = '';
+      setSafeHTML(headerPagesList, '');
       pages.forEach(p => {
         const isActive = p.id === state.activePageId;
         const row = document.createElement('div');
         row.className = `flex items-center justify-between p-2 rounded-xl cursor-pointer transition text-xs ${isActive ? 'bg-indigo-50/80 font-bold text-indigo-900' : 'hover:bg-slate-50 text-slate-700'}`;
-        row.innerHTML = `
+        setSafeHTML(row, `
           <div class="flex items-center gap-2.5 min-w-0">
             <img src="${p.pictureUrl || '/pariksha_notes_logo.jpg'}" class="w-6 h-6 rounded-full object-cover ring-1 ${isActive ? 'ring-indigo-500' : 'ring-slate-200'} shrink-0">
             <div class="min-w-0 truncate">
@@ -2378,7 +2379,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </div>
           ${isActive ? '<span class="text-indigo-600 font-bold shrink-0 ml-2">✓ Active</span>' : '<span class="text-[10px] text-slate-400 shrink-0 ml-2 hover:text-indigo-600">Switch</span>'}
-        `;
+        `);
         row.addEventListener('click', (e) => {
           e.stopPropagation();
           if (!isActive) {
@@ -2428,11 +2429,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const grid = document.getElementById('accountsPageGrid');
     if (!grid) return;
 
-    grid.innerHTML = '';
+    setSafeHTML(grid, '');
     const pages = state.pages || [];
 
     if (pages.length === 0) {
-      grid.innerHTML = `<div class="col-span-full py-12 text-center text-slate-400 text-xs">No pages connected yet. Click "+ Connect New Facebook Page" above to add one.</div>`;
+      setSafeHTML(grid, `<div class="col-span-full py-12 text-center text-slate-400 text-xs">No pages connected yet. Click "+ Connect New Facebook Page" above to add one.</div>`);
       return;
     }
 
@@ -2440,7 +2441,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const isActive = p.id === state.activePageId;
       const card = document.createElement('div');
       card.className = `p-5 rounded-2xl border transition-all ${isActive ? 'bg-gradient-to-br from-white via-indigo-50/20 to-purple-50/20 border-indigo-200 shadow-md ring-2 ring-indigo-500/20' : 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'}`;
-      card.innerHTML = `
+      setSafeHTML(card, `
         <div class="flex items-start justify-between gap-3 mb-4">
           <div class="flex items-center gap-3.5 min-w-0">
             <img src="${p.pictureUrl || '/pariksha_notes_logo.jpg'}" class="w-12 h-12 rounded-full object-cover ring-2 ${isActive ? 'ring-indigo-500' : 'ring-slate-200'} shrink-0">
@@ -2498,7 +2499,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </button>
           `}
         </div>
-      `;
+      `);
 
       card.querySelectorAll('.switch-page-btn').forEach(btn => {
         btn.addEventListener('click', () => switchActivePage(btn.getAttribute('data-id')));
@@ -2584,7 +2585,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       submitEditPageBtn.disabled = true;
-      submitEditPageBtn.innerHTML = `<span class="animate-spin mr-1">⌛</span> Saving...`;
+      setSafeHTML(submitEditPageBtn, `<span class="animate-spin mr-1">⌛</span> Saving...`);
 
       try {
         const payload = { name, category, systemPrompt };
@@ -2618,7 +2619,7 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('Error updating page: ' + err.message);
       } finally {
         submitEditPageBtn.disabled = false;
-        submitEditPageBtn.innerHTML = `<i data-lucide="check" class="w-3.5 h-3.5"></i><span>Save Page & Guidelines</span>`;
+        setSafeHTML(submitEditPageBtn, `<i data-lucide="check" class="w-3.5 h-3.5"></i><span>Save Page & Guidelines</span>`);
         refreshIcons();
       }
     });
@@ -2675,7 +2676,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       submitAddPageBtn.disabled = true;
-      submitAddPageBtn.innerHTML = `<span class="animate-spin mr-1">⌛</span> Verifying with Meta...`;
+      setSafeHTML(submitAddPageBtn, `<span class="animate-spin mr-1">⌛</span> Verifying with Meta...`);
 
       try {
         const res = await fetch('/api/facebook/pages', {
@@ -2700,7 +2701,7 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('Network error connecting page: ' + err.message);
       } finally {
         submitAddPageBtn.disabled = false;
-        submitAddPageBtn.innerHTML = `<i data-lucide="check" class="w-3.5 h-3.5"></i><span>Verify & Connect Page</span>`;
+        setSafeHTML(submitAddPageBtn, `<i data-lucide="check" class="w-3.5 h-3.5"></i><span>Verify & Connect Page</span>`);
         refreshIcons();
       }
     });
@@ -2722,8 +2723,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Update fields
       if (pageSettingsPageId) pageSettingsPageId.value = state.settings.pageId || '';
-      if (pageSettingsAccessToken) pageSettingsAccessToken.value = state.settings.accessToken || '';
-      if (pageSettingsGeminiKey) pageSettingsGeminiKey.value = state.settings.geminiApiKey || '';
+      if (pageSettingsAccessToken) { pageSettingsAccessToken.value = ''; pageSettingsAccessToken.placeholder = state.settings.hasAccessToken ? 'Saved securely — leave blank to keep' : 'Enter page access token'; }
+      if (pageSettingsGeminiKey) { pageSettingsGeminiKey.value = ''; pageSettingsGeminiKey.placeholder = state.settings.hasGeminiApiKey ? 'Saved securely — leave blank to keep' : 'Enter Gemini API key'; }
       if (pageSettingsDemoMode) pageSettingsDemoMode.checked = !!state.settings.isDemoMode;
 
       // Update Profile & Accounts view
@@ -2748,9 +2749,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const statScheduledPosts = document.getElementById('statScheduledPosts');
       const badgeQueueCount = document.getElementById('badgeQueueCount');
 
-      if (statTotalPosts) statTotalPosts.textContent = totalHistory > 0 ? (totalHistory + 128) : 128;
-      if (statPublishedPosts) statPublishedPosts.textContent = successPosts > 0 ? (successPosts + 98) : 98;
-      if (statScheduledPosts) statScheduledPosts.textContent = pendingQueueCount > 0 ? pendingQueueCount : 24;
+      if (statTotalPosts) statTotalPosts.textContent = totalHistory;
+      if (statPublishedPosts) statPublishedPosts.textContent = successPosts;
+      if (statScheduledPosts) statScheduledPosts.textContent = pendingQueueCount;
       if (badgeQueueCount) badgeQueueCount.textContent = pendingQueueCount;
 
       // Update automation switch

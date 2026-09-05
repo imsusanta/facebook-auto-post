@@ -13,7 +13,7 @@ class ChatBotService {
       messageText = ''
     } = data;
 
-    const rulesData = storage.getAutomationRules();
+    const rulesData = (await storage.getAutomationRules());
     const chatSettings = rulesData.chatSettings || {};
 
     if (!rulesData.chatAutomationEnabled || !chatSettings.enabled) {
@@ -26,7 +26,7 @@ class ChatBotService {
     let replyText = '';
     const greetings = ['hi', 'hello', 'hey', 'হ্যালো', 'নমস্কার', 'সালাম', 'kemon acho'];
     if (greetings.some(g => cleanText === g || cleanText.startsWith(g))) {
-      const s = storage.getSettings();
+      const s = (await storage.getSettings());
       replyText = `${chatSettings.welcomeMessage || `হ্যালো! 👋 স্বাগতম ${s.pageName || 'আমাদের পেজে'}।`}\n\nআপনার যেকোনো তথ্য বা সহায়তার জন্য আমাদের বলুন।`;
     } else {
       // 2. Gemini AI Conversational Support
@@ -37,11 +37,11 @@ class ChatBotService {
     try {
       await facebook.sendMessengerMessage(senderId, replyText);
 
-      storage.addHistory({
+      (await storage.addHistory({
         status: 'success',
         message: `[Messenger Bot Reply to ${senderName}]: "${replyText.slice(0, 80)}..."`,
         source: 'messenger_bot'
-      });
+      }));
 
       return {
         handled: true,
@@ -52,8 +52,8 @@ class ChatBotService {
         timestamp: new Date().toISOString()
       };
     } catch (err) {
-      console.error('[ChatBot] Error sending Messenger reply:', err.message);
-      return { handled: false, error: err.message };
+      console.log('[chat_bot] operation event');
+      return { handled: false, error: 'Operation failed. Check settings and try again.' };
     }
   }
 
@@ -61,7 +61,7 @@ class ChatBotService {
    * Use Google Gemini AI to formulate conversational customer support responses
    */
   async generateAiChatReply(userMessage, senderName, customPersona) {
-    const settings = storage.getSettings();
+    const settings = (await storage.getSettings());
     const geminiApiKey = settings.geminiApiKey ? settings.geminiApiKey.trim() : '';
 
     const pageName = settings.pageName || 'our Facebook Page';

@@ -1,76 +1,30 @@
-const express = require('express');
-const router = express.Router();
-const storage = require('../services/storage');
-const commentBot = require('../services/comment_bot');
-const chatBot = require('../services/chat_bot');
-const { broadcastSSE } = require('../middleware/sse');
-
-// GET /api/webhook/facebook - Meta Challenge Verification
-router.get('/facebook', (req, res) => {
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
-
-  const settings = storage.getSettings();
-  const verifyToken = settings.webhookVerifyToken || 'autopost_secure_verify_token_2026';
-
-  if (mode === 'subscribe' && token === verifyToken) {
-    console.log('[Meta Webhook] Verified successfully by Meta!');
-    return res.status(200).send(challenge);
-  }
-  console.warn('[Meta Webhook] Token mismatch or invalid mode.');
-  return res.sendStatus(403);
+const router=require('express').Router();
+const crypto=require('node:crypto');
+const db=require('../services/db');
+const {ENABLE_WEBHOOKS}=require('../config/env');
+router.use((req,res,next)=>ENABLE_WEBHOOKS?next():res.sendStatus(404));
+router.get('/facebook',(req,res)=>{
+ const expected=process.env.FB_VERIFY_TOKEN;const token=req.query['hub.verify_token'];
+ if(expected&&typeof token==='string'&&req.query['hub.mode']==='subscribe'&&Buffer.byteLength(token)===Buffer.byteLength(expected)&&crypto.timingSafeEqual(Buffer.from(token),Buffer.from(expected)))return res.status(200).send(req.query['hub.challenge']);res.sendStatus(403);
 });
-
-// POST /api/webhook/facebook - Ingest feed comments and Messenger messages
-router.post('/facebook', async (req, res) => {
-  const body = req.body;
-
-  // Acknowledge receipt to Meta immediately within milliseconds
-  res.status(200).send('EVENT_RECEIVED');
-
-  if (body.object === 'page') {
-    for (const entry of body.entry || []) {
-      // 1. Feed / Post Comment Event
-      if (entry.changes) {
-        for (const change of entry.changes) {
-          if (change.field === 'feed' && change.value?.item === 'comment' && change.value?.verb === 'add') {
-            const commentVal = change.value;
-            console.log(`[Meta Webhook] Incoming comment on post ${commentVal.post_id}: "${commentVal.message}" by ${commentVal.from?.name}`);
-            
-            commentBot.processComment({
-              commentId: commentVal.comment_id,
-              postId: commentVal.post_id,
-              message: commentVal.message,
-              senderName: commentVal.from?.name || 'Follower',
-              senderId: commentVal.from?.id
-            }).then(result => {
-              broadcastSSE('comment_replied', result);
-            }).catch(err => console.error('[Webhook Comment Error]', err.message));
-          }
-        }
-      }
-
-      // 2. Messenger Message Event
-      if (entry.messaging) {
-        for (const msgEvent of entry.messaging) {
-          if (msgEvent.message && !msgEvent.message.is_echo) {
-            const senderId = msgEvent.sender?.id;
-            const text = msgEvent.message.text;
-            console.log(`[Meta Webhook] Incoming Messenger message from ${senderId}: "${text}"`);
-
-            chatBot.processMessage({
-              senderId: senderId,
-              messageText: text,
-              senderName: 'Messenger User'
-            }).then(result => {
-              broadcastSSE('chat_replied', result);
-            }).catch(err => console.error('[Webhook Chat Error]', err.message));
-          }
-        }
-      }
-    }
+router.post('/facebook',async(req,res)=>{
+ const signature=req.get('x-hub-signature-256')||'';
+ if(!Buffer.isBuffer(req.body)||!/^sha256=[a-f\d]{64}$/.test(signature)||!process.env.FB_APP_SECRET)return res.sendStatus(403);
+ const expected=crypto.createHmac('sha256',process.env.FB_APP_SECRET).update(req.body).digest();
+ if(!crypto.timingSafeEqual(expected,Buffer.from(signature.slice(7),'hex')))return res.sendStatus(403);
+ let body;try{body=JSON.parse(req.body);}catch{return res.sendStatus(400);}
+ if(body.object!=='page'||!Array.isArray(body.entry)||body.entry.length>100)return res.sendStatus(400);
+ await db.transaction(async()=>{
+  for(const entry of body.entry){
+   const {rows}=await db.query('SELECT workspace_id FROM facebook_pages WHERE id=$1',[String(entry.id)]);if(!rows[0])continue;
+   for(const event of [...(entry.changes||[]).map(change=>({change})),...(entry.messaging||[]).map(message=>({message}))]){
+    const stable=event.message?.message?.mid||event.change?.value?.comment_id||JSON.stringify(event);
+    const id=crypto.createHash('sha256').update(`${entry.id}:${stable}:${event.change?.value?.verb||''}`).digest('hex');
+    const data={pageId:String(entry.id),...event};
+    await db.query('INSERT INTO webhook_events(id,workspace_id,data) VALUES($1,$2,$3) ON CONFLICT(id) DO NOTHING',[id,rows[0].workspace_id,require('../security/secrets').seal({payload:JSON.stringify(data)} )]);
+   }
   }
+ });
+ res.status(200).send('EVENT_RECEIVED');
 });
-
-module.exports = router;
+module.exports=router;

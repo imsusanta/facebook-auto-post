@@ -3,6 +3,7 @@ const axios = require('axios');
 const fs = require('fs');
 const FormData = require('form-data');
 const storage = require('./storage');
+const media = require('../security/media');
 
 const FB_GRAPH_API_VERSION = 'v20.0';
 const GRAPH_BASE_URL = `https://graph.facebook.com/${FB_GRAPH_API_VERSION}`;
@@ -19,14 +20,11 @@ class FacebookService {
       const res = await axios.get(url, { timeout: 8000 });
       const picUrl = res.data?.data?.url;
       if (picUrl) {
-        const dl = await axios.get(picUrl, { responseType: 'arraybuffer', timeout: 10000 });
-        const localPath = path.join(__dirname, '..', 'public', 'pariksha_notes_logo.jpg');
-        fs.writeFileSync(localPath, dl.data);
-        console.log(`[Facebook] Downloaded & updated local page logo: ${localPath}`);
-        return '/pariksha_notes_logo.jpg';
+        const asset = await media.store(await media.load(picUrl));
+        return asset.url;
       }
     } catch (err) {
-      console.log('[Facebook] Logo fetch notice:', err.message);
+      console.log('[facebook] operation event');
     }
     return null;
   }
@@ -62,7 +60,7 @@ class FacebookService {
           pageLink: response.data.link || `https://facebook.com/${response.data.id}`
         };
       } catch (err) {
-        console.log(`[FB Verify] Direct lookup for ${targetId} failed, attempting /me auto-detection...`);
+        console.log('[facebook] operation event');
       }
     }
 
@@ -97,21 +95,22 @@ class FacebookService {
    * @param {Object} options { message, imagePath, imageUrl, isDemo, source }
    */
   async publishPost(options = {}) {
-    const { message, imagePath, imageUrl, isDemo = false, source = 'manual' } = options;
-    const settings = storage.getSettings();
+    let { message, imagePath, imageUrl, isDemo = false, source = 'manual' } = options;
+    if (imageUrl) { const asset = await media.store(await media.load(imageUrl)); imagePath = asset.localPath; imageUrl = null; }
+    const settings = (await storage.getSettings());
 
     // Check for demo mode
-    if (isDemo || settings.isDemoMode || (!settings.accessToken && !settings.pageId)) {
+    if (process.env.NODE_ENV !== 'production' && (isDemo || settings.isDemoMode)) {
       await new Promise(r => setTimeout(r, 1200));
 
       const mockPostId = `${settings.pageId || '100088992233'}_${Date.now()}`;
-      const log = storage.addHistory({
+      const log = (await storage.addHistory({
         status: 'success',
         message: message || '(Demo post)',
         imageUrl: imagePath ? '/uploads/' + imagePath.split('/').pop() : imageUrl,
         postId: mockPostId,
         source: source
-      });
+      }));
 
       return {
         success: true,
@@ -126,17 +125,17 @@ class FacebookService {
 
     if (!accessToken) {
       const errMsg = 'Facebook Access Token is not configured in Settings.';
-      storage.addHistory({
+      (await storage.addHistory({
         status: 'failed',
         message: message || '',
         imageUrl: imagePath ? '/uploads/' + imagePath.split('/').pop() : imageUrl,
         error: errMsg,
         source: source
-      });
+      }));
       throw new Error(errMsg);
     }
 
-    const targetEndpoint = (pageId && pageId.trim() !== '' && !pageId.startsWith('1000')) ? pageId.trim() : 'me';
+    const targetEndpoint = pageId && pageId.trim() !== '' ? pageId.trim() : 'me';
 
     try {
       let result;
@@ -155,13 +154,7 @@ class FacebookService {
           });
           result = response.data;
         } catch (photoErr) {
-          console.warn('[FB Publish] Photo upload failed, falling back to text feed post:', photoErr.message);
-          // Fallback to text feed post
-          const feedResponse = await axios.post(`${GRAPH_BASE_URL}/${targetEndpoint}/feed`, {
-            message: message,
-            access_token: accessToken
-          }, { timeout: 20000 });
-          result = feedResponse.data;
+          throw photoErr; // Never publish a second request after an ambiguous photo failure.
         }
       }
       // 2. Photo Post with remote Image URL
@@ -191,14 +184,14 @@ class FacebookService {
       }
 
       const postId = result.id || result.post_id;
-      const log = storage.addHistory({
+      const log = (await storage.addHistory({
         status: 'success',
         message: message || '',
         imageUrl: imagePath ? '/uploads/' + imagePath.split('/').pop() : imageUrl,
         postId: postId,
         fbUrl: `https://facebook.com/${postId}`,
         source: source
-      });
+      }));
 
       return {
         success: true,
@@ -213,15 +206,15 @@ class FacebookService {
         errorMsg = fbError.error_user_msg || fbError.message || `Facebook Error (${fbError.code})`;
       }
 
-      storage.addHistory({
+      (await storage.addHistory({
         status: 'failed',
         message: message || '',
         imageUrl: imagePath ? '/uploads/' + imagePath.split('/').pop() : imageUrl,
-        error: errorMsg,
+        error: 'Facebook request failed; check connection and delivery status',
         source: source
-      });
+      }));
 
-      throw new Error(errorMsg);
+      throw Object.assign(new Error('Facebook request failed. Check the connection and post status before retrying.'), {statusCode: 502, expose: true});
     }
   }
 
@@ -229,9 +222,9 @@ class FacebookService {
    * Post a public reply to a Facebook comment
    */
   async replyToComment(commentId, message) {
-    const settings = storage.getSettings();
+    const settings = (await storage.getSettings());
     if (!settings.accessToken || settings.isDemoMode || !commentId || commentId.startsWith('sim_') || commentId.startsWith('demo_')) {
-      console.log(`[Facebook Demo/Sim] Simulating public reply to comment ${commentId}: "${message}"`);
+      console.log('[facebook] operation event');
       return { id: `demo_reply_${Date.now()}` };
     }
 
@@ -242,7 +235,7 @@ class FacebookService {
       }, { timeout: 15000 });
       return res.data;
     } catch (err) {
-      console.error('[Facebook] Error replying to comment:', err.response?.data?.error || err.message);
+      console.log('[facebook] operation event');
       throw err;
     }
   }
@@ -251,9 +244,9 @@ class FacebookService {
    * Send a private Messenger message (DM) to a commenter
    */
   async sendPrivateReply(commentId, message) {
-    const settings = storage.getSettings();
+    const settings = (await storage.getSettings());
     if (!settings.accessToken || settings.isDemoMode || !commentId || commentId.startsWith('sim_') || commentId.startsWith('demo_')) {
-      console.log(`[Facebook Demo/Sim] Simulating private DM to commenter of ${commentId}: "${message}"`);
+      console.log('[facebook] operation event');
       return { success: true, demo: true };
     }
 
@@ -265,7 +258,7 @@ class FacebookService {
       }, { timeout: 15000 });
       return res.data;
     } catch (err) {
-      console.error('[Facebook] Error sending private reply:', err.response?.data?.error || err.message);
+      console.log('[facebook] operation event');
       throw err;
     }
   }
@@ -274,9 +267,9 @@ class FacebookService {
    * Like a Facebook comment to boost engagement
    */
   async likeComment(commentId) {
-    const settings = storage.getSettings();
+    const settings = (await storage.getSettings());
     if (!settings.accessToken || settings.isDemoMode || !commentId || commentId.startsWith('sim_') || commentId.startsWith('demo_')) {
-      console.log(`[Facebook Demo/Sim] Simulating like on comment ${commentId}`);
+      console.log('[facebook] operation event');
       return { success: true };
     }
 
@@ -286,7 +279,7 @@ class FacebookService {
       }, { timeout: 10000 });
       return res.data;
     } catch (err) {
-      console.error('[Facebook] Error liking comment:', err.response?.data?.error || err.message);
+      console.log('[facebook] operation event');
       return null;
     }
   }
@@ -295,9 +288,9 @@ class FacebookService {
    * Send a direct Messenger chat message to a user
    */
   async sendMessengerMessage(recipientId, messageText) {
-    const settings = storage.getSettings();
+    const settings = (await storage.getSettings());
     if (!settings.accessToken || settings.isDemoMode || !recipientId || recipientId.startsWith('sim_') || recipientId.startsWith('demo_')) {
-      console.log(`[Facebook Demo/Sim] Simulating Messenger chat reply to ${recipientId}: "${messageText}"`);
+      console.log('[facebook] operation event');
       return { recipient_id: recipientId, message_id: `demo_mid_${Date.now()}` };
     }
 
@@ -309,7 +302,7 @@ class FacebookService {
       }, { timeout: 15000 });
       return res.data;
     } catch (err) {
-      console.error('[Facebook] Error sending Messenger message:', err.response?.data?.error || err.message);
+      console.log('[facebook] operation event');
       throw err;
     }
   }
