@@ -255,6 +255,10 @@ function authMiddleware(req, res, next) {
     return next();
   }
 
+  if (process.env.STORAGE_MODE === 'postgres' && (require('../services/postgres-session').cookieToken(req) || (req.path.startsWith('/v1/workspaces') && process.env.NODE_ENV !== 'test'))) {
+    return require('../services/postgres-session').authenticate(req, res, next);
+  }
+
   // 5. Check Session Cookie (authenticated browser sessions)
   const cookies = parseCookies(req.headers.cookie);
   const sessionId = cookies.auth_session || cookies['__Host-auth_session'];
@@ -281,7 +285,7 @@ function authMiddleware(req, res, next) {
           // ignore parsing error
         }
         if (!isOriginAllowed(originDomain)) {
-          logger.warn(`[Security] CSRF blocked: Untrusted request origin "${originHeader}"`);
+          logger.warn('[Security] CSRF blocked: Untrusted request origin.');
           return res.status(403).json({
             success: false,
             error: 'Forbidden: Request origin is not allowed.',

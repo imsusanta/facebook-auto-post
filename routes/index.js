@@ -17,14 +17,19 @@ router.use('/webhook', webhooksRoutes);
 
 // Mount Auth routes (Login, logout, session check)
 const authRoutes = require('./auth.routes');
-router.use('/auth', authRoutes);
+const postgresAuthRoutes = require('./postgres-auth.routes');
+router.use('/auth', (req, res, next) => (process.env.STORAGE_MODE === 'postgres' ? postgresAuthRoutes : authRoutes)(req, res, next));
 
 // Apply API authentication middleware to all subsequent routes
 router.use(authMiddleware);
 
 // SaaS Phase 1: Multi-Tenant Workspace Routes (Scoped to Authenticated User)
 const v1WorkspacesRoutes = require('./v1/workspaces');
-router.use('/v1/workspaces', v1WorkspacesRoutes);
+router.use('/v1/workspaces', (req, res, next) => {
+  if (process.env.NODE_ENV === 'production') return res.status(404).json({ code: 'NOT_FOUND' });
+  if (req.authType !== 'postgres-cookie' && process.env.NODE_ENV !== 'test') return res.status(401).json({ code: 'AUTH_REQUIRED' });
+  next();
+}, v1WorkspacesRoutes);
 
 // Legacy Operator / Admin Routes: Guarded against ordinary SaaS tenant users
 const adminOnly = requireRole(['admin', 'super_admin']);

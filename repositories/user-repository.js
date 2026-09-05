@@ -25,7 +25,8 @@ function verifyPasswordHash(storedHash, candidatePassword) {
     if (storedHash.startsWith('pbkdf2_sha512$')) {
       const parts = storedHash.split('$');
       if (parts.length !== 4) return false;
-      const iterations = parseInt(parts[1], 10);
+      const iterations = Number(parts[1]);
+      if (iterations !== 100000 || !/^[a-f0-9]{32}$/.test(parts[2]) || !/^[a-f0-9]{128}$/.test(parts[3])) return false;
       const salt = parts[2];
       const expectedHash = parts[3];
 

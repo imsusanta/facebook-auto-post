@@ -5,19 +5,12 @@ const { isValidUuid } = require('../db/uuid');
 const membershipRepository = require('../repositories/membership-repository');
 const { hasPermission } = require('../security/permissions');
 
-const SAFE_REQUEST_ID_REGEX = /^[-_a-zA-Z0-9.]{1,64}$/;
-
 function generateRequestId() {
   return `req_${crypto.randomUUID()}`;
 }
 
-function resolveSafeRequestId(headerValue) {
-  if (typeof headerValue === 'string') {
-    const trimmed = headerValue.trim();
-    if (SAFE_REQUEST_ID_REGEX.test(trimmed)) {
-      return trimmed;
-    }
-  }
+// Client-supplied IDs are untrusted data, not correlation identifiers.
+function resolveSafeRequestId() {
   return generateRequestId();
 }
 
@@ -26,7 +19,7 @@ function resolveSafeRequestId(headerValue) {
  * verifies active workspace membership, and binds verified context to req.workspaceContext.
  */
 async function resolveWorkspaceContext(req, res, next) {
-  const requestId = resolveSafeRequestId(req.headers['x-request-id']);
+  const requestId = req.requestId || resolveSafeRequestId();
   req.requestId = requestId;
   res.setHeader('x-request-id', requestId);
 
@@ -89,7 +82,7 @@ async function resolveWorkspaceContext(req, res, next) {
 
     next();
   } catch (err) {
-    console.error(`[WorkspaceContext] Error resolving membership for req ${requestId}:`, err.message);
+    require('../utils/safe-diagnostics')('workspace.context', err, requestId);
     return res.status(503).json({
       error: 'DatabaseUnavailable',
       message: 'Database service is temporarily unavailable. Please retry.',

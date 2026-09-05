@@ -23,7 +23,7 @@ function validateDatabaseConfig() {
       }
     } catch (err) {
       const redacted = redactDatabaseUrl(DATABASE_URL);
-      throw new Error(`Configuration Error: Malformed DATABASE_URL (${redacted}): ${err.message}`);
+      throw new Error(`Configuration Error: Malformed DATABASE_URL (${redacted}).`);
     }
   }
 }

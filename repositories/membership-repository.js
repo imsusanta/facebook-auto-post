@@ -1,8 +1,11 @@
 'use strict';
+const { publicError } = require('../security/public-error');
 
 const { query, withTransaction } = require('../db/index');
 const { isValidUuid } = require('../db/uuid');
 const auditLogRepository = require('./audit-log-repository');
+
+const { lockPrincipals, requireAdministrator } = require('./authorization-locks');
 
 const VALID_ROLES = ['owner', 'admin', 'editor', 'reviewer', 'viewer'];
 const VALID_STATUSES = ['active', 'suspended', 'removed'];
@@ -10,13 +13,13 @@ const VALID_STATUSES = ['active', 'suspended', 'removed'];
 class MembershipRepository {
   async addMember({ workspaceId, userId, role = 'viewer', status = 'active', invitedBy = null }, client = null) {
     if (!isValidUuid(workspaceId) || !isValidUuid(userId)) {
-      throw new Error('Invalid workspaceId or userId');
+      throw publicError('VALIDATION_FAILED', 'Invalid workspaceId or userId');
     }
     if (!VALID_ROLES.includes(role)) {
-      throw new Error(`Invalid role: ${role}. Valid roles are: ${VALID_ROLES.join(', ')}`);
+      throw publicError('VALIDATION_FAILED', `Invalid role: ${role}. Valid roles are: ${VALID_ROLES.join(', ')}`);
     }
     if (!VALID_STATUSES.includes(status)) {
-      throw new Error(`Invalid status: ${status}`);
+      throw publicError('VALIDATION_FAILED', `Invalid status: ${status}`);
     }
 
     const sql = `
@@ -112,16 +115,16 @@ class MembershipRepository {
    */
   async updateRole({ workspaceId, targetUserId, newRole, actorUserId, actorRole = null, requestId = null }, clientOverride = null) {
     if (!isValidUuid(workspaceId) || !isValidUuid(targetUserId) || !isValidUuid(actorUserId)) {
-      throw new Error('Invalid workspaceId, targetUserId, or actorUserId');
+      throw publicError('VALIDATION_FAILED', 'Invalid workspaceId, targetUserId, or actorUserId');
     }
     if (!VALID_ROLES.includes(newRole)) {
-      throw new Error(`Invalid role: ${newRole}`);
+      throw publicError('VALIDATION_FAILED', `Invalid role: ${newRole}`);
     }
 
     // Role-change safety rules:
     // 1. User cannot modify/elevate own role
     if (actorUserId === targetUserId) {
-      throw new Error('Self-elevation prohibited: Users cannot alter their own membership role.');
+      throw publicError('PERMISSION_DENIED', 'Self-elevation prohibited: Users cannot alter their own membership role.');
     }
 
     const executeInTx = async (client) => {
@@ -131,46 +134,25 @@ class MembershipRepository {
         [workspaceId, 'active']
       );
       if (wsRows.length === 0) {
-        throw new Error('Workspace not found or inactive');
+        throw publicError('WORKSPACE_NOT_FOUND', 'Workspace not found or inactive');
       }
 
-      // 3. workspace_members lock: reload actor membership and join users
-      const { rows: actorRows } = await client.query(
-        `SELECT wm.*, u.status as user_status, u.deleted_at as user_deleted_at
-         FROM workspace_members wm
-         JOIN users u ON wm.user_id = u.id
-         WHERE wm.workspace_id = $1 AND wm.user_id = $2 FOR UPDATE`,
-        [workspaceId, actorUserId]
-      );
-      const actor = actorRows[0];
-      if (!actor || actor.status !== 'active' || actor.user_status !== 'active' || actor.user_deleted_at !== null) {
-        throw new Error('Actor membership not found or not active in workspace');
-      }
-      if (actor.role !== 'owner' && actor.role !== 'admin') {
-        throw new Error('Actor lacks permission to update membership roles');
-      }
-
-      // Reload target membership inside transaction
-      const { rows: targetRows } = await client.query(
-        `SELECT wm.*, u.status as user_status, u.deleted_at as user_deleted_at
-         FROM workspace_members wm
-         JOIN users u ON wm.user_id = u.id
-         WHERE wm.workspace_id = $1 AND wm.user_id = $2 FOR UPDATE`,
-        [workspaceId, targetUserId]
-      );
-      const target = targetRows[0];
-      if (!target || target.status === 'removed' || target.user_deleted_at !== null) {
-        throw new Error('Target member not found in workspace');
+      const principals = await lockPrincipals(client, workspaceId, [actorUserId, targetUserId]);
+      const actor = requireAdministrator(principals, actorUserId);
+      const target = principals.members.get(targetUserId);
+      const targetUser = principals.users.get(targetUserId);
+      if (!target || target.status === 'removed' || !targetUser || targetUser.deleted_at !== null) {
+        throw publicError('WORKSPACE_NOT_FOUND', 'Target member not found in workspace');
       }
 
       // 2. Admin cannot grant owner role
       if (actor.role !== 'owner' && newRole === 'owner') {
-        throw new Error('Privilege violation: Only an owner can grant the owner role.');
+        throw publicError('PERMISSION_DENIED', 'Privilege violation: Only an owner can grant the owner role.');
       }
 
       // 3. Admin cannot modify an owner's role
       if (actor.role !== 'owner' && target.role === 'owner') {
-        throw new Error('Privilege violation: Admins cannot alter an owner membership.');
+        throw publicError('PERMISSION_DENIED', 'Privilege violation: Admins cannot alter an owner membership.');
       }
 
       // 4. Owner cannot be demoted if they are the final active owner
@@ -185,7 +167,7 @@ class MembershipRepository {
         );
         const activeOwners = countRows[0]?.count || 0;
         if (activeOwners <= 1) {
-          throw new Error('Safety violation: Cannot demote the final remaining owner without ownership transfer.');
+          throw publicError('PERMISSION_DENIED', 'Safety violation: Cannot demote the final remaining owner without ownership transfer.');
         }
       }
 
@@ -223,7 +205,7 @@ class MembershipRepository {
    */
   async removeMember({ workspaceId, targetUserId, actorUserId, actorRole = null, requestId = null }, clientOverride = null) {
     if (!isValidUuid(workspaceId) || !isValidUuid(targetUserId) || !isValidUuid(actorUserId)) {
-      throw new Error('Invalid workspaceId, targetUserId, or actorUserId');
+      throw publicError('VALIDATION_FAILED', 'Invalid workspaceId, targetUserId, or actorUserId');
     }
 
     const executeInTx = async (client) => {
@@ -233,7 +215,7 @@ class MembershipRepository {
         [workspaceId, 'active']
       );
       if (wsRows.length === 0) {
-        throw new Error('Workspace not found or inactive');
+        throw publicError('WORKSPACE_NOT_FOUND', 'Workspace not found or inactive');
       }
 
       // 2. Lock and revoke obsolete pending invitations for target user in this workspace
@@ -246,38 +228,17 @@ class MembershipRepository {
         [workspaceId, targetUserId]
       );
 
-      // 3. Lock actor membership and verify active principal
-      const { rows: actorRows } = await client.query(
-        `SELECT wm.*, u.status as user_status, u.deleted_at as user_deleted_at
-         FROM workspace_members wm
-         JOIN users u ON wm.user_id = u.id
-         WHERE wm.workspace_id = $1 AND wm.user_id = $2 FOR UPDATE`,
-        [workspaceId, actorUserId]
-      );
-      const actor = actorRows[0];
-      if (!actor || actor.status !== 'active' || actor.user_status !== 'active' || actor.user_deleted_at !== null) {
-        throw new Error('Actor membership not found or not active in workspace');
-      }
-      if (actor.role !== 'owner' && actor.role !== 'admin') {
-        throw new Error('Actor lacks permission to remove workspace members');
-      }
-
-      // Lock target membership inside transaction
-      const { rows: targetRows } = await client.query(
-        `SELECT wm.*, u.status as user_status, u.deleted_at as user_deleted_at
-         FROM workspace_members wm
-         JOIN users u ON wm.user_id = u.id
-         WHERE wm.workspace_id = $1 AND wm.user_id = $2 FOR UPDATE`,
-        [workspaceId, targetUserId]
-      );
-      const target = targetRows[0];
-      if (!target || target.status === 'removed') {
-        throw new Error('Target member not found in workspace');
+      const principals = await lockPrincipals(client, workspaceId, [actorUserId, targetUserId]);
+      const actor = requireAdministrator(principals, actorUserId);
+      const target = principals.members.get(targetUserId);
+      const targetUser = principals.users.get(targetUserId);
+      if (!target || target.status === 'removed' || !targetUser || targetUser.deleted_at !== null) {
+        throw publicError('WORKSPACE_NOT_FOUND', 'Target member not found in workspace');
       }
 
       // Non-owner cannot remove an owner
       if (actor.role !== 'owner' && target.role === 'owner') {
-        throw new Error('Privilege violation: Only an owner can remove an owner.');
+        throw publicError('PERMISSION_DENIED', 'Privilege violation: Only an owner can remove an owner.');
       }
 
       // Final owner protection: Cannot remove last remaining active owner
@@ -292,7 +253,7 @@ class MembershipRepository {
         );
         const activeOwners = countRows[0]?.count || 0;
         if (activeOwners <= 1) {
-          throw new Error('Safety violation: Cannot remove the final remaining workspace owner.');
+          throw publicError('PERMISSION_DENIED', 'Safety violation: Cannot remove the final remaining workspace owner.');
         }
       }
 

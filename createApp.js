@@ -50,7 +50,7 @@ function createApp() {
       return callback(err);
     },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-key', 'X-CSRF-Token', 'x-csrf-token']
   };
   app.use(cors(corsOptions));
@@ -101,7 +101,10 @@ function createApp() {
   app.use('/api/ai/generate', generateLimiter);
 
   // Serve static assets & uploaded media
-  app.use('/uploads', express.static(path.join(__dirname, UPLOADS_DIR)));
+  // Legacy media is operator-only, never a public or tenant media library.
+  const { authMiddleware, requireRole } = require('./middleware/auth');
+  app.use('/uploads', authMiddleware, requireRole(['admin', 'super_admin']), express.static(path.join(__dirname, UPLOADS_DIR)));
+  app.use('/uploads', (req, res) => res.status(404).end());
   app.use(express.static(path.join(__dirname, 'public')));
 
   // Mount Master API Router

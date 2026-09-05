@@ -25,7 +25,7 @@ const IGNORE_PATHS = [
   'public/vendor'
 ];
 
-const EXTENSIONS = new Set(['.js', '.json', '.html', '.css', '.md']);
+const EXTENSIONS = new Set(['.js', '.json', '.html', '.css', '.md', '.sql', '.sh', '.yml', '.yaml']);
 
 function scanDirectory(dir, fileList = []) {
   const files = fs.readdirSync(dir);

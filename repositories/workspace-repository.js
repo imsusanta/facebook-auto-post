@@ -1,7 +1,9 @@
 'use strict';
+const { publicError } = require('../security/public-error');
 
 const { query, withTransaction } = require('../db/index');
 const { generateUuid, isValidUuid } = require('../db/uuid');
+const { lockWorkspace, lockPrincipals, requireAdministrator } = require('./authorization-locks');
 const membershipRepository = require('./membership-repository');
 const auditLogRepository = require('./audit-log-repository');
 
@@ -22,28 +24,24 @@ class WorkspaceRepository {
    */
   async createWorkspaceWithOwner({ name, slug, creatorUserId, requestId = null }) {
     if (!name || typeof name !== 'string' || !name.trim()) {
-      throw new Error('Workspace name is required');
+      throw publicError('VALIDATION_FAILED', 'Workspace name is required');
     }
     if (!isValidUuid(creatorUserId)) {
-      throw new Error('Valid creatorUserId is required');
+      throw publicError('VALIDATION_FAILED', 'Valid creatorUserId is required');
     }
 
     const cleanSlug = normalizeSlug(slug || name);
     if (!cleanSlug) {
-      throw new Error('Valid workspace slug could not be derived');
-    }
-
-    // Verify creator user is active and not deleted
-    const { rows: userRows } = await query(
-      'SELECT id, status, deleted_at FROM users WHERE id = $1 AND deleted_at IS NULL',
-      [creatorUserId]
-    );
-    const creator = userRows[0];
-    if (!creator || creator.status !== 'active') {
-      throw new Error('Creator user not found or inactive');
+      throw publicError('VALIDATION_FAILED', 'Valid workspace slug could not be derived');
     }
 
     return withTransaction(async (client) => {
+      // A newly generated workspace has no existing locks to contend with.
+      const { rows: userRows } = await client.query(
+        'SELECT id FROM users WHERE id = $1 AND status = $2 AND deleted_at IS NULL FOR UPDATE',
+        [creatorUserId, 'active']
+      );
+      if (!userRows[0]) throw publicError('WORKSPACE_NOT_FOUND', 'Creator user not found or inactive');
       const workspaceId = generateUuid();
 
       const insertWorkspaceSql = `
@@ -153,7 +151,7 @@ class WorkspaceRepository {
 
     if (updates.slug && typeof updates.slug === 'string') {
       const cleanSlug = normalizeSlug(updates.slug);
-      if (!cleanSlug) throw new Error('Invalid slug');
+      if (!cleanSlug) throw publicError('VALIDATION_FAILED', 'Invalid slug');
       fields.push(`slug = $${pIdx++}`);
       params.push(cleanSlug);
     }
@@ -163,6 +161,9 @@ class WorkspaceRepository {
     fields.push('updated_at = NOW()');
 
     const executeInTx = async (client) => {
+      await lockWorkspace(client, workspaceId);
+      const principals = await lockPrincipals(client, workspaceId, [actorUserId]);
+      requireAdministrator(principals, actorUserId);
       const sql = `
         UPDATE workspaces
         SET ${fields.join(', ')}

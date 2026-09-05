@@ -29,7 +29,7 @@ function getPool(overrideConfig = null) {
 
     pool.on('error', (err) => {
       // Log sanitized notification without exposing connection strings
-      console.error('[PostgreSQL] Unexpected client error on idle connection:', err.message);
+      require('../utils/safe-diagnostics')('database.idle', err);
     });
   }
   return pool;
@@ -66,7 +66,7 @@ async function withTransaction(callback) {
     try {
       await client.query('ROLLBACK');
     } catch (rollbackErr) {
-      console.error('[PostgreSQL] Error during transaction rollback:', rollbackErr.message);
+      require('../utils/safe-diagnostics')('database.rollback', rollbackErr);
     }
     throw err;
   } finally {

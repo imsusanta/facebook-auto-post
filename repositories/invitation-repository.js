@@ -1,9 +1,12 @@
 'use strict';
+const { publicError } = require('../security/public-error');
 
 const crypto = require('crypto');
 const { query, withTransaction } = require('../db/index');
 const { generateUuid, isValidUuid } = require('../db/uuid');
 const auditLogRepository = require('./audit-log-repository');
+
+const { lockPrincipals, requireAdministrator } = require('./authorization-locks');
 
 const ALLOWED_INVITE_ROLES = ['admin', 'editor', 'reviewer', 'viewer'];
 
@@ -14,19 +17,19 @@ function hashToken(token) {
 class InvitationRepository {
   async createInvitation({ workspaceId, email, role, invitedBy = null, ttlHours = 72, requestId = null }, clientOverride = null) {
     if (!isValidUuid(workspaceId)) {
-      throw new Error('Invalid workspaceId UUID');
+      throw publicError('VALIDATION_FAILED', 'Invalid workspaceId UUID');
     }
-    if (invitedBy !== null && invitedBy !== undefined && !isValidUuid(invitedBy)) {
-      throw new Error('Invalid invitedBy UUID');
+    if (!isValidUuid(invitedBy)) {
+      throw publicError('VALIDATION_FAILED', 'Invalid invitedBy UUID');
     }
     if (!email || typeof email !== 'string' || !email.includes('@')) {
-      throw new Error('Valid email address is required');
+      throw publicError('VALIDATION_FAILED', 'Valid email address is required');
     }
     if (!ALLOWED_INVITE_ROLES.includes(role)) {
-      throw new Error(`Invalid invitation role: ${role}. Invitations cannot grant the "owner" role.`);
+      throw publicError('VALIDATION_FAILED', `Invalid invitation role: ${role}. Invitations cannot grant the "owner" role.`);
     }
     if (typeof ttlHours !== 'number' || !Number.isInteger(ttlHours) || ttlHours < 1 || ttlHours > 168) {
-      throw new Error('ttlHours must be an integer between 1 and 168');
+      throw publicError('VALIDATION_FAILED', 'ttlHours must be an integer between 1 and 168');
     }
 
     const emailNormalized = email.trim().toLowerCase();
@@ -38,7 +41,7 @@ class InvitationRepository {
         [workspaceId, 'active']
       );
       if (wsRows.length === 0) {
-        throw new Error('Workspace not found or inactive');
+        throw publicError('WORKSPACE_NOT_FOUND', 'Workspace not found or inactive');
       }
 
       // 2. Transactionally expire stale pending invites for this email to prevent unique index deadlock
@@ -52,6 +55,9 @@ class InvitationRepository {
         [workspaceId, emailNormalized]
       );
 
+      const principals = await lockPrincipals(client, workspaceId, [invitedBy]);
+      requireAdministrator(principals, invitedBy);
+
       // 3. Check existing membership: active or suspended members cannot receive invites
       const activeMemberCheckSql = `
         SELECT wm.status
@@ -64,12 +70,12 @@ class InvitationRepository {
       const { rows: memberRows } = await client.query(activeMemberCheckSql, [emailNormalized, workspaceId]);
       if (memberRows.length > 0) {
         if (memberRows[0].status === 'active') {
-          const err = new Error('User is already an active member of this workspace');
+          const err = publicError('CONFLICT', 'User is already an active member of this workspace');
           err.code = 'CONFLICT';
           throw err;
         }
         if (memberRows[0].status === 'suspended') {
-          const err = new Error('User is a suspended member of this workspace and cannot be invited. Membership must be reinstated directly by an owner or administrator.');
+          const err = publicError('CONFLICT', 'User is a suspended member of this workspace and cannot be invited. Membership must be reinstated directly by an owner or administrator.');
           err.code = 'CONFLICT';
           throw err;
         }
@@ -112,7 +118,7 @@ class InvitationRepository {
         };
       } catch (err) {
         if (err.code === '23505') {
-          const conflictErr = new Error('A pending invitation already exists for this email address');
+          const conflictErr = publicError('CONFLICT', 'A pending invitation already exists for this email address');
           conflictErr.code = 'CONFLICT';
           throw conflictErr;
         }
@@ -138,7 +144,7 @@ class InvitationRepository {
 
   async revokeInvitation({ workspaceId, invitationId, actorUserId = null, requestId = null }, clientOverride = null) {
     if (!isValidUuid(workspaceId) || !isValidUuid(invitationId)) {
-      throw new Error('Invalid workspaceId or invitationId');
+      throw publicError('VALIDATION_FAILED', 'Invalid workspaceId or invitationId');
     }
 
     const executeInTx = async (client) => {
@@ -148,7 +154,7 @@ class InvitationRepository {
         [workspaceId, 'active']
       );
       if (wsRows.length === 0) {
-        throw new Error('Workspace not found or inactive');
+        throw publicError('WORKSPACE_NOT_FOUND', 'Workspace not found or inactive');
       }
 
       // 2. Lock & revoke invitation
@@ -160,8 +166,11 @@ class InvitationRepository {
       `;
       const { rows } = await client.query(sql, [invitationId, workspaceId]);
       if (rows.length === 0) {
-        throw new Error('Invitation not found or already inactive');
+        throw publicError('WORKSPACE_NOT_FOUND', 'Invitation not found or already inactive');
       }
+
+      const principals = await lockPrincipals(client, workspaceId, [actorUserId]);
+      requireAdministrator(principals, actorUserId);
 
       // Atomically record audit event inside transaction
       await auditLogRepository.recordEvent({
@@ -182,10 +191,10 @@ class InvitationRepository {
 
   async acceptInvitation({ token, userId, requestId = null }) {
     if (!token || typeof token !== 'string' || !token.trim()) {
-      throw new Error('Valid invitation token is required');
+      throw publicError('VALIDATION_FAILED', 'Valid invitation token is required');
     }
     if (!isValidUuid(userId)) {
-      throw new Error('Valid userId is required');
+      throw publicError('VALIDATION_FAILED', 'Valid userId is required');
     }
 
     const tokenHash = hashToken(token);
@@ -197,17 +206,9 @@ class InvitationRepository {
     );
     const candidate = checkRows[0];
     if (!candidate) {
-      throw new Error('Invitation is invalid or does not exist');
+      throw publicError('INVITATION_INVALID', 'Invitation is invalid or does not exist');
     }
-    if (candidate.status !== 'pending') {
-      throw new Error(`Invitation has already been ${candidate.status}`);
-    }
-    if (new Date(candidate.expires_at) <= new Date()) {
-      await query("UPDATE workspace_invitations SET status = 'expired' WHERE id = $1", [candidate.id]);
-      throw new Error('Invitation has expired');
-    }
-
-    return withTransaction(async (client) => {
+    const outcome = await withTransaction(async (client) => {
       // Canonical Lock Ordering: 1. workspaces -> 2. invitations -> 3. members -> 4. users
 
       // 1. Lock workspace: verify active and not deleted
@@ -217,7 +218,7 @@ class InvitationRepository {
       );
       const ws = wsRows[0];
       if (!ws || ws.status !== 'active' || ws.deleted_at !== null) {
-        throw new Error('Workspace not found or inactive');
+        throw publicError('WORKSPACE_NOT_FOUND', 'Workspace not found or inactive');
       }
 
       // 2. Lock invitation row
@@ -230,78 +231,32 @@ class InvitationRepository {
       const invite = inviteRows[0];
 
       if (!invite) {
-        throw new Error('Invitation is invalid or does not exist');
+        throw publicError('INVITATION_INVALID', 'Invitation is invalid or does not exist');
       }
       if (invite.status !== 'pending') {
-        throw new Error(`Invitation has already been ${invite.status}`);
+        throw publicError('INVITATION_INVALID', `Invitation has already been ${invite.status}`);
       }
-      if (new Date(invite.expires_at) <= new Date()) {
-        throw new Error('Invitation has expired');
-      }
+      // Use database time and a conditional transition. Return an error outcome
+      // instead of throwing inside the transaction so expiration commits safely.
+      const expired = await client.query("UPDATE workspace_invitations SET status = 'expired' WHERE id = $1 AND status = 'pending' AND expires_at <= clock_timestamp() RETURNING id", [invite.id]);
+      if (expired.rowCount) return { expired: true };
 
-      // 3. Lock existing membership if any
-      const memberSql = `
-        SELECT workspace_id, user_id, role, status
-        FROM workspace_members
-        WHERE workspace_id = $1 AND user_id = $2
-        FOR UPDATE;
-      `;
-      const { rows: memberRows } = await client.query(memberSql, [invite.workspace_id, userId]);
-      const existingMember = memberRows[0];
-
-      // 4. Lock and verify accepting user
-      const userSql = `
-        SELECT id, email, email_normalized, status, email_verified_at, deleted_at
-        FROM users
-        WHERE id = $1 AND deleted_at IS NULL
-        FOR UPDATE;
-      `;
-      const { rows: userRows } = await client.query(userSql, [userId]);
-      const user = userRows[0];
-
-      if (!user) {
-        throw new Error('User not found or inactive');
-      }
-      if (user.status !== 'active') {
-        throw new Error('User account is suspended or inactive');
-      }
-      if (!user.email_verified_at) {
-        throw new Error('Email must be verified before accepting workspace invitations');
-      }
-      if (user.email_normalized !== invite.email_normalized) {
-        // Generic security message to prevent email/token probing
-        throw new Error('Invitation is invalid or does not match this account');
-      }
-
-      // Verify issuing inviter retains authority (if invited_by is set)
-      if (invite.invited_by) {
-        const inviterSql = `
-          SELECT wm.role, wm.status as member_status, u.status as user_status, u.deleted_at as user_deleted_at
-          FROM workspace_members wm
-          JOIN users u ON wm.user_id = u.id
-          WHERE wm.workspace_id = $1 AND wm.user_id = $2;
-        `;
-        const { rows: inviterRows } = await client.query(inviterSql, [invite.workspace_id, invite.invited_by]);
-        const inviter = inviterRows[0];
-
-        if (
-          !inviter ||
-          inviter.member_status !== 'active' ||
-          inviter.user_status !== 'active' ||
-          inviter.user_deleted_at !== null ||
-          (inviter.role !== 'owner' && inviter.role !== 'admin')
-        ) {
-          throw new Error('Invitation is no longer valid because the issuing inviter no longer possesses administrative authority in this workspace');
-        }
-      }
+      const principals = await lockPrincipals(client, invite.workspace_id, [userId, invite.invited_by]);
+      const user = principals.users.get(userId);
+      const existingMember = principals.members.get(userId);
+      if (!user || user.status !== 'active' || user.deleted_at !== null) throw publicError('WORKSPACE_NOT_FOUND', 'User not found or inactive');
+      if (!user.email_verified_at) throw publicError('INVITATION_INVALID', 'Email must be verified before accepting workspace invitations');
+      if (user.email_normalized !== invite.email_normalized) throw publicError('INVITATION_INVALID', 'Invitation is invalid or does not match this account');
+      // Invitations without an identifiable, still-authorized issuer fail closed.
+      requireAdministrator(principals, invite.invited_by);
 
       // Membership state transitions:
       if (existingMember) {
         if (existingMember.status === 'active') {
-          throw new Error('User is already an active member of this workspace');
+          throw publicError('CONFLICT', 'User is already an active member of this workspace');
         }
         if (existingMember.status === 'suspended') {
-          throw new Error('Suspended members cannot reactivate their membership via invitation. An active workspace owner or administrator must reinstate the membership.');
+          throw publicError('PERMISSION_DENIED', 'Suspended members cannot reactivate their membership via invitation. An active workspace owner or administrator must reinstate the membership.');
         }
         // Reactivate removed member with fresh authorized invitation
         const updateMemberSql = `
@@ -324,10 +279,12 @@ class InvitationRepository {
       const updateInviteSql = `
         UPDATE workspace_invitations
         SET status = 'accepted', accepted_at = NOW()
-        WHERE id = $1
+        WHERE id = $1 AND status = 'pending' AND expires_at > clock_timestamp()
         RETURNING id, workspace_id, role, status, accepted_at;
       `;
       const { rows: updatedInviteRows } = await client.query(updateInviteSql, [invite.id]);
+
+      if (!updatedInviteRows[0]) throw publicError('INVITATION_INVALID', 'Invitation has expired');
 
       // Atomically record audit event inside transaction
       await auditLogRepository.recordEvent({
@@ -343,8 +300,10 @@ class InvitationRepository {
         }
       }, client);
 
-      return updatedInviteRows[0];
+      return { accepted: updatedInviteRows[0] };
     });
+    if (outcome.expired) throw publicError('INVITATION_INVALID', 'Invitation has expired');
+    return outcome.accepted;
   }
 }
 

@@ -17,7 +17,7 @@ const {
  */
 function asyncHandler(fn) {
   return (req, res, next) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
+    Promise.resolve().then(() => fn(req, res, next)).catch(next);
   };
 }
 
@@ -36,103 +36,11 @@ router.use((req, res, next) => {
  * Never leaks internal database strings, syntax errors, or credentials.
  */
 function sendSafeError(res, req, err) {
-  const requestId = req.requestId || resolveSafeRequestId(req.headers['x-request-id']);
-  const isProd = process.env.NODE_ENV === 'production';
-
-  // 1. Conflict errors (409)
-  if (
-    err.code === 'CONFLICT' ||
-    err.code === '23505' ||
-    err.message?.includes('already exists') ||
-    err.message?.includes('already an active member') ||
-    err.message?.includes('conflict')
-  ) {
-    return res.status(409).json({
-      error: 'Conflict',
-      message: err.message || 'A conflict occurred with an existing resource.',
-      code: 'CONFLICT',
-      requestId
-    });
-  }
-
-  // 2. Permission / Role violation errors (403)
-  if (
-    err.code === 'PERMISSION_DENIED' ||
-    err.code === 'FORBIDDEN' ||
-    err.message?.includes('permission') ||
-    err.message?.includes('Privilege violation') ||
-    err.message?.includes('Safety violation') ||
-    err.message?.includes('Self-elevation') ||
-    err.message?.includes('cannot grant') ||
-    err.message?.includes('cannot alter') ||
-    err.message?.includes('cannot remove') ||
-    err.message?.includes('cannot demote') ||
-    err.message?.includes('Suspended members cannot') ||
-    err.message?.includes('no longer possesses administrative authority')
-  ) {
-    return res.status(403).json({
-      error: 'PermissionDenied',
-      message: isProd ? 'You do not have permission to perform this action.' : err.message,
-      code: 'PERMISSION_DENIED',
-      requestId
-    });
-  }
-
-  // 3. Validation errors (400)
-  if (
-    err.code === 'VALIDATION_FAILED' ||
-    err.message?.includes('required') ||
-    err.message?.includes('must be') ||
-    err.message?.includes('Invalid') ||
-    err.message?.includes('malformed') ||
-    err.message?.includes('cannot receive invites')
-  ) {
-    return res.status(400).json({
-      error: 'ValidationFailed',
-      message: err.message,
-      code: 'VALIDATION_FAILED',
-      requestId
-    });
-  }
-
-  // 4. Invitation expired or invalid (400)
-  if (
-    err.message?.includes('Invitation has expired') ||
-    err.message?.includes('Invitation has already been') ||
-    err.message?.includes('Invitation is invalid') ||
-    err.message?.includes('Email must be verified') ||
-    err.message?.includes('does not match this account')
-  ) {
-    return res.status(400).json({
-      error: 'InvitationInvalid',
-      message: err.message,
-      code: 'INVITATION_INVALID',
-      requestId
-    });
-  }
-
-  // 5. Resource not found / Inaccessible (404)
-  if (
-    err.message?.includes('not found') ||
-    err.message?.includes('inactive') ||
-    err.message?.includes('does not exist')
-  ) {
-    return res.status(404).json({
-      error: 'WorkspaceNotFound',
-      message: 'Workspace not found or access denied.',
-      code: 'WORKSPACE_NOT_FOUND',
-      requestId
-    });
-  }
-
-  // 6. Generic 500 for unexpected errors / database internals
-  console.error(`[WorkspacesAPI] Internal error on req ${requestId}:`, isProd ? err.code : err.message);
-  return res.status(500).json({
-    error: 'InternalError',
-    message: 'An unexpected internal error occurred.',
-    code: 'INTERNAL_ERROR',
-    requestId
-  });
+  const requestId = req.requestId || resolveSafeRequestId();
+  const { status, ...body } = require('../../security/public-error').publicResponse(err);
+  if (status >= 500) require('../../utils/safe-diagnostics')('workspace.route', err, requestId);
+  res.setHeader('x-request-id', requestId);
+  return res.status(status).json({ ...body, requestId });
 }
 
 // --- Global Workspace Endpoints (Authenticated User Scope) ---
