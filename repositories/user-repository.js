@@ -1,46 +1,9 @@
 'use strict';
 
-const crypto = require('crypto');
 const { query } = require('../db/index');
 const { generateUuid, isValidUuid } = require('../db/uuid');
-
-function normalizeEmail(email) {
-  if (!email || typeof email !== 'string') return '';
-  return email.trim().toLowerCase();
-}
-
-function hashPasswordPbkdf2(password, salt = crypto.randomBytes(16).toString('hex')) {
-  if (!password || typeof password !== 'string' || password.length < 8) {
-    throw new Error('Password must be at least 8 characters');
-  }
-  const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
-  return `pbkdf2_sha512$100000$${salt}$${hash}`;
-}
-
-function verifyPasswordHash(storedHash, candidatePassword) {
-  if (!storedHash || !candidatePassword || typeof candidatePassword !== 'string') {
-    return false;
-  }
-  try {
-    if (storedHash.startsWith('pbkdf2_sha512$')) {
-      const parts = storedHash.split('$');
-      if (parts.length !== 4) return false;
-      const iterations = Number(parts[1]);
-      if (iterations !== 100000 || !/^[a-f0-9]{32}$/.test(parts[2]) || !/^[a-f0-9]{128}$/.test(parts[3])) return false;
-      const salt = parts[2];
-      const expectedHash = parts[3];
-
-      const testHash = crypto.pbkdf2Sync(candidatePassword, salt, iterations, 64, 'sha512').toString('hex');
-      const testBuf = Buffer.from(testHash, 'utf8');
-      const expBuf = Buffer.from(expectedHash, 'utf8');
-      if (testBuf.length !== expBuf.length) return false;
-      return crypto.timingSafeEqual(testBuf, expBuf);
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
+const passwords = require('../security/passwords');
+function normalizeEmail(email) { return typeof email === 'string' ? email.trim().toLowerCase() : ''; }
 
 function safeSerializeUser(user) {
   if (!user) return null;
@@ -51,14 +14,15 @@ function safeSerializeUser(user) {
 }
 
 class UserRepository {
-  async createUser({ email, password, passwordAlgorithm = 'pbkdf2_sha512', status = 'active', emailVerifiedAt = null }, client = null) {
+  async createUser({ email, password, passwordAlgorithm = 'argon2id', status = 'active', emailVerifiedAt = null }, client = null) {
     const normalized = normalizeEmail(email);
     if (!normalized || !normalized.includes('@')) {
       throw new Error('Valid email address is required');
     }
 
     const id = generateUuid();
-    const passwordHash = hashPasswordPbkdf2(password);
+    if (passwordAlgorithm !== 'argon2id') throw new Error('New user passwords require argon2id');
+    const passwordHash = await passwords.hash(password);
 
     const sql = `
       INSERT INTO users (id, email, email_normalized, password_hash, password_algorithm, status, email_verified_at)
@@ -110,18 +74,16 @@ class UserRepository {
   async softDelete(id, client = null) {
     if (!isValidUuid(id)) return false;
 
-    const sql = `
-      UPDATE users
-      SET deleted_at = NOW(), status = 'suspended', updated_at = NOW()
-      WHERE id = $1 AND deleted_at IS NULL;
-    `;
-    const { rowCount } = client ? await client.query(sql, [id]) : await query(sql, [id]);
-    return rowCount > 0;
+    return require('../services/account-lifecycle').makeInactive(id, true, null, client);
   }
 
-  verifyPassword(user, candidatePassword) {
-    if (!user || !user.password_hash) return false;
-    return verifyPasswordHash(user.password_hash, candidatePassword);
+  async suspendUser(id, client = null) {
+    if (!isValidUuid(id)) return false;
+    return require('../services/account-lifecycle').makeInactive(id, false, null, client);
+  }
+
+  async verifyPassword(user, candidatePassword) {
+    return user ? passwords.verify(user.password_hash, candidatePassword) : false;
   }
 
   safeSerialize(user) {

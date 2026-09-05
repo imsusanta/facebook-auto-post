@@ -49,9 +49,17 @@ docker compose -f docker-compose.test.yml down
 
 With `STORAGE_MODE=postgres`, `/api/auth/login` reads the PostgreSQL user table
 and uses PostgreSQL-backed sessions. The user must be active, not deleted and
-email-verified. Tests seed synthetic accounts; there is not yet a public signup
-or verification-delivery flow. Never mark a real user's email verified merely
+email-verified. Tests seed synthetic accounts; the follow-on identity backend adds signup/verification/recovery endpoints, but no
+production mail provider or customer UI. See identity-lifecycle.md for boundaries. Never mark a real user's email verified merely
 to bypass the missing onboarding step.
 
 See [security/identity status](security-identity-pass.md) and
 [remaining product delivery gates](delivery-plan.md).
+
+## Follow-on account lifecycle
+
+See [identity lifecycle](identity-lifecycle.md). PostgreSQL auth now requires a stable
+`AUTH_RATE_LIMIT_KEY` outside tests. Test runners generate their own synthetic
+rate/mail keys; do not paste real keys into commands, chat or logs. Signup and
+recovery delivery are test-only until a real provider/domain is selected and
+implemented. Production routes remain blocked.

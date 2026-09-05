@@ -18,6 +18,7 @@
     "db:rollback": "node scripts/migrate.js --rollback"
   },
   "dependencies": {
+    "argon2": "^0.45.1",
     "axios": "^1.7.9",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^13.0.3",
@@ -36,5 +37,8 @@
   "devDependencies": {
     "eslint": "^10.9.1",
     "playwright": "^1.63.0"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
   }
 }

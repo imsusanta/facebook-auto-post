@@ -89,6 +89,7 @@ class CDPClient {
 
 function findChromeExecutable() {
   const candidates = [
+    process.env.BROWSER_EXECUTABLE,
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     '/Applications/Chromium.app/Contents/MacOS/Chromium',
     '/usr/bin/google-chrome',
@@ -96,7 +97,7 @@ function findChromeExecutable() {
     '/usr/bin/chromium'
   ];
   for (const c of candidates) {
-    if (fs.existsSync(c)) return c;
+    if (c && fs.existsSync(c)) return c;
   }
   return null;
 }
@@ -140,6 +141,7 @@ async function launchHeadlessChrome() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-chrome-test-'));
   const chromeProcess = spawn(chromePath, [
     '--headless=new',
+    ...(process.env.CI === 'true' ? ['--no-sandbox'] : []),
     '--remote-debugging-port=0',
     '--no-first-run',
     '--no-default-browser-check',
