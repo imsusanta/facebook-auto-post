@@ -9,9 +9,22 @@ const DATABASE_POOL_MIN = parseInt(process.env.DATABASE_POOL_MIN, 10) || 2;
 const DATABASE_POOL_MAX = parseInt(process.env.DATABASE_POOL_MAX, 10) || 10;
 const DATABASE_STATEMENT_TIMEOUT_MS = parseInt(process.env.DATABASE_STATEMENT_TIMEOUT_MS, 10) || 10000;
 
+const { redactDatabaseUrl } = require('../db/safety-guard');
+
 function validateDatabaseConfig() {
-  if (STORAGE_MODE === 'postgres' && !DATABASE_URL) {
-    throw new Error('Configuration Error: DATABASE_URL is required when STORAGE_MODE=postgres. Production and PostgreSQL mode cannot start without a valid database connection string.');
+  if (STORAGE_MODE === 'postgres') {
+    if (!DATABASE_URL) {
+      throw new Error('Configuration Error: DATABASE_URL is required when STORAGE_MODE=postgres. Production and PostgreSQL mode cannot start without a valid database connection string.');
+    }
+    try {
+      const parsed = new URL(DATABASE_URL);
+      if (parsed.protocol !== 'postgres:' && parsed.protocol !== 'postgresql:') {
+        throw new Error(`Invalid protocol: "${parsed.protocol}". Expected "postgres:" or "postgresql:".`);
+      }
+    } catch (err) {
+      const redacted = redactDatabaseUrl(DATABASE_URL);
+      throw new Error(`Configuration Error: Malformed DATABASE_URL (${redacted}): ${err.message}`);
+    }
   }
 }
 

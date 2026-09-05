@@ -25,17 +25,9 @@ const assert = require('node:assert');
 process.env.NODE_ENV = 'test';
 process.env.STORAGE_MODE = 'postgres';
 
-const defaultTestDb = 'postgres://susantalohar@127.0.0.1:5432/facebook_auto_poster_test';
-const databaseUrl = process.env.DATABASE_URL || defaultTestDb;
+const { resolveTestDatabaseUrl } = require('../db/safety-guard');
+const databaseUrl = resolveTestDatabaseUrl();
 process.env.DATABASE_URL = databaseUrl;
-
-// Production target safety guard
-if (
-  /aws|rds|neon|supabase|heroku|prod|production/i.test(databaseUrl) ||
-  (!databaseUrl.includes('127.0.0.1') && !databaseUrl.includes('localhost') && !databaseUrl.includes('test'))
-) {
-  throw new Error(`[Security Error] Test runner refused to run against potentially non-local or production DATABASE_URL: "${databaseUrl}"`);
-}
 
 // 2. Isolate DATA_DIR to prevent legacy data tampering
 const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-postgres-test-'));
@@ -183,12 +175,11 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
     // Drop isolated test schema unless retaining for debug
     delete process.env.PGOPTIONS;
     if (process.env.DEBUG_RETAIN_TEST_DB !== 'true') {
+      const cleanupPool = new Pool({ connectionString: databaseUrl });
       try {
-        const cleanupPool = new Pool({ connectionString: databaseUrl });
         await cleanupPool.query(`DROP SCHEMA IF EXISTS "${testSchema}" CASCADE;`);
+      } finally {
         await cleanupPool.end();
-      } catch (err) {
-        console.error('Error dropping test schema:', err.message);
       }
     }
 
