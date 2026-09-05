@@ -49,6 +49,10 @@ const ALL_PERMISSIONS = [
   'media:upload',
   'media:delete',
 
+  'facebook:connect',
+  'facebook:disconnect',
+  'facebook:status',
+
   'billing:read',
   'billing:manage'
 ];
@@ -89,6 +93,9 @@ const ROLE_PERMISSIONS = {
     'media:read',
     'media:upload',
     'media:delete',
+    'facebook:connect',
+    'facebook:disconnect',
+    'facebook:status',
     'billing:read'
   ]),
 
@@ -112,7 +119,8 @@ const ROLE_PERMISSIONS = {
     'publish:trigger',
     'templates:read',
     'settings:read',
-    'media:read'
+    'media:read',
+    'facebook:status'
   ]),
 
   editor: new Set([

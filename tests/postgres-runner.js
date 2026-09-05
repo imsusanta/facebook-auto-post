@@ -25,6 +25,10 @@ const assert = require('node:assert');
 process.env.NODE_ENV = 'test';
 process.env.STORAGE_MODE = 'postgres';
 process.env.AUTH_RATE_LIMIT_KEY = crypto.randomBytes(32).toString('hex');
+process.env.FB_TOKEN_ENCRYPTION_KEY = crypto.randomBytes(32).toString('hex');
+process.env.META_APP_ID = 'test-meta-app-id-12345';
+process.env.META_APP_SECRET = 'test-meta-app-secret-67890';
+process.env.META_OAUTH_REDIRECT_URI = 'http://127.0.0.1:3000/api/v1/workspaces/callback';
 
 const { resolveTestDatabaseUrl, assertLeastPrivilegedTestRole } = require('../db/safety-guard');
 const databaseUrl = resolveTestDatabaseUrl();
@@ -1894,6 +1898,17 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
 
   require('./identity-lifecycle-cases')({ request: options => request(baseUrl, options), query, getPool, baseUrl: () => baseUrl });
   require('./tenant-domain-cases')({
+    request: options => request(baseUrl, options),
+    query,
+    get workspaceA() { return workspaceA; },
+    get workspaceB() { return workspaceB; },
+    get userA() { return userA; },
+    get userB() { return userB; },
+    get userC() { return userC; },
+    get userD() { return userD; },
+    get userF() { return userF; }
+  });
+  require('./facebook-oauth-cases')({
     request: options => request(baseUrl, options),
     query,
     get workspaceA() { return workspaceA; },

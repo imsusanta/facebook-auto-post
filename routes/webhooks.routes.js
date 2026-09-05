@@ -97,11 +97,46 @@ router.post('/facebook', verifyMetaSignature, async (req, res) => {
 
   if (body && body.object === 'page') {
     for (const entry of body.entry || []) {
+      const pageId = entry.id;
+      let workspaceId = null;
+
+      if (process.env.STORAGE_MODE === 'postgres' && pageId) {
+        try {
+          const facebookOAuthRepository = require('../repositories/facebook-oauth-repository');
+          const sub = await facebookOAuthRepository.findWorkspaceByPageId({ pageId });
+          if (sub) {
+            workspaceId = sub.workspace_id;
+          }
+        } catch (err) {
+          logger.warn('[Webhook Routing Error]', err.message);
+        }
+      }
+
       // 1. Feed / Post Comment Event
       if (entry.changes) {
         for (const change of entry.changes) {
           if (change.field === 'feed' && change.value?.item === 'comment' && change.value?.verb === 'add') {
             const commentVal = change.value;
+            const eventId = commentVal.comment_id || `${commentVal.post_id}_${Date.now()}`;
+
+            if (workspaceId && eventId) {
+              try {
+                const facebookOAuthRepository = require('../repositories/facebook-oauth-repository');
+                const isNew = await facebookOAuthRepository.recordWebhookEvent({
+                  workspaceId,
+                  pageId,
+                  eventType: 'feed_comment',
+                  eventId
+                });
+                if (!isNew) {
+                  logger.info(`[Meta Webhook] Duplicate comment event ${eventId} ignored.`);
+                  continue;
+                }
+              } catch (dedupErr) {
+                logger.warn('[Webhook Dedup Error]', dedupErr.message);
+              }
+            }
+
             logger.info(`[Meta Webhook] Incoming comment on post ${commentVal.post_id}: "${commentVal.message}" by ${commentVal.from?.name}`);
 
             commentBot.processComment({
@@ -109,7 +144,8 @@ router.post('/facebook', verifyMetaSignature, async (req, res) => {
               postId: commentVal.post_id,
               message: commentVal.message,
               senderName: commentVal.from?.name || 'Follower',
-              senderId: commentVal.from?.id
+              senderId: commentVal.from?.id,
+              workspaceId
             }).then(result => {
               broadcastSSE('comment_replied', result);
             }).catch(err => logger.error('[Webhook Comment Error]', err.message));
@@ -123,12 +159,33 @@ router.post('/facebook', verifyMetaSignature, async (req, res) => {
           if (msgEvent.message && !msgEvent.message.is_echo) {
             const senderId = msgEvent.sender?.id;
             const text = msgEvent.message.text;
+            const eventId = msgEvent.message.mid || `${senderId}_${Date.now()}`;
+
+            if (workspaceId && eventId) {
+              try {
+                const facebookOAuthRepository = require('../repositories/facebook-oauth-repository');
+                const isNew = await facebookOAuthRepository.recordWebhookEvent({
+                  workspaceId,
+                  pageId,
+                  eventType: 'messenger_message',
+                  eventId
+                });
+                if (!isNew) {
+                  logger.info(`[Meta Webhook] Duplicate messenger event ${eventId} ignored.`);
+                  continue;
+                }
+              } catch (dedupErr) {
+                logger.warn('[Webhook Dedup Error]', dedupErr.message);
+              }
+            }
+
             logger.info(`[Meta Webhook] Incoming Messenger message from ${senderId}: "${text}"`);
 
             chatBot.processMessage({
               senderId: senderId,
               messageText: text,
-              senderName: 'Messenger User'
+              senderName: 'Messenger User',
+              workspaceId
             }).then(result => {
               broadcastSSE('chat_replied', result);
             }).catch(err => logger.error('[Webhook Chat Error]', err.message));
