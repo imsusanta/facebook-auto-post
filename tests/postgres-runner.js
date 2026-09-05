@@ -1893,4 +1893,16 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
   });
 
   require('./identity-lifecycle-cases')({ request: options => request(baseUrl, options), query, getPool, baseUrl: () => baseUrl });
+  require('./tenant-domain-cases')({
+    request: options => request(baseUrl, options),
+    query,
+    get workspaceA() { return workspaceA; },
+    get workspaceB() { return workspaceB; },
+    get userA() { return userA; },
+    get userB() { return userB; },
+    get userC() { return userC; },
+    get userD() { return userD; },
+    get userF() { return userF; }
+  });
 });
+

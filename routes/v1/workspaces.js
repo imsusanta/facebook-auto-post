@@ -6,6 +6,13 @@ const workspaceRepository = require('../../repositories/workspace-repository');
 const membershipRepository = require('../../repositories/membership-repository');
 const invitationRepository = require('../../repositories/invitation-repository');
 const auditLogRepository = require('../../repositories/audit-log-repository');
+const tenantPageRepository = require('../../repositories/tenant-page-repository');
+const tenantPostRepository = require('../../repositories/tenant-post-repository');
+const tenantScheduleRepository = require('../../repositories/tenant-schedule-repository');
+const tenantTemplateRepository = require('../../repositories/tenant-template-repository');
+const tenantSettingsRepository = require('../../repositories/tenant-settings-repository');
+const tenantMediaRepository = require('../../repositories/tenant-media-repository');
+const { publicError } = require('../../security/public-error');
 const {
   resolveWorkspaceContext,
   requireWorkspacePermission,
@@ -426,6 +433,545 @@ router.get(
       return res.status(200).json({
         success: true,
         auditLogs,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+// --- Tenant Domain Endpoints ---
+
+// Connected Facebook Pages
+router.get(
+  '/:workspaceId/pages',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('pages:read'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId } = req.params;
+    try {
+      const pages = await tenantPageRepository.listPages({ workspaceId });
+      return res.status(200).json({
+        success: true,
+        pages,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.post(
+  '/:workspaceId/pages',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('pages:manage'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId } = req.params;
+    const { pageId, pageName, accessToken, category, systemPrompt, isDefault } = req.body || {};
+    try {
+      const page = await tenantPageRepository.connectPage({
+        workspaceId,
+        pageId,
+        pageName,
+        accessToken,
+        category,
+        systemPrompt,
+        isDefault,
+        actorUserId: req.user.id,
+        requestId: req.requestId
+      });
+      return res.status(201).json({
+        success: true,
+        page,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.get(
+  '/:workspaceId/pages/:pageId',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('pages:read'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId, pageId } = req.params;
+    try {
+      const page = await tenantPageRepository.getPageById({ workspaceId, pageId });
+      if (!page) {
+        throw publicError('RESOURCE_NOT_FOUND', 'Page not found in workspace.');
+      }
+      return res.status(200).json({
+        success: true,
+        page,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.delete(
+  '/:workspaceId/pages/:pageId',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('pages:manage'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId, pageId } = req.params;
+    try {
+      const page = await tenantPageRepository.disconnectPage({
+        workspaceId,
+        pageId,
+        actorUserId: req.user.id,
+        requestId: req.requestId
+      });
+      return res.status(200).json({
+        success: true,
+        page,
+        message: 'Page disconnected successfully.',
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.patch(
+  '/:workspaceId/pages/:pageId/default',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('pages:manage'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId, pageId } = req.params;
+    try {
+      const page = await tenantPageRepository.setDefaultPage({
+        workspaceId,
+        pageId,
+        actorUserId: req.user.id,
+        requestId: req.requestId
+      });
+      return res.status(200).json({
+        success: true,
+        page,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+// Posts and Version History
+router.get(
+  '/:workspaceId/posts',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('drafts:read'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId } = req.params;
+    const { status, limit, offset } = req.query || {};
+    try {
+      const posts = await tenantPostRepository.listPosts({
+        workspaceId,
+        status,
+        limit,
+        offset
+      });
+      return res.status(200).json({
+        success: true,
+        posts,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.post(
+  '/:workspaceId/posts',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('drafts:create'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId } = req.params;
+    const { caption, category, topic, mediaUrls, pageId, status, scheduledAt } = req.body || {};
+    try {
+      const post = await tenantPostRepository.createPost({
+        workspaceId,
+        createdBy: req.user.id,
+        caption,
+        category,
+        topic,
+        mediaUrls,
+        pageId,
+        status: status || 'draft',
+        scheduledAt,
+        requestId: req.requestId
+      });
+      return res.status(201).json({
+        success: true,
+        post,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.get(
+  '/:workspaceId/posts/:postId',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('drafts:read'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId, postId } = req.params;
+    try {
+      const post = await tenantPostRepository.getPostById({ workspaceId, postId });
+      if (!post) {
+        throw publicError('RESOURCE_NOT_FOUND', 'Post not found in workspace.');
+      }
+      return res.status(200).json({
+        success: true,
+        post,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.patch(
+  '/:workspaceId/posts/:postId',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('drafts:update'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId, postId } = req.params;
+    const updates = req.body || {};
+    try {
+      const post = await tenantPostRepository.updatePost({
+        workspaceId,
+        postId,
+        updates,
+        actorUserId: req.user.id,
+        requestId: req.requestId
+      });
+      return res.status(200).json({
+        success: true,
+        post,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.delete(
+  '/:workspaceId/posts/:postId',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('drafts:delete'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId, postId } = req.params;
+    try {
+      await tenantPostRepository.deletePost({
+        workspaceId,
+        postId,
+        actorUserId: req.user.id,
+        requestId: req.requestId
+      });
+      return res.status(200).json({
+        success: true,
+        message: 'Post deleted successfully.',
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.get(
+  '/:workspaceId/posts/:postId/versions',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('drafts:read'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId, postId } = req.params;
+    try {
+      const post = await tenantPostRepository.getPostById({ workspaceId, postId });
+      if (!post) {
+        throw publicError('RESOURCE_NOT_FOUND', 'Post not found in workspace.');
+      }
+      const versions = await tenantPostRepository.getPostVersions({ workspaceId, postId });
+      return res.status(200).json({
+        success: true,
+        versions,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+// Schedules
+router.get(
+  '/:workspaceId/schedules',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('schedule:read'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId } = req.params;
+    try {
+      const schedule = await tenantScheduleRepository.getSchedule({ workspaceId });
+      return res.status(200).json({
+        success: true,
+        schedule,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.put(
+  '/:workspaceId/schedules',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('schedule:update'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId } = req.params;
+    const { pageId, cronExpression, cronLabel, status, selectedCategories, includeAiImage } = req.body || {};
+    try {
+      const schedule = await tenantScheduleRepository.saveSchedule({
+        workspaceId,
+        pageId,
+        cronExpression,
+        cronLabel,
+        status,
+        selectedCategories,
+        includeAiImage,
+        actorUserId: req.user.id,
+        requestId: req.requestId
+      });
+      return res.status(200).json({
+        success: true,
+        schedule,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+// Templates
+router.get(
+  '/:workspaceId/templates',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('templates:read'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId } = req.params;
+    try {
+      const templates = await tenantTemplateRepository.listTemplates({ workspaceId });
+      return res.status(200).json({
+        success: true,
+        templates,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.post(
+  '/:workspaceId/templates',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('templates:manage'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId } = req.params;
+    const { slug, title, badge, category, description, sample } = req.body || {};
+    try {
+      const template = await tenantTemplateRepository.createTemplate({
+        workspaceId,
+        slug,
+        title,
+        badge,
+        category,
+        description,
+        sample,
+        actorUserId: req.user.id,
+        requestId: req.requestId
+      });
+      return res.status(201).json({
+        success: true,
+        template,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.get(
+  '/:workspaceId/templates/:templateId',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('templates:read'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId, templateId } = req.params;
+    try {
+      const template = await tenantTemplateRepository.getTemplateById({ workspaceId, templateId });
+      if (!template) {
+        throw publicError('RESOURCE_NOT_FOUND', 'Template not found in workspace.');
+      }
+      return res.status(200).json({
+        success: true,
+        template,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.delete(
+  '/:workspaceId/templates/:templateId',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('templates:manage'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId, templateId } = req.params;
+    try {
+      await tenantTemplateRepository.deleteTemplate({
+        workspaceId,
+        templateId,
+        actorUserId: req.user.id,
+        requestId: req.requestId
+      });
+      return res.status(200).json({
+        success: true,
+        message: 'Template deleted successfully.',
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+// Settings
+router.get(
+  '/:workspaceId/settings',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('settings:read'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId } = req.params;
+    try {
+      const settings = await tenantSettingsRepository.getSettings({ workspaceId });
+      return res.status(200).json({
+        success: true,
+        settings,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.put(
+  '/:workspaceId/settings',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('settings:update'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId } = req.params;
+    const updates = req.body || {};
+    try {
+      const settings = await tenantSettingsRepository.updateSettings({
+        workspaceId,
+        updates,
+        actorUserId: req.user.id,
+        requestId: req.requestId
+      });
+      return res.status(200).json({
+        success: true,
+        settings,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+// Media Assets
+router.get(
+  '/:workspaceId/media',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('media:read'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId } = req.params;
+    const { limit, offset } = req.query || {};
+    try {
+      const media = await tenantMediaRepository.listMedia({ workspaceId, limit, offset });
+      return res.status(200).json({
+        success: true,
+        media,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.post(
+  '/:workspaceId/media',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('media:upload'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId } = req.params;
+    const { filename, storagePath, mimeType, sizeBytes } = req.body || {};
+    try {
+      const media = await tenantMediaRepository.recordMediaUpload({
+        workspaceId,
+        filename,
+        storagePath,
+        mimeType,
+        sizeBytes,
+        actorUserId: req.user.id,
+        requestId: req.requestId
+      });
+      return res.status(201).json({
+        success: true,
+        media,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.delete(
+  '/:workspaceId/media/:mediaId',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('media:delete'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId, mediaId } = req.params;
+    try {
+      await tenantMediaRepository.deleteMedia({
+        workspaceId,
+        mediaId,
+        actorUserId: req.user.id,
+        requestId: req.requestId
+      });
+      return res.status(200).json({
+        success: true,
+        message: 'Media asset deleted successfully.',
         requestId: req.requestId
       });
     } catch (err) {
