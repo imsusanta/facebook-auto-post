@@ -260,7 +260,9 @@ document.addEventListener('DOMContentLoaded', () => {
       'accounts': { title: 'Facebook Accounts & Pages Hub', subtitle: 'Connect multiple Facebook pages and switch active account anytime with 1-click.' },
       'settings': { title: 'Facebook & AI Settings', subtitle: 'Configure Meta Page tokens, Google Gemini API keys and simulation mode.' },
       'integrations': { title: 'API & Service Integrations', subtitle: 'Monitor connection health across Meta Graph API, Gemini AI and Webhooks.' },
-      'activity': { title: 'Live Execution & History Log', subtitle: 'Real-time trace of scheduler triggers, published posts and system events.' }
+      'activity': { title: 'Live Execution & History Log', subtitle: 'Real-time trace of scheduler triggers, published posts and system events.' },
+      'team': { title: 'টিম ও অনুমতি ব্যবস্থাপনা (Team & Roles)', subtitle: 'ওয়ার্কস্পেসের সদস্য তালিকা, ভূমিকা নির্ধারণ ও নতুন সদস্য আমন্ত্রণ জানান।' },
+      'security': { title: 'নিরাপত্তা ও অডিট ট্রেল (Security & Audit)', subtitle: 'ওয়ার্কস্পেসের সমস্ত কার্যকলাপের ক্রিপ্টোগ্রাফিক ও নিরাপত্তা লগ।' }
     };
 
     const cfg = headerConfigs[viewName] || headerConfigs['dashboard'];
@@ -281,6 +283,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (viewName === 'accounts') renderAccountsView();
     if (viewName === 'integrations') fetchAndRenderIntegrations();
     if (viewName === 'activity') renderActivityLogsView();
+    if (viewName === 'team') renderWorkspaceTeamView();
+    if (viewName === 'security') renderWorkspaceAuditView();
 
     refreshIcons();
   }
@@ -3073,7 +3077,14 @@ document.addEventListener('DOMContentLoaded', () => {
           currentCsrfToken = data.csrfToken || null;
           hideAuthModal();
           updateAuthUI(true, data.user);
-          initApp();
+          const hasWorkspaces = await loadWorkspacesAndSelect();
+          if (!hasWorkspaces) {
+            initApp();
+          } else {
+            fetchStatus();
+            connectSSE();
+            refreshIcons();
+          }
         } else {
           if (adminAuthError) {
             adminAuthError.textContent = data.error || 'Invalid email or password.';
@@ -3227,6 +3238,600 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // ================= CUSTOMER MULTI-TENANT WORKSPACE MODULE =================
+
+  function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  const ROLE_NAMES_BN = {
+    owner: 'মালিক (Owner)',
+    admin: 'অ্যাডমিন (Admin)',
+    editor: 'সম্পাদক (Editor)',
+    reviewer: 'পর্যালোচক (Reviewer)',
+    viewer: 'দর্শক (Viewer)'
+  };
+
+  const customerState = {
+    isMultiTenant: false,
+    workspaces: [],
+    activeWorkspace: null,
+    activeRole: null,
+    onboardingStep: 1
+  };
+
+  // DOM Elements
+  const workspaceSelectorContainer = document.getElementById('workspaceSelectorContainer');
+  const workspaceDropdownBtn = document.getElementById('workspaceDropdownBtn');
+  const workspaceDropdownMenu = document.getElementById('workspaceDropdownMenu');
+  const currentWorkspaceName = document.getElementById('currentWorkspaceName');
+  const currentWorkspaceRoleBadge = document.getElementById('currentWorkspaceRoleBadge');
+  const workspaceListItems = document.getElementById('workspaceListItems');
+  const btnOpenCreateWorkspaceModal = document.getElementById('btnOpenCreateWorkspaceModal');
+
+  const onboardingModal = document.getElementById('onboardingModal');
+  const onboardingWorkspaceNameInput = document.getElementById('onboardingWorkspaceNameInput');
+  const btnOnboardingCreateWs = document.getElementById('btnOnboardingCreateWs');
+  const onboardingError1 = document.getElementById('onboardingError1');
+  const onboardingStep1 = document.getElementById('onboardingStep1');
+  const onboardingStep2 = document.getElementById('onboardingStep2');
+  const onboardingStep3 = document.getElementById('onboardingStep3');
+  const onboardingStepNum = document.getElementById('onboardingStepNum');
+  const btnOnboardingConnectFb = document.getElementById('btnOnboardingConnectFb');
+  const btnOnboardingSkipStep2 = document.getElementById('btnOnboardingSkipStep2');
+  const btnOnboardingNextStep2 = document.getElementById('btnOnboardingNextStep2');
+  const btnOnboardingFinish = document.getElementById('btnOnboardingFinish');
+
+  const createWorkspaceModal = document.getElementById('createWorkspaceModal');
+  const createWorkspaceForm = document.getElementById('createWorkspaceForm');
+  const wsNameInput = document.getElementById('wsNameInput');
+  const wsSlugInput = document.getElementById('wsSlugInput');
+  const createWsError = document.getElementById('createWsError');
+  const btnCloseCreateWsModal = document.getElementById('btnCloseCreateWsModal');
+  const btnCancelCreateWs = document.getElementById('btnCancelCreateWs');
+
+  const navTeam = document.getElementById('navTeam');
+  const navSecurity = document.getElementById('navSecurity');
+  const btnOpenInviteModal = document.getElementById('btnOpenInviteModal');
+  const inviteMemberModal = document.getElementById('inviteMemberModal');
+  const inviteMemberForm = document.getElementById('inviteMemberForm');
+  const inviteEmailInput = document.getElementById('inviteEmailInput');
+  const inviteRoleSelect = document.getElementById('inviteRoleSelect');
+  const inviteError = document.getElementById('inviteError');
+  const inviteSuccess = document.getElementById('inviteSuccess');
+  const btnCloseInviteModal = document.getElementById('btnCloseInviteModal');
+  const btnCancelInvite = document.getElementById('btnCancelInvite');
+  const teamMembersList = document.getElementById('teamMembersList');
+  const pendingInvitationsList = document.getElementById('pendingInvitationsList');
+  const workspaceAuditLogsList = document.getElementById('workspaceAuditLogsList');
+
+  const postVersionDrawer = document.getElementById('postVersionDrawer');
+  const btnCloseVersionDrawer = document.getElementById('btnCloseVersionDrawer');
+  const postVersionsList = document.getElementById('postVersionsList');
+
+  // Toggle workspace dropdown
+  if (workspaceDropdownBtn) {
+    workspaceDropdownBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (workspaceDropdownMenu) workspaceDropdownMenu.classList.toggle('hidden');
+    });
+  }
+  document.addEventListener('click', () => {
+    if (workspaceDropdownMenu && !workspaceDropdownMenu.classList.contains('hidden')) {
+      workspaceDropdownMenu.classList.add('hidden');
+    }
+  });
+
+  // Modal open / close handlers
+  if (btnOpenCreateWorkspaceModal) {
+    btnOpenCreateWorkspaceModal.addEventListener('click', () => {
+      if (workspaceDropdownMenu) workspaceDropdownMenu.classList.add('hidden');
+      if (createWorkspaceModal) {
+        createWorkspaceModal.classList.remove('hidden');
+        if (wsNameInput) wsNameInput.value = '';
+        if (wsSlugInput) wsSlugInput.value = '';
+        if (createWsError) createWsError.classList.add('hidden');
+      }
+    });
+  }
+  if (btnCloseCreateWsModal) btnCloseCreateWsModal.addEventListener('click', () => createWorkspaceModal.classList.add('hidden'));
+  if (btnCancelCreateWs) btnCancelCreateWs.addEventListener('click', () => createWorkspaceModal.classList.add('hidden'));
+
+  if (btnOpenInviteModal) {
+    btnOpenInviteModal.addEventListener('click', () => {
+      if (inviteMemberModal) {
+        inviteMemberModal.classList.remove('hidden');
+        if (inviteEmailInput) inviteEmailInput.value = '';
+        if (inviteError) inviteError.classList.add('hidden');
+        if (inviteSuccess) inviteSuccess.classList.add('hidden');
+      }
+    });
+  }
+  if (btnCloseInviteModal) btnCloseInviteModal.addEventListener('click', () => inviteMemberModal.classList.add('hidden'));
+  if (btnCancelInvite) btnCancelInvite.addEventListener('click', () => inviteMemberModal.classList.add('hidden'));
+
+  if (btnCloseVersionDrawer) {
+    btnCloseVersionDrawer.addEventListener('click', () => postVersionDrawer.classList.add('hidden'));
+  }
+
+  // Create Workspace form handler
+  if (createWorkspaceForm) {
+    createWorkspaceForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = wsNameInput.value.trim();
+      const slug = wsSlugInput.value.trim() || undefined;
+      if (!name) return;
+
+      try {
+        const res = await fetch('/api/v1/workspaces', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': currentCsrfToken || '' },
+          body: JSON.stringify({ name, slug })
+        });
+        const data = await res.json();
+        if (data.success && data.workspace) {
+          createWorkspaceModal.classList.add('hidden');
+          await loadWorkspacesAndSelect(data.workspace.id);
+        } else {
+          createWsError.textContent = data.message || data.error || 'Failed to create workspace';
+          createWsError.classList.remove('hidden');
+        }
+      } catch {
+        createWsError.textContent = 'Network error. Please try again.';
+        createWsError.classList.remove('hidden');
+      }
+    });
+  }
+
+  // Onboarding Wizard: Step 1
+  if (btnOnboardingCreateWs) {
+    btnOnboardingCreateWs.addEventListener('click', async () => {
+      const name = onboardingWorkspaceNameInput.value.trim();
+      if (!name) {
+        onboardingError1.textContent = 'দয়া করে একটি নাম দিন (Please enter a name)';
+        onboardingError1.classList.remove('hidden');
+        return;
+      }
+      onboardingError1.classList.add('hidden');
+      btnOnboardingCreateWs.disabled = true;
+      btnOnboardingCreateWs.textContent = 'তৈরি হচ্ছে...';
+
+      try {
+        const res = await fetch('/api/v1/workspaces', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': currentCsrfToken || '' },
+          body: JSON.stringify({ name })
+        });
+        const data = await res.json();
+        if (data.success && data.workspace) {
+          customerState.activeWorkspace = data.workspace;
+          // Advance to Step 2
+          onboardingStep1.classList.add('hidden');
+          onboardingStep2.classList.remove('hidden');
+          onboardingStepNum.textContent = '২';
+          refreshIcons();
+        } else {
+          onboardingError1.textContent = data.message || 'ওয়ার্কস্পেস তৈরি করা যায়নি';
+          onboardingError1.classList.remove('hidden');
+        }
+      } catch {
+        onboardingError1.textContent = 'সংযোগ সমস্যা। আবার চেষ্টা করুন।';
+        onboardingError1.classList.remove('hidden');
+      } finally {
+        btnOnboardingCreateWs.disabled = false;
+        btnOnboardingCreateWs.textContent = 'ওয়ার্কস্পেস তৈরি করুন ➔';
+      }
+    });
+  }
+
+  // Onboarding Wizard: Step 2
+  if (btnOnboardingConnectFb) {
+    btnOnboardingConnectFb.addEventListener('click', async () => {
+      if (!customerState.activeWorkspace) return;
+      try {
+        const res = await fetch(`/api/v1/workspaces/${customerState.activeWorkspace.id}/facebook/auth`);
+        const data = await res.json();
+        if (data.success && data.authUrl) {
+          window.open(data.authUrl, '_blank', 'width=600,height=700');
+        }
+      } catch {
+        alert('ফেসবুক সংযোগ চালু করা সম্ভব হয়নি');
+      }
+    });
+  }
+  if (btnOnboardingSkipStep2) {
+    btnOnboardingSkipStep2.addEventListener('click', () => {
+      onboardingStep2.classList.add('hidden');
+      onboardingStep3.classList.remove('hidden');
+      onboardingStepNum.textContent = '৩';
+      refreshIcons();
+    });
+  }
+  if (btnOnboardingNextStep2) {
+    btnOnboardingNextStep2.addEventListener('click', () => {
+      onboardingStep2.classList.add('hidden');
+      onboardingStep3.classList.remove('hidden');
+      onboardingStepNum.textContent = '৩';
+      refreshIcons();
+    });
+  }
+
+  // Onboarding Wizard: Step 3 Finish
+  if (btnOnboardingFinish) {
+    btnOnboardingFinish.addEventListener('click', async () => {
+      onboardingModal.classList.add('hidden');
+      await loadWorkspacesAndSelect(customerState.activeWorkspace?.id);
+    });
+  }
+
+  // Invite Member form handler
+  if (inviteMemberForm) {
+    inviteMemberForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!customerState.activeWorkspace) return;
+      const email = inviteEmailInput.value.trim();
+      const role = inviteRoleSelect.value;
+      if (!email) return;
+
+      inviteError.classList.add('hidden');
+      inviteSuccess.classList.add('hidden');
+
+      try {
+        const res = await fetch(`/api/v1/workspaces/${customerState.activeWorkspace.id}/invitations`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': currentCsrfToken || '' },
+          body: JSON.stringify({ email, role })
+        });
+        const data = await res.json();
+        if (data.success) {
+          inviteSuccess.textContent = `আমন্ত্রণ সফলভাবে পাঠানো হয়েছে (${role})!`;
+          inviteSuccess.classList.remove('hidden');
+          inviteEmailInput.value = '';
+          renderWorkspaceTeamView();
+          setTimeout(() => {
+            if (inviteMemberModal) inviteMemberModal.classList.add('hidden');
+          }, 1500);
+        } else {
+          inviteError.textContent = data.message || 'আমন্ত্রণ পাঠাতে ব্যর্থ';
+          inviteError.classList.remove('hidden');
+        }
+      } catch {
+        inviteError.textContent = 'সংযোগ ব্যর্থ হয়েছে।';
+        inviteError.classList.remove('hidden');
+      }
+    });
+  }
+
+  // Load workspaces and select active
+  async function loadWorkspacesAndSelect(targetId = null) {
+    try {
+      const res = await fetch('/api/v1/workspaces');
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (!data.success || !Array.isArray(data.workspaces)) return false;
+
+      customerState.isMultiTenant = true;
+      customerState.workspaces = data.workspaces;
+
+      if (data.workspaces.length === 0) {
+        // Show Onboarding Modal
+        if (onboardingModal) onboardingModal.classList.remove('hidden');
+        return true;
+      }
+
+      // Show workspace switcher & nav
+      if (workspaceSelectorContainer) {
+        workspaceSelectorContainer.classList.remove('hidden');
+        workspaceSelectorContainer.classList.add('flex');
+      }
+      if (navTeam) navTeam.classList.remove('hidden');
+      if (navSecurity) navSecurity.classList.remove('hidden');
+
+      // Select workspace
+      const target = (targetId && data.workspaces.find(w => w.id === targetId)) || data.workspaces[0];
+      await selectWorkspace(target);
+
+      // Render workspace list in dropdown
+      renderWorkspaceDropdownList();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function renderWorkspaceDropdownList() {
+    if (!workspaceListItems) return;
+    workspaceListItems.innerHTML = '';
+
+    customerState.workspaces.forEach(ws => {
+      const isSelected = customerState.activeWorkspace?.id === ws.id;
+      const btn = document.createElement('button');
+      btn.className = `w-full text-left px-3 py-2 text-xs flex items-center justify-between rounded-lg transition ${
+        isSelected ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-700 hover:bg-slate-50 font-medium'
+      }`;
+      btn.innerHTML = `
+        <div class="flex items-center gap-2 truncate">
+          <i data-lucide="building" class="w-3.5 h-3.5 text-slate-400"></i>
+          <span class="truncate">${escapeHtml(ws.name)}</span>
+        </div>
+        ${isSelected ? '<i data-lucide="check" class="w-3.5 h-3.5 text-indigo-600 shrink-0"></i>' : ''}
+      `;
+      btn.addEventListener('click', async () => {
+        workspaceDropdownMenu.classList.add('hidden');
+        await selectWorkspace(ws);
+      });
+      workspaceListItems.appendChild(btn);
+    });
+    refreshIcons();
+  }
+
+  async function selectWorkspace(ws) {
+    customerState.activeWorkspace = ws;
+    if (currentWorkspaceName) currentWorkspaceName.textContent = ws.name;
+
+    // Fetch workspace details and user role
+    try {
+      const res = await fetch(`/api/v1/workspaces/${ws.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        customerState.activeRole = data.role || 'viewer';
+        if (currentWorkspaceRoleBadge) {
+          currentWorkspaceRoleBadge.textContent = ROLE_NAMES_BN[data.role] || data.role;
+        }
+        applyRbacVisibility(data.role);
+      }
+    } catch {
+      customerState.activeRole = 'viewer';
+    }
+
+    renderWorkspaceDropdownList();
+
+    // Reload active view data
+    if (state.currentView === 'team') renderWorkspaceTeamView();
+    if (state.currentView === 'security') renderWorkspaceAuditView();
+  }
+
+  function applyRbacVisibility(role) {
+    const isViewer = role === 'viewer';
+    const isOwnerOrAdmin = role === 'owner' || role === 'admin';
+
+    // Invite button
+    if (btnOpenInviteModal) {
+      if (isOwnerOrAdmin) {
+        btnOpenInviteModal.classList.remove('hidden');
+      } else {
+        btnOpenInviteModal.classList.add('hidden');
+      }
+    }
+
+    // Create post button
+    const navCreatePost = document.getElementById('navCreatePost');
+    if (navCreatePost) {
+      if (isViewer) {
+        navCreatePost.classList.add('opacity-50', 'pointer-events-none');
+        navCreatePost.title = 'আপনার ভূমিকা (দর্শক) পোস্ট তৈরি করতে অনুমতি দেয় না';
+      } else {
+        navCreatePost.classList.remove('opacity-50', 'pointer-events-none');
+        navCreatePost.removeAttribute('title');
+      }
+    }
+  }
+
+  // Team View Renderer
+  async function renderWorkspaceTeamView() {
+    if (!customerState.activeWorkspace || !teamMembersList) return;
+
+    teamMembersList.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-xs text-slate-400">লোড হচ্ছে...</td></tr>';
+
+    try {
+      const wsId = customerState.activeWorkspace.id;
+      const [membersRes, invitesRes] = await Promise.all([
+        fetch(`/api/v1/workspaces/${wsId}/members`),
+        fetch(`/api/v1/workspaces/${wsId}/invitations`)
+      ]);
+
+      const membersData = await membersRes.json();
+      const invitesData = await invitesRes.json();
+
+      if (membersData.success && Array.isArray(membersData.members)) {
+        teamMembersList.innerHTML = '';
+        membersData.members.forEach(m => {
+          const tr = document.createElement('tr');
+          const isOwner = m.role === 'owner';
+          const canManage = (customerState.activeRole === 'owner' || customerState.activeRole === 'admin') && !isOwner;
+
+          tr.innerHTML = `
+            <td class="py-3 px-4 flex items-center gap-3">
+              <div class="w-8 h-8 rounded-full bg-slate-100 text-slate-700 font-bold flex items-center justify-center text-xs">
+                ${escapeHtml((m.email || 'U')[0].toUpperCase())}
+              </div>
+              <div>
+                <span class="font-semibold text-slate-800">${escapeHtml(m.email || m.user_id)}</span>
+              </div>
+            </td>
+            <td class="py-3 px-4">
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${
+                m.role === 'owner' ? 'bg-amber-50 text-amber-800' :
+                m.role === 'admin' ? 'bg-indigo-50 text-indigo-700' :
+                m.role === 'editor' ? 'bg-emerald-50 text-emerald-700' :
+                m.role === 'reviewer' ? 'bg-purple-50 text-purple-700' :
+                'bg-slate-100 text-slate-600'
+              }">
+                ${ROLE_NAMES_BN[m.role] || m.role}
+              </span>
+            </td>
+            <td class="py-3 px-4">
+              <span class="inline-flex items-center gap-1 text-xs text-emerald-600 font-medium">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                ${escapeHtml(m.status)}
+              </span>
+            </td>
+            <td class="py-3 px-4 text-xs text-slate-500">
+              ${new Date(m.joined_at || m.created_at || Date.now()).toLocaleDateString()}
+            </td>
+            <td class="py-3 px-4 text-right">
+              ${canManage ? `
+                <button class="btn-remove-member text-xs text-rose-600 hover:underline font-semibold" data-user-id="${m.user_id}">
+                  অপসারণ
+                </button>
+              ` : '<span class="text-xs text-slate-400">—</span>'}
+            </td>
+          `;
+          teamMembersList.appendChild(tr);
+        });
+
+        // Bind remove member buttons
+        teamMembersList.querySelectorAll('.btn-remove-member').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const targetUserId = btn.getAttribute('data-user-id');
+            if (!confirm('আপনি কি নিশ্চিত এই সদস্যকে ওয়ার্কস্পেস থেকে অপসারণ করতে চান?')) return;
+            try {
+              const res = await fetch(`/api/v1/workspaces/${wsId}/members/${targetUserId}`, {
+                method: 'DELETE',
+                headers: { 'X-CSRF-Token': currentCsrfToken || '' }
+              });
+              const data = await res.json();
+              if (data.success) {
+                renderWorkspaceTeamView();
+              } else {
+                alert(data.message || 'অপসারণ ব্যর্থ হয়েছে');
+              }
+            } catch {
+              alert('সংযোগ ব্যর্থ হয়েছে');
+            }
+          });
+        });
+      }
+
+      // Render Pending Invitations
+      if (pendingInvitationsList && invitesData.success && Array.isArray(invitesData.invitations)) {
+        pendingInvitationsList.innerHTML = '';
+        if (invitesData.invitations.length === 0) {
+          pendingInvitationsList.innerHTML = '<p class="text-xs text-slate-400">কোনো অপেক্ষমাণ আমন্ত্রণ নেই।</p>';
+        } else {
+          invitesData.invitations.forEach(inv => {
+            const div = document.createElement('div');
+            div.className = 'flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs';
+            div.innerHTML = `
+              <div class="flex items-center gap-2.5">
+                <i data-lucide="mail" class="w-4 h-4 text-slate-400"></i>
+                <div>
+                  <span class="font-semibold text-slate-800">${escapeHtml(inv.email)}</span>
+                  <span class="ml-2 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[10px] font-bold">${ROLE_NAMES_BN[inv.role] || inv.role}</span>
+                  <span class="ml-1 text-slate-400 text-[10px]">(মেয়াদ: ${new Date(inv.expires_at).toLocaleDateString()})</span>
+                </div>
+              </div>
+              <button class="btn-revoke-invite text-xs text-rose-600 hover:underline font-semibold" data-invite-id="${inv.id}">
+                বাতিল করুন
+              </button>
+            `;
+            pendingInvitationsList.appendChild(div);
+          });
+
+          // Bind revoke buttons
+          pendingInvitationsList.querySelectorAll('.btn-revoke-invite').forEach(btn => {
+            btn.addEventListener('click', async () => {
+              const invId = btn.getAttribute('data-invite-id');
+              if (!confirm('আপনি কি এই আমন্ত্রণটি প্রত্যাহার করতে চান?')) return;
+              try {
+                const res = await fetch(`/api/v1/workspaces/${wsId}/invitations/${invId}`, {
+                  method: 'DELETE',
+                  headers: { 'X-CSRF-Token': currentCsrfToken || '' }
+                });
+                const data = await res.json();
+                if (data.success) {
+                  renderWorkspaceTeamView();
+                } else {
+                  alert(data.message || 'আমন্ত্রণ প্রত্যাহার ব্যর্থ');
+                }
+              } catch {
+                alert('সংযোগ সমস্যা');
+              }
+            });
+          });
+        }
+      }
+      refreshIcons();
+    } catch {
+      teamMembersList.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-xs text-rose-600">টিম সদস্য লোড করতে ব্যর্থ হয়েছে।</td></tr>';
+    }
+  }
+
+  // Security & Audit View Renderer
+  async function renderWorkspaceAuditView() {
+    if (!customerState.activeWorkspace || !workspaceAuditLogsList) return;
+
+    workspaceAuditLogsList.innerHTML = '<tr><td colspan="4" class="py-4 text-center text-xs text-slate-400">অডিট লগ লোড হচ্ছে...</td></tr>';
+
+    try {
+      const wsId = customerState.activeWorkspace.id;
+      const res = await fetch(`/api/v1/workspaces/${wsId}/audit-logs`);
+      const data = await res.json();
+
+      if (data.success && Array.isArray(data.auditLogs)) {
+        workspaceAuditLogsList.innerHTML = '';
+        if (data.auditLogs.length === 0) {
+          workspaceAuditLogsList.innerHTML = '<tr><td colspan="4" class="py-4 text-center text-xs text-slate-400">কোনো অডিট লগ রেকর্ড পাওয়া যায়নি।</td></tr>';
+        } else {
+          data.auditLogs.forEach(log => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td class="py-2.5 px-4 text-slate-500">${new Date(log.created_at).toLocaleString()}</td>
+              <td class="py-2.5 px-4 font-semibold text-indigo-700">${escapeHtml(log.action)}</td>
+              <td class="py-2.5 px-4 text-slate-700">${escapeHtml(log.resource_type)} ${log.resource_id ? `<span class="text-slate-400">(${escapeHtml(log.resource_id.slice(0, 8))}...)</span>` : ''}</td>
+              <td class="py-2.5 px-4 text-slate-400">${escapeHtml(log.actor_user_id ? log.actor_user_id.slice(0, 8) + '...' : 'System')}</td>
+            `;
+            workspaceAuditLogsList.appendChild(tr);
+          });
+        }
+      }
+    } catch {
+      workspaceAuditLogsList.innerHTML = '<tr><td colspan="4" class="py-4 text-center text-xs text-rose-600">অডিট লগ লোড করা যায়নি।</td></tr>';
+    }
+  }
+
+  // Post Version History Drawer opener
+  window.openPostVersionHistory = async function(postId) {
+    if (!customerState.activeWorkspace || !postVersionDrawer || !postVersionsList) return;
+
+    postVersionDrawer.classList.remove('hidden');
+    postVersionsList.innerHTML = '<p class="text-xs text-slate-400 text-center py-4">সংস্করণ লোড হচ্ছে...</p>';
+
+    try {
+      const wsId = customerState.activeWorkspace.id;
+      const res = await fetch(`/api/v1/workspaces/${wsId}/posts/${postId}/versions`);
+      const data = await res.json();
+
+      if (data.success && Array.isArray(data.versions)) {
+        postVersionsList.innerHTML = '';
+        if (data.versions.length === 0) {
+          postVersionsList.innerHTML = '<p class="text-xs text-slate-400">কোনো সংস্করণ ইতিহাস নেই।</p>';
+        } else {
+          data.versions.forEach(v => {
+            const item = document.createElement('div');
+            item.className = 'p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-1.5';
+            item.innerHTML = `
+              <div class="flex items-center justify-between">
+                <span class="font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded text-[10px]">সংস্করণ #${v.version_number}</span>
+                <span class="text-slate-400 text-[10px]">${new Date(v.created_at).toLocaleString()}</span>
+              </div>
+              <p class="text-slate-800 font-medium whitespace-pre-wrap line-clamp-3">${escapeHtml(v.caption)}</p>
+            `;
+            postVersionsList.appendChild(item);
+          });
+        }
+      }
+    } catch {
+      postVersionsList.innerHTML = '<p class="text-xs text-rose-600 text-center py-4">সংস্করণ ইতিহাস পাওয়া যায়নি।</p>';
+    }
+  };
+
   function initApp() {
     fetchStatus();
     fetchConnectedPages();
@@ -3246,7 +3851,15 @@ document.addEventListener('DOMContentLoaded', () => {
           currentCsrfToken = data.csrfToken || null;
           hideAuthModal();
           updateAuthUI(true, data.user);
-          initApp();
+          // Try loading customer multi-tenant workspaces
+          const hasWorkspaces = await loadWorkspacesAndSelect();
+          if (!hasWorkspaces) {
+            initApp();
+          } else {
+            fetchStatus();
+            connectSSE();
+            refreshIcons();
+          }
           return;
         } else {
           currentCsrfToken = null;

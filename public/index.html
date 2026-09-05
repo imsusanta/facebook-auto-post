@@ -84,8 +84,16 @@
               <span>Media Library</span>
             </a>
             <a href="#" class="sidebar-item" data-nav="accounts">
-              <i data-lucide="users" class="w-4 h-4"></i>
+              <i data-lucide="share-2" class="w-4 h-4"></i>
               <span>Accounts</span>
+            </a>
+            <a href="#" class="sidebar-item hidden" data-nav="team" id="navTeam">
+              <i data-lucide="users" class="w-4 h-4"></i>
+              <span>টিম সদস্য (Team)</span>
+            </a>
+            <a href="#" class="sidebar-item hidden" data-nav="security" id="navSecurity">
+              <i data-lucide="shield-check" class="w-4 h-4"></i>
+              <span>নিরাপত্তা ও অডিট</span>
             </a>
           </nav>
         </div>
@@ -156,6 +164,30 @@
             <span id="liveStatusDot" class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
           </span>
           <span id="liveStatusText">Live Connected</span>
+        </div>
+
+        <!-- Customer Workspace Switcher -->
+        <div id="workspaceSelectorContainer" class="relative hidden items-center gap-2">
+          <button id="workspaceDropdownBtn" class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-800 shadow-sm hover:border-indigo-300 transition">
+            <i data-lucide="briefcase" class="w-3.5 h-3.5 text-indigo-600"></i>
+            <span id="currentWorkspaceName">ওয়ার্কস্পেস</span>
+            <span id="currentWorkspaceRoleBadge" class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-bold">মালিক</span>
+            <i data-lucide="chevron-down" class="w-3 h-3 text-slate-400"></i>
+          </button>
+          
+          <!-- Dropdown menu -->
+          <div id="workspaceDropdownMenu" class="hidden absolute left-0 top-full mt-1.5 w-64 bg-white rounded-xl shadow-xl border border-slate-100 py-2 z-50">
+            <div class="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">আপনার ওয়ার্কস্পেসসমূহ</div>
+            <div id="workspaceListItems" class="max-h-48 overflow-y-auto py-1 space-y-0.5">
+              <!-- Dynamically populated -->
+            </div>
+            <div class="border-t border-slate-100 mt-1 pt-1 px-2">
+              <button id="btnOpenCreateWorkspaceModal" class="w-full text-left px-3 py-1.5 text-xs text-indigo-600 font-semibold hover:bg-indigo-50 rounded-lg flex items-center gap-2 transition">
+                <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
+                <span>নতুন ওয়ার্কস্পেস তৈরি করুন</span>
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Quick Page Switcher Dropdown -->
@@ -1517,7 +1549,7 @@
 
             <div>
               <label class="block font-bold text-slate-700 mb-1">Page Access Token <span class="text-rose-500">*</span></label>
-              <textarea id="newPageTokenInput" rows="3" placeholder="Paste your Facebook Page Access Token (EAAB...)" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-mono text-[11px] leading-relaxed"></textarea>
+              <textarea id="newPageTokenInput" rows="3" placeholder="Paste your Facebook Page Access Token" class="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-mono text-[11px] leading-relaxed"></textarea>
               <span class="text-[10px] text-slate-400 mt-0.5 block">Requires: pages_manage_posts, pages_read_engagement, pages_messaging</span>
             </div>
 
@@ -1877,6 +1909,78 @@
           </div>
         </div>
       </div>
+      <!-- ================= 11. VIEW: TEAM MEMBERS ================= -->
+      <div id="view-team" class="app-view space-y-6 hidden">
+        <div class="saas-card p-6">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-100">
+            <div>
+              <h3 class="text-lg font-bold text-slate-900">টিম ও অনুমতি ব্যবস্থাপনা (Team Members & Roles)</h3>
+              <p class="text-xs text-slate-500 mt-0.5">ওয়ার্কস্পেসের সদস্য তালিকা, ভূমিকা নির্ধারণ ও নতুন সদস্যদের আমন্ত্রণ জানান।</p>
+            </div>
+            <button id="btnOpenInviteModal" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm flex items-center gap-2 transition self-start sm:self-auto">
+              <i data-lucide="user-plus" class="w-3.5 h-3.5"></i>
+              <span>সদস্য আমন্ত্রণ করুন (Invite Member)</span>
+            </button>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                  <th class="py-3 px-4">সদস্য (Member)</th>
+                  <th class="py-3 px-4">ভূমিকা (Role)</th>
+                  <th class="py-3 px-4">স্ট্যাটাস (Status)</th>
+                  <th class="py-3 px-4">যুক্ত হয়েছেন (Joined)</th>
+                  <th class="py-3 px-4 text-right">পদক্ষেপ (Action)</th>
+                </tr>
+              </thead>
+              <tbody id="teamMembersList" class="divide-y divide-slate-100 text-sm">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Pending Invitations section -->
+          <div class="mt-8 pt-6 border-t border-slate-100">
+            <h4 class="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
+              <i data-lucide="mail-clock" class="w-4 h-4 text-indigo-500"></i>
+              <span>অপেক্ষমাণ আমন্ত্রণসমূহ (Pending Invitations)</span>
+            </h4>
+            <div id="pendingInvitationsList" class="space-y-2">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= 12. VIEW: SECURITY & AUDIT ================= -->
+      <div id="view-security" class="app-view space-y-6 hidden">
+        <div class="saas-card p-6">
+          <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+            <div>
+              <h3 class="text-lg font-bold text-slate-900">নিরাপত্তা ও অডিট ট্রেল (Security & Audit Trail)</h3>
+              <p class="text-xs text-slate-500">ওয়ার্কস্পেসের সমস্ত কার্যকলাপের ক্রিপ্টোগ্রাফিক ও নিরাপত্তা লগ।</p>
+            </div>
+            <span class="text-[11px] font-mono bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200">Tamper-Evident</span>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                  <th class="py-3 px-4">সময় (Time)</th>
+                  <th class="py-3 px-4">কার্যকলাপ (Action)</th>
+                  <th class="py-3 px-4">রিসোর্স (Resource)</th>
+                  <th class="py-3 px-4">অ্যাক্টর (Actor ID)</th>
+                </tr>
+              </thead>
+              <tbody id="workspaceAuditLogsList" class="divide-y divide-slate-100 text-xs font-mono">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
 
@@ -1973,6 +2077,214 @@
         </button>
       </div>
 
+    </div>
+  </div>
+
+  <!-- ================= BENGALI 3-STEP ONBOARDING WIZARD MODAL ================= -->
+  <div id="onboardingModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full mx-4 p-6 space-y-5 animate-in fade-in zoom-in-95 duration-200">
+      <!-- Step Indicator -->
+      <div class="flex items-center justify-between pb-4 border-b border-slate-100">
+        <div>
+          <span class="text-[10px] font-bold tracking-wider text-indigo-600 uppercase bg-indigo-50 px-2 py-0.5 rounded-full">স্বাগতম (Welcome)</span>
+          <h3 class="text-lg font-bold text-slate-900 mt-1">আপনার ওয়ার্কস্পেস সেটআপ করুন</h3>
+        </div>
+        <div class="flex items-center gap-1.5 text-xs font-bold text-slate-400">
+          <span id="onboardingStepNum" class="text-indigo-600 font-bold">১</span> / ৩
+        </div>
+      </div>
+
+      <!-- Step 1: Create Workspace -->
+      <div id="onboardingStep1" class="space-y-4">
+        <p class="text-xs text-slate-600 leading-relaxed">
+          আপনার ব্যবসার বা দলের জন্য একটি ওয়ার্কস্পেস তৈরি করুন। সমস্ত ফেসবুক পেজ, পোস্ট ড্রাফট এবং টিম মেম্বার এই ওয়ার্কস্পেসে সংরক্ষিত থাকবে।
+        </p>
+        <div>
+          <label for="onboardingWorkspaceNameInput" class="block text-xs font-semibold text-slate-700 mb-1">ওয়ার্কস্পেসের নাম (Workspace Name)</label>
+          <input
+            type="text"
+            id="onboardingWorkspaceNameInput"
+            placeholder="যেমন: আমার বিজনেস এজেন্সী"
+            class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
+          >
+        </div>
+        <div id="onboardingError1" class="hidden p-2.5 rounded-xl text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200"></div>
+        <button
+          type="button"
+          id="btnOnboardingCreateWs"
+          class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl shadow-sm transition flex items-center justify-center gap-2"
+        >
+          <span>ওয়ার্কস্পেস তৈরি করুন ➔</span>
+        </button>
+      </div>
+
+      <!-- Step 2: Connect Facebook Page -->
+      <div id="onboardingStep2" class="space-y-4 hidden">
+        <p class="text-xs text-slate-600 leading-relaxed">
+          আপনার ফেসবুক পেজটি কানেক্ট করুন। আপনার পেজ এক্সেস টোকেন আমাদের সার্ভারে AES-256-GCM এনক্রিপশনের মাধ্যমে নিরাপদে সংরক্ষিত থাকবে।
+        </p>
+        <div class="p-4 rounded-xl bg-slate-50 border border-slate-200 text-center space-y-3">
+          <div class="w-10 h-10 rounded-full bg-[#1877F2] text-white flex items-center justify-center font-bold text-lg mx-auto shadow-sm">f</div>
+          <div>
+            <h4 class="text-sm font-bold text-slate-800">অফিসিয়াল ফেসবুক ওঅথ সংযোগ</h4>
+            <p class="text-[11px] text-slate-500 mt-0.5">Meta Graph API অনুমোদিত নিরাপদ লগইন</p>
+          </div>
+          <button
+            type="button"
+            id="btnOnboardingConnectFb"
+            class="w-full py-2.5 bg-[#1877F2] hover:bg-[#166fe5] text-white text-xs font-semibold rounded-xl shadow-sm transition flex items-center justify-center gap-2"
+          >
+            <span>ফেসবুক পেজ কানেক্ট করুন (Connect)</span>
+          </button>
+        </div>
+        <div class="flex items-center justify-between pt-2">
+          <button type="button" id="btnOnboardingSkipStep2" class="text-xs text-slate-400 hover:text-slate-600 font-medium">পরে কানেক্ট করব (Skip for now)</button>
+          <button type="button" id="btnOnboardingNextStep2" class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1">
+            <span>পরবর্তী ধাপ ➔</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 3: Success & Get Started -->
+      <div id="onboardingStep3" class="space-y-4 text-center hidden">
+        <div class="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
+          <i data-lucide="check-circle" class="w-6 h-6"></i>
+        </div>
+        <div>
+          <h4 class="text-base font-bold text-slate-900">অভিনন্দন! ওয়ার্কস্পেস তৈরি সম্পন্ন</h4>
+          <p class="text-xs text-slate-500 mt-1">এখন আপনি কন্টেন্ট তৈরি, শিডিউল এবং টিম সদস্যদের আমন্ত্রণ জানাতে প্রস্তুত।</p>
+        </div>
+        <button
+          type="button"
+          id="btnOnboardingFinish"
+          class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-sm transition flex items-center justify-center gap-2"
+        >
+          <i data-lucide="layout-grid" class="w-4 h-4"></i>
+          <span>ড্যাশবোর্ডে প্রবেশ করুন</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= CREATE WORKSPACE MODAL ================= -->
+  <div id="createWorkspaceModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full mx-4 p-6 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <h3 class="text-base font-bold text-slate-900 flex items-center gap-2">
+          <i data-lucide="plus-circle" class="w-4 h-4 text-indigo-600"></i>
+          <span>নতুন ওয়ার্কস্পেস তৈরি (New Workspace)</span>
+        </h3>
+        <button type="button" id="btnCloseCreateWsModal" class="text-slate-400 hover:text-slate-600">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <form id="createWorkspaceForm" class="space-y-4">
+        <div>
+          <label for="wsNameInput" class="block text-xs font-semibold text-slate-700 mb-1">ওয়ার্কস্পেসের নাম (Name)</label>
+          <input
+            type="text"
+            id="wsNameInput"
+            placeholder="যেমন: ঢাকা মিডিয়া হাব"
+            class="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
+            required
+          >
+        </div>
+        <div>
+          <label for="wsSlugInput" class="block text-xs font-semibold text-slate-700 mb-1">স্লাগ / URL Identifier (ঐচ্ছিক)</label>
+          <input
+            type="text"
+            id="wsSlugInput"
+            placeholder="dhaka-media"
+            class="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition font-mono"
+          >
+        </div>
+
+        <div id="createWsError" class="hidden p-2.5 rounded-xl text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200"></div>
+
+        <div class="flex items-center justify-end gap-2 pt-2">
+          <button type="button" id="btnCancelCreateWs" class="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition">বাতিল</button>
+          <button type="submit" id="btnSubmitCreateWs" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl shadow-sm transition flex items-center gap-1.5">
+            <i data-lucide="check" class="w-3.5 h-3.5"></i>
+            <span>তৈরি করুন</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= INVITE MEMBER MODAL ================= -->
+  <div id="inviteMemberModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full mx-4 p-6 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <h3 class="text-base font-bold text-slate-900 flex items-center gap-2">
+          <i data-lucide="user-plus" class="w-4 h-4 text-indigo-600"></i>
+          <span>সদস্য আমন্ত্রণ করুন (Invite Team Member)</span>
+        </h3>
+        <button type="button" id="btnCloseInviteModal" class="text-slate-400 hover:text-slate-600">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <form id="inviteMemberForm" class="space-y-4">
+        <div>
+          <label for="inviteEmailInput" class="block text-xs font-semibold text-slate-700 mb-1">ইমেইল ঠিকানা (Email)</label>
+          <input
+            type="email"
+            id="inviteEmailInput"
+            placeholder="colleague@example.com"
+            class="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
+            required
+          >
+        </div>
+
+        <div>
+          <label for="inviteRoleSelect" class="block text-xs font-semibold text-slate-700 mb-1">ভূমিকা / রোল (Role)</label>
+          <select
+            id="inviteRoleSelect"
+            class="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
+          >
+            <option value="editor">সম্পাদক (Editor) — পোস্ট তৈরি ও ড্রাফট করতে পারে</option>
+            <option value="reviewer">পর্যালোচক (Reviewer) — পোস্ট পর্যালোচনা ও অনুমোদন করতে পারে</option>
+            <option value="admin">অ্যাডমিন (Admin) — সদস্য ও সেটিংস ব্যবস্থাপনা করতে পারে</option>
+            <option value="viewer">দর্শক (Viewer) — শুধুমাত্র পড়ার অনুমতি</option>
+          </select>
+        </div>
+
+        <div id="inviteError" class="hidden p-2.5 rounded-xl text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200"></div>
+        <div id="inviteSuccess" class="hidden p-2.5 rounded-xl text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"></div>
+
+        <div class="flex items-center justify-end gap-2 pt-2">
+          <button type="button" id="btnCancelInvite" class="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition">বাতিল</button>
+          <button type="submit" id="btnSubmitInvite" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl shadow-sm transition flex items-center gap-1.5">
+            <i data-lucide="send" class="w-3.5 h-3.5"></i>
+            <span>আমন্ত্রণ পাঠান</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= POST VERSION HISTORY DRAWER ================= -->
+  <div id="postVersionDrawer" class="fixed inset-y-0 right-0 w-full sm:w-96 bg-white shadow-2xl border-l border-slate-200 z-50 p-6 flex flex-col justify-between hidden animate-in slide-in-from-right duration-200">
+    <div>
+      <div class="flex items-center justify-between pb-4 border-b border-slate-100">
+        <div>
+          <span class="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full uppercase">অপরিবর্তনীয় সংস্করণ</span>
+          <h3 class="text-base font-bold text-slate-900 mt-1">পোস্টের সংস্করণ ইতিহাস</h3>
+        </div>
+        <button type="button" id="btnCloseVersionDrawer" class="text-slate-400 hover:text-slate-600">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div id="postVersionsList" class="py-4 space-y-3 overflow-y-auto max-h-[calc(100vh-160px)]">
+        <!-- Dynamically populated -->
+      </div>
+    </div>
+
+    <div class="pt-4 border-t border-slate-100 text-center">
+      <span class="text-[11px] text-slate-400">সংস্করণগুলো ডাটাবেসে অপরিবর্তনীয়ভাবে সংরক্ষিত</span>
     </div>
   </div>
 
