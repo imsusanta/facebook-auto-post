@@ -16,7 +16,8 @@
     "verify:clean": "bash scripts/verify-clean-worktree.sh",
     "db:migrate": "node scripts/migrate.js",
     "db:migrate:status": "node scripts/migrate.js --status",
-    "db:rollback": "node scripts/migrate.js --rollback"
+    "db:rollback": "node scripts/migrate.js --rollback",
+    "seed:admin": "node scripts/seed-admin.js"
   },
   "dependencies": {
     "argon2": "^0.45.1",
