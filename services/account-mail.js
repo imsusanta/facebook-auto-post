@@ -4,7 +4,13 @@ const { withTransaction, query } = require('../db');
 const messages = new Map();
 const delivered = new Set();
 let failDelivery = false;
-function enabled() { return process.env.NODE_ENV === 'test' && process.env.ALLOW_TEST_MAIL === 'true' && process.env.AUTH_MAIL_ADAPTER === 'test'; }
+function enabled() {
+  return (
+    (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development') &&
+    process.env.ALLOW_TEST_MAIL === 'true' &&
+    process.env.AUTH_MAIL_ADAPTER === 'test'
+  );
+}
 function settings() {
   if (!enabled()) throw new Error('Mail provider is not configured');
   const key = process.env.AUTH_MAIL_ENCRYPTION_KEY;
@@ -53,6 +59,10 @@ async function dispatch(id) {
         if (failDelivery || delivered.size >= 2000 || messages.size >= 1000) throw new Error('Test mail delivery unavailable');
         const data = decrypt(id, outbox.payload);
         messages.set(id, { id, ...data }); delivered.add(id);
+        if (process.env.NODE_ENV === 'development') {
+          const logger = require('../utils/logger');
+          logger.info(`📧 [Auth Mail (Dev)] To: ${data.to} | Action: ${data.purpose} | Link: ${data.link}`);
+        }
       }
       await client.query("UPDATE auth_mail_outbox SET state = 'sent', payload = NULL, delivered_at = NOW(), attempts = attempts + 1 WHERE id = $1", [id]);
     });
@@ -69,6 +79,7 @@ async function drain() {
   for (const row of rows.rows) await dispatch(row.id);
 }
 function takeTestMessages() { settings(); const result = [...messages.values()]; messages.clear(); return result; }
+function peekTestMessages() { settings(); return [...messages.values()]; }
 function configureTestFailure(value) { settings(); failDelivery = Boolean(value); }
 function resetTestMailbox() { settings(); messages.clear(); delivered.clear(); failDelivery = false; }
-module.exports = { enabled, settings, enqueue, dispatch, drain, takeTestMessages, configureTestFailure, resetTestMailbox };
+module.exports = { enabled, settings, enqueue, dispatch, drain, takeTestMessages, peekTestMessages, configureTestFailure, resetTestMailbox };

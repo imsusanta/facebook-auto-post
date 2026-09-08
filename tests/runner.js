@@ -26,6 +26,7 @@ process.env.NODE_ENV = 'development';
 process.env.DEV_AUTH_BYPASS = 'false';
 process.env.FB_APP_SECRET = 'test_meta_app_secret_12345';
 process.env.ADMIN_API_KEY = 'test_admin_api_key_secret_999';
+process.env.STORAGE_MODE = 'legacy';
 
 // Step C: Record real data/settings.json state (if exists) without reading or exposing contents
 const realSettingsPath = path.join(__dirname, '..', 'data', 'settings.json');

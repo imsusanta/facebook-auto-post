@@ -3,7 +3,7 @@
  * Configures security middleware, body parsers, routes, and error handling
  * without auto-listening, enabling clean programmatic testing.
  */
-
+require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
@@ -106,6 +106,11 @@ function createApp() {
   app.use('/uploads', authMiddleware, requireRole(['admin', 'super_admin']), express.static(path.join(__dirname, UPLOADS_DIR)));
   app.use('/uploads', (req, res) => res.status(404).end());
   app.use(express.static(path.join(__dirname, 'public')));
+
+  // Support direct browser navigation to account verification and password reset routes
+  app.get(['/account/verify', '/account/reset'], (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  });
 
   // Mount Master API Router
   app.use('/api', apiRoutes);

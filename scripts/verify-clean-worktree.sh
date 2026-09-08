@@ -78,6 +78,7 @@ run 'database safety guard' npm run test:safety-guard
 run 'legacy regressions' npm test
 run 'PostgreSQL and real-auth integration' npm run test:postgres
 run 'browser regressions' node tests/browser-test.js
+run 'customer UI browser regressions' npm run test:browser:customer
 run 'runner failure-mode proof' bash scripts/verify-clean-worktree.sh --test-failure-mode
 [[ "$(git rev-parse HEAD)" == "$EXPECTED_HEAD" ]] || exit 1
 [[ -z "$(git status --porcelain)" ]] || { echo 'Tests modified the worktree.' >&2; git status --short; exit 1; }

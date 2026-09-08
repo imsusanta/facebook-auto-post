@@ -1,9 +1,11 @@
 require('dotenv').config();
 const { DEFAULT_PORT } = require('./constants');
 
+process.env.NODE_ENV = process.env.NODE_ENV || 'development';
+
 module.exports = {
   PORT: parseInt(process.env.PORT, 10) || DEFAULT_PORT,
-  NODE_ENV: process.env.NODE_ENV || 'development',
+  NODE_ENV: process.env.NODE_ENV,
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
   FB_PAGE_ID: process.env.FB_PAGE_ID || '',
   FB_PAGE_ACCESS_TOKEN: process.env.FB_PAGE_ACCESS_TOKEN || '',

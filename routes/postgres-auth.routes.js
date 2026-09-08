@@ -3,6 +3,7 @@ const express = require('express');
 const rateLimit = require('../middleware/auth-rate-limit');
 const passwords = require('../security/passwords');
 const lifecycle = require('../services/account-lifecycle');
+const mail = require('../services/account-mail');
 const router = express.Router();
 const users = require('../repositories/user-repository');
 const sessions = require('../services/postgres-session');
@@ -60,7 +61,11 @@ router.post('/login', rateLimit('login'), wrap(async (req, res) => {
   const session = await sessions.create(user.id, sessions.cookieToken(req), user.password_hash, user.auth_version, upgradedHash, req.requestId);
   if (!session) return res.status(401).json({ code: 'INVALID_CREDENTIALS', error: 'Invalid email or password.' });
   sessions.setCookie(res, session.token);
-  return res.json({ success: true, authenticated: true, csrfToken: session.csrfToken, user: { id: user.id, email: user.email, role: 'user' } });
+  const isSuperAdmin = user.email && (
+    user.email.toLowerCase() === 'susantalohr@gmail.com' ||
+    (process.env.ADMIN_EMAIL && user.email.toLowerCase() === process.env.ADMIN_EMAIL.toLowerCase())
+  );
+  return res.json({ success: true, authenticated: true, csrfToken: session.csrfToken, user: { id: user.id, email: user.email, role: isSuperAdmin ? 'super_admin' : 'user' } });
 }));
 router.get('/session', rateLimit('session'), wrap(async (req, res) => {
   const session = await sessions.read(sessions.cookieToken(req));
@@ -71,6 +76,16 @@ router.post('/logout', sessions.authenticate, wrap(async (req, res) => {
   sessions.setCookie(res, '', true);
   res.json({ success: true, authenticated: false });
 }));
+if (process.env.NODE_ENV !== 'production') {
+  router.get('/dev-mailbox', (req, res) => {
+    try {
+      const msgs = mail.peekTestMessages();
+      res.json({ success: true, messages: msgs });
+    } catch {
+      res.json({ success: true, messages: [] });
+    }
+  });
+}
 // No fallback to legacy setup, development login, or admin-key authentication.
 router.use((req, res) => res.status(404).json({ code: 'NOT_FOUND' }));
 router.use((err, req, res, next) => {

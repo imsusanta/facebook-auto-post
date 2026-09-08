@@ -1919,5 +1919,16 @@ describe('PostgreSQL Multi-Tenancy & RBAC Isolation Suite', () => {
     get userD() { return userD; },
     get userF() { return userF; }
   });
+  require('./publishing-pipeline-cases')({
+    request: options => request(baseUrl, options),
+    query,
+    get workspaceA() { return workspaceA; },
+    get workspaceB() { return workspaceB; },
+    get userA() { return userA; },
+    get userB() { return userB; },
+    get userC() { return userC; },
+    get userD() { return userD; },
+    get userF() { return userF; }
+  });
 });
 
