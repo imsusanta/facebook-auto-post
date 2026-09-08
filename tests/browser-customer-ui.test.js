@@ -17,6 +17,9 @@ process.env.NODE_ENV = 'test';
 process.env.STORAGE_MODE = 'postgres';
 process.env.AUTH_RATE_LIMIT_KEY = crypto.randomBytes(32).toString('hex');
 process.env.FB_TOKEN_ENCRYPTION_KEY = crypto.randomBytes(32).toString('hex');
+process.env.ALLOW_TEST_MAIL = 'true';
+process.env.AUTH_MAIL_ADAPTER = 'test';
+process.env.AUTH_MAIL_ENCRYPTION_KEY = crypto.randomBytes(32).toString('hex');
 
 const { resolveTestDatabaseUrl, assertLeastPrivilegedTestRole } = require('../db/safety-guard');
 const databaseUrl = resolveTestDatabaseUrl();
@@ -29,6 +32,7 @@ const { runMigrations } = require('../db/migrator');
 const userRepository = require('../repositories/user-repository');
 const workspaceRepository = require('../repositories/workspace-repository');
 const membershipRepository = require('../repositories/membership-repository');
+const mail = require('../services/account-mail');
 const { closeAllSseClients } = require('../middleware/sse');
 
 const testSchema = 'test_schema_ui_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
@@ -310,6 +314,7 @@ async function runCustomerUIBrowserTests() {
     });
     process.env.ALLOWED_ORIGINS = `http://127.0.0.1:${port}`;
     const baseUrl = `http://127.0.0.1:${port}`;
+    process.env.AUTH_PUBLIC_ORIGIN = baseUrl;
     console.log(`[Customer UI Test] App running at ${baseUrl}`);
 
     // 4. Launch Headless Chrome
@@ -333,6 +338,73 @@ async function runCustomerUIBrowserTests() {
 
     const authModalVisible = await cdp.evaluate('!document.getElementById("adminAuthModal").classList.contains("hidden")');
     assert('Auth modal is initially visible when unauthenticated', authModalVisible);
+
+    // Test 1b: Switch to Signup Tab
+    console.log('[Customer UI Test] Testing Signup tab switching...');
+    await cdp.evaluate('document.getElementById("tabAuthSignup").click()');
+    await new Promise((r) => setTimeout(r, 200));
+    const signupFormVisible = await cdp.evaluate('!document.getElementById("adminSignupForm").classList.contains("hidden")');
+    assert('Switching to Signup tab displays the signup form', signupFormVisible);
+
+    // Test 1c: Minimum Password Policy (< 12 characters rejected)
+    console.log('[Customer UI Test] Testing password length policy in signup...');
+    await cdp.evaluate(`
+      document.getElementById('adminSignupEmailInput').value = 'newbie@example.test';
+      document.getElementById('adminSignupPasswordInput').value = 'Short123!';
+      document.getElementById('adminSignupConfirmPasswordInput').value = 'Short123!';
+      document.getElementById('adminSignupForm').dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+    `);
+    await new Promise((r) => setTimeout(r, 200));
+    const shortPwError = await cdp.evaluate('document.getElementById("adminSignupError").textContent');
+    assert('Password length policy (< 12 chars) is rejected with Bengali error', shortPwError.includes('১২'));
+
+    // Test 1d: Submit Valid Signup (generates email verification link)
+    console.log('[Customer UI Test] Submitting valid signup in browser UI...');
+    await cdp.evaluate(`
+      document.getElementById('adminSignupEmailInput').value = 'newbie-customer@example.test';
+      document.getElementById('adminSignupPasswordInput').value = 'StrongPassword123!';
+      document.getElementById('adminSignupConfirmPasswordInput').value = 'StrongPassword123!';
+      document.getElementById('adminSignupForm').dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+    `);
+    await new Promise((r) => setTimeout(r, 1200));
+    const signupSuccessVisible = await cdp.evaluate('!document.getElementById("adminSignupSuccess").classList.contains("hidden")');
+    assert('Signup succeeds with 202 Accepted and displays email verification notification', signupSuccessVisible);
+
+    // Test 1e: Email verification via token and auto-transition to login
+    console.log('[Customer UI Test] Testing email verification flow...');
+    const testMsgs = mail.takeTestMessages();
+    const signupMsg = testMsgs.find((m) => m.to === 'newbie-customer@example.test');
+    assert('Test mail provider captured the email verification link', Boolean(signupMsg));
+    const rawToken = new URL(signupMsg.link).hash.slice('#token='.length);
+
+    await cdp.evaluate(`
+      document.getElementById('adminSignupSuccessVerifyBtn').click();
+      document.getElementById('adminVerifyTokenInput').value = '${rawToken}';
+      document.getElementById('adminVerifySubmitBtn').click();
+    `);
+    await new Promise((r) => setTimeout(r, 1800));
+
+    const verifySuccess = await cdp.evaluate('!document.getElementById("adminAuthForm").classList.contains("hidden")');
+    assert('Email verification automatically activates account and returns to login form', verifySuccess);
+
+    // Test 1f: Login with newly registered customer with 0 workspaces triggers Bengali Onboarding
+    console.log('[Customer UI Test] Logging in as newly registered customer...');
+    await cdp.evaluate(`
+      document.getElementById('adminAuthEmailInput').value = 'newbie-customer@example.test';
+      document.getElementById('adminAuthPasswordInput').value = 'StrongPassword123!';
+      document.getElementById('adminAuthForm').dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+    `);
+    await new Promise((r) => setTimeout(r, 2000));
+
+    const onboardingModalOpen = await cdp.evaluate('!document.getElementById("onboardingModal").classList.contains("hidden")');
+    assert('Newly registered customer with 0 workspaces automatically triggers Bengali onboarding wizard', onboardingModalOpen);
+
+    // Close onboarding modal and log out to test existing multi-tenant workspace owner
+    await cdp.evaluate(`
+      document.getElementById('onboardingModal').classList.add('hidden');
+      document.getElementById('adminLogoutBtn').click();
+    `);
+    await new Promise((r) => setTimeout(r, 1200));
 
     // Test 2: Submit Login as Verified SaaS Customer
     console.log('[Customer UI Test] Submitting login form in browser UI...');

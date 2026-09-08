@@ -107,6 +107,11 @@ function createApp() {
   app.use('/uploads', (req, res) => res.status(404).end());
   app.use(express.static(path.join(__dirname, 'public')));
 
+  // Support direct browser navigation to account verification and password reset routes
+  app.get(['/account/verify', '/account/reset'], (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  });
+
   // Mount Master API Router
   app.use('/api', apiRoutes);
 

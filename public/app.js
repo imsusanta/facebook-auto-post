@@ -2950,6 +2950,31 @@ document.addEventListener('DOMContentLoaded', () => {
   const adminAuthSubmitBtn = document.getElementById('adminAuthSubmitBtn');
   const togglePasswordVisibilityBtn = document.getElementById('togglePasswordVisibilityBtn');
 
+  // SaaS Signup Controls
+  const tabAuthLogin = document.getElementById('tabAuthLogin');
+  const tabAuthSignup = document.getElementById('tabAuthSignup');
+  const switchToSignupBtn = document.getElementById('switchToSignupBtn');
+  const switchToLoginBtn = document.getElementById('switchToLoginBtn');
+  const switchToVerifyBtn = document.getElementById('switchToVerifyBtn');
+  const adminSignupForm = document.getElementById('adminSignupForm');
+  const adminSignupEmailInput = document.getElementById('adminSignupEmailInput');
+  const adminSignupPasswordInput = document.getElementById('adminSignupPasswordInput');
+  const adminSignupConfirmPasswordInput = document.getElementById('adminSignupConfirmPasswordInput');
+  const adminSignupError = document.getElementById('adminSignupError');
+  const adminSignupSuccess = document.getElementById('adminSignupSuccess');
+  const adminSignupSuccessLoginBtn = document.getElementById('adminSignupSuccessLoginBtn');
+  const adminSignupSuccessVerifyBtn = document.getElementById('adminSignupSuccessVerifyBtn');
+  const adminSignupSubmitBtn = document.getElementById('adminSignupSubmitBtn');
+  const toggleSignupPasswordVisibilityBtn = document.getElementById('toggleSignupPasswordVisibilityBtn');
+
+  // SaaS Email Verification Controls
+  const adminVerifySection = document.getElementById('adminVerifySection');
+  const adminVerifyTokenInput = document.getElementById('adminVerifyTokenInput');
+  const adminVerifyError = document.getElementById('adminVerifyError');
+  const adminVerifySuccess = document.getElementById('adminVerifySuccess');
+  const adminVerifySubmitBtn = document.getElementById('adminVerifySubmitBtn');
+  const adminVerifyBackToLoginBtn = document.getElementById('adminVerifyBackToLoginBtn');
+
   const adminDevLoginSection = document.getElementById('adminDevLoginSection');
   const adminDevLoginBtn = document.getElementById('adminDevLoginBtn');
 
@@ -3007,12 +3032,59 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function showAuthModal(isDev = false) {
+  function setAuthModalTab(tab = 'login') {
+    if (adminAuthError) adminAuthError.classList.add('hidden');
+    if (adminSignupError) adminSignupError.classList.add('hidden');
+    if (adminSignupSuccess) adminSignupSuccess.classList.add('hidden');
+    if (adminVerifyError) adminVerifyError.classList.add('hidden');
+    if (adminVerifySuccess) adminVerifySuccess.classList.add('hidden');
+
+    if (tab === 'login') {
+      if (adminAuthForm) adminAuthForm.classList.remove('hidden');
+      if (adminSignupForm) adminSignupForm.classList.add('hidden');
+      if (adminVerifySection) adminVerifySection.classList.add('hidden');
+
+      if (tabAuthLogin) {
+        tabAuthLogin.className = 'flex-1 py-2 text-xs font-bold rounded-lg transition shadow-sm bg-white text-indigo-600';
+      }
+      if (tabAuthSignup) {
+        tabAuthSignup.className = 'flex-1 py-2 text-xs font-semibold rounded-lg transition text-slate-600 hover:text-slate-900';
+      }
+      if (adminModalTitle) adminModalTitle.textContent = 'Facebook AutoPost SaaS Login';
+      if (adminModalSubtitle) adminModalSubtitle.textContent = 'Log in with your administrator email and password.';
+    } else if (tab === 'signup') {
+      if (adminAuthForm) adminAuthForm.classList.add('hidden');
+      if (adminSignupForm) adminSignupForm.classList.remove('hidden');
+      if (adminVerifySection) adminVerifySection.classList.add('hidden');
+
+      if (tabAuthLogin) {
+        tabAuthLogin.className = 'flex-1 py-2 text-xs font-semibold rounded-lg transition text-slate-600 hover:text-slate-900';
+      }
+      if (tabAuthSignup) {
+        tabAuthSignup.className = 'flex-1 py-2 text-xs font-bold rounded-lg transition shadow-sm bg-white text-indigo-600';
+      }
+      if (adminModalTitle) adminModalTitle.textContent = 'নতুন অ্যাকাউন্ট তৈরি করুন';
+      if (adminModalSubtitle) adminModalSubtitle.textContent = 'ফেসবুক অটো পোস্টার SaaS প্ল্যাটফর্মে সাইন আপ করুন।';
+    } else if (tab === 'verify') {
+      if (adminAuthForm) adminAuthForm.classList.add('hidden');
+      if (adminSignupForm) adminSignupForm.classList.add('hidden');
+      if (adminVerifySection) adminVerifySection.classList.remove('hidden');
+
+      if (tabAuthLogin) {
+        tabAuthLogin.className = 'flex-1 py-2 text-xs font-semibold rounded-lg transition text-slate-600 hover:text-slate-900';
+      }
+      if (tabAuthSignup) {
+        tabAuthSignup.className = 'flex-1 py-2 text-xs font-semibold rounded-lg transition text-slate-600 hover:text-slate-900';
+      }
+      if (adminModalTitle) adminModalTitle.textContent = 'ইমেইল ভেরিফিকেশন (Email Verification)';
+      if (adminModalSubtitle) adminModalSubtitle.textContent = 'আপনার ভেরিফিকেশন টোকেন প্রবেশ করিয়ে অ্যাকাউন্ট সক্রিয় করুন।';
+    }
+    refreshIcons();
+  }
+
+  function showAuthModal(isDev = false, tab = 'login') {
     if (!adminAuthModal) return;
     adminAuthModal.classList.remove('hidden');
-
-    if (adminModalTitle) adminModalTitle.textContent = 'Facebook AutoPost SaaS Login';
-    if (adminModalSubtitle) adminModalSubtitle.textContent = 'Log in with your administrator email and password.';
 
     if (adminDevLoginSection) {
       if (isDev) {
@@ -3022,17 +3094,32 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    if (adminAuthError) adminAuthError.classList.add('hidden');
+    setAuthModalTab(tab);
     refreshIcons();
   }
 
   function hideAuthModal() {
-    if (adminAuthModal) adminAuthModal.classList.add('hidden');
+    if (!adminAuthModal) return;
+    adminAuthModal.classList.add('hidden');
     if (adminAuthError) adminAuthError.classList.add('hidden');
+    if (adminSignupError) adminSignupError.classList.add('hidden');
+    if (adminVerifyError) adminVerifyError.classList.add('hidden');
     if (adminAuthPasswordInput) adminAuthPasswordInput.value = '';
+    if (adminSignupPasswordInput) adminSignupPasswordInput.value = '';
+    if (adminSignupConfirmPasswordInput) adminSignupConfirmPasswordInput.value = '';
   }
 
-  // Toggle Password Visibility Eye Button
+  // Tab switcher event listeners
+  if (tabAuthLogin) tabAuthLogin.addEventListener('click', () => setAuthModalTab('login'));
+  if (tabAuthSignup) tabAuthSignup.addEventListener('click', () => setAuthModalTab('signup'));
+  if (switchToSignupBtn) switchToSignupBtn.addEventListener('click', () => setAuthModalTab('signup'));
+  if (switchToLoginBtn) switchToLoginBtn.addEventListener('click', () => setAuthModalTab('login'));
+  if (switchToVerifyBtn) switchToVerifyBtn.addEventListener('click', () => setAuthModalTab('verify'));
+  if (adminVerifyBackToLoginBtn) adminVerifyBackToLoginBtn.addEventListener('click', () => setAuthModalTab('login'));
+  if (adminSignupSuccessLoginBtn) adminSignupSuccessLoginBtn.addEventListener('click', () => setAuthModalTab('login'));
+  if (adminSignupSuccessVerifyBtn) adminSignupSuccessVerifyBtn.addEventListener('click', () => setAuthModalTab('verify'));
+
+  // Toggle Password Visibility Eye Buttons
   if (togglePasswordVisibilityBtn && adminAuthPasswordInput) {
     togglePasswordVisibilityBtn.addEventListener('click', () => {
       const isPassword = adminAuthPasswordInput.type === 'password';
@@ -3045,6 +3132,183 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  if (toggleSignupPasswordVisibilityBtn && adminSignupPasswordInput) {
+    toggleSignupPasswordVisibilityBtn.addEventListener('click', () => {
+      const isPassword = adminSignupPasswordInput.type === 'password';
+      adminSignupPasswordInput.type = isPassword ? 'text' : 'password';
+      if (adminSignupConfirmPasswordInput) {
+        adminSignupConfirmPasswordInput.type = isPassword ? 'text' : 'password';
+      }
+      const icon = toggleSignupPasswordVisibilityBtn.querySelector('i');
+      if (icon) {
+        icon.setAttribute('data-lucide', isPassword ? 'eye-off' : 'eye');
+        refreshIcons();
+      }
+    });
+  }
+
+  // SaaS Email & Password Signup Submission
+  if (adminSignupForm) {
+    adminSignupForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = adminSignupEmailInput ? adminSignupEmailInput.value.trim() : '';
+      const password = adminSignupPasswordInput ? adminSignupPasswordInput.value : '';
+      const confirmPassword = adminSignupConfirmPasswordInput ? adminSignupConfirmPasswordInput.value : '';
+
+      if (adminSignupError) adminSignupError.classList.add('hidden');
+      if (adminSignupSuccess) adminSignupSuccess.classList.add('hidden');
+
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        if (adminSignupError) {
+          adminSignupError.textContent = 'অনুগ্রহ করে একটি সঠিক ইমেইল ঠিকানা প্রদান করুন।';
+          adminSignupError.classList.remove('hidden');
+        }
+        return;
+      }
+
+      if (!password || password.length < 12) {
+        if (adminSignupError) {
+          adminSignupError.textContent = 'পাসওয়ার্ড কমপক্ষে ১২ অক্ষরের হতে হবে।';
+          adminSignupError.classList.remove('hidden');
+        }
+        return;
+      }
+
+      if (password !== confirmPassword) {
+        if (adminSignupError) {
+          adminSignupError.textContent = 'পাসওয়ার্ড দুটি মিলছে না। অনুগ্রহ করে একই পাসওয়ার্ড দিন।';
+          adminSignupError.classList.remove('hidden');
+        }
+        return;
+      }
+
+      if (adminSignupSubmitBtn) {
+        adminSignupSubmitBtn.disabled = true;
+        adminSignupSubmitBtn.innerHTML = '<span>অ্যাকাউন্ট তৈরি হচ্ছে...</span>';
+      }
+
+      try {
+        const res = await fetch('/api/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (res.status === 202 || (data && data.success)) {
+          if (adminSignupSuccess) {
+            adminSignupSuccess.classList.remove('hidden');
+          }
+          if (adminSignupPasswordInput) adminSignupPasswordInput.value = '';
+          if (adminSignupConfirmPasswordInput) adminSignupConfirmPasswordInput.value = '';
+          if (adminAuthEmailInput) adminAuthEmailInput.value = email;
+        } else {
+          if (adminSignupError) {
+            adminSignupError.textContent = data.error || 'নিবন্ধন সম্পন্ন করা যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।';
+            adminSignupError.classList.remove('hidden');
+          }
+        }
+      } catch {
+        if (adminSignupError) {
+          adminSignupError.textContent = 'সার্ভারের সাথে সংযোগ স্থাপন করা যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।';
+          adminSignupError.classList.remove('hidden');
+        }
+      } finally {
+        if (adminSignupSubmitBtn) {
+          adminSignupSubmitBtn.disabled = false;
+          adminSignupSubmitBtn.innerHTML = '<i data-lucide="user-plus" class="w-4 h-4"></i><span>অ্যাকাউন্ট তৈরি করুন (Sign Up)</span>';
+          refreshIcons();
+        }
+      }
+    });
+  }
+
+  // Direct Email Verification Submission
+  async function submitEmailVerification(token) {
+    if (!token || !/^[a-f0-9]{64}$/.test(token.trim())) {
+      if (adminVerifyError) {
+        adminVerifyError.textContent = 'অনুগ্রহ করে সঠিক ৬৪-অক্ষরের ভেরিফিকেশন টোকেন প্রদান করুন।';
+        adminVerifyError.classList.remove('hidden');
+      }
+      return false;
+    }
+
+    if (adminVerifySubmitBtn) {
+      adminVerifySubmitBtn.disabled = true;
+      adminVerifySubmitBtn.innerHTML = '<span>যাচাই করা হচ্ছে...</span>';
+    }
+    if (adminVerifyError) adminVerifyError.classList.add('hidden');
+    if (adminVerifySuccess) adminVerifySuccess.classList.add('hidden');
+
+    try {
+      const res = await fetch('/api/auth/verify-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: token.trim() })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (adminVerifySuccess) {
+          adminVerifySuccess.textContent = 'ইমেইল সফলভাবে যাচাই হয়েছে! অনুগ্রহ করে লগইন করুন।';
+          adminVerifySuccess.classList.remove('hidden');
+        }
+        setTimeout(() => {
+          setAuthModalTab('login');
+          if (adminAuthError) {
+            adminAuthError.textContent = 'ইমেইল ভেরিফাই হয়েছে। এবার আপনার পাসওয়ার্ড দিয়ে লগইন করুন।';
+            adminAuthError.className = 'p-2.5 rounded-xl text-xs font-medium bg-emerald-50 text-emerald-800 border border-emerald-200';
+            adminAuthError.classList.remove('hidden');
+          }
+        }, 1200);
+        return true;
+      } else {
+        if (adminVerifyError) {
+          adminVerifyError.textContent = data.error || 'ভেরিফিকেশন টোকেনটি অবৈধ বা মেয়াদোত্তীর্ণ হয়ে গেছে।';
+          adminVerifyError.classList.remove('hidden');
+        }
+        return false;
+      }
+    } catch {
+      if (adminVerifyError) {
+        adminVerifyError.textContent = 'সংযোগ ব্যর্থ হয়েছে। আবার চেষ্টা করুন।';
+        adminVerifyError.classList.remove('hidden');
+      }
+      return false;
+    } finally {
+      if (adminVerifySubmitBtn) {
+        adminVerifySubmitBtn.disabled = false;
+        adminVerifySubmitBtn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i><span>ইমেইল নিশ্চিত করুন (Verify Email)</span>';
+        refreshIcons();
+      }
+    }
+  }
+
+  if (adminVerifySubmitBtn) {
+    adminVerifySubmitBtn.addEventListener('click', () => {
+      const token = adminVerifyTokenInput ? adminVerifyTokenInput.value.trim() : '';
+      submitEmailVerification(token);
+    });
+  }
+
+  // Check URL fragment or query for verification token (e.g. /account/verify#token=...)
+  function checkUrlVerificationToken() {
+    let token = null;
+    if (window.location.hash) {
+      const match = window.location.hash.match(/token=([a-f0-9]{64})/i);
+      if (match) token = match[1];
+    }
+    if (!token && window.location.search) {
+      const params = new window.URLSearchParams(window.location.search);
+      token = params.get('token') || params.get('verify_token');
+    }
+    if (token && /^[a-f0-9]{64}$/.test(token)) {
+      showAuthModal(false, 'verify');
+      if (adminVerifyTokenInput) adminVerifyTokenInput.value = token;
+      submitEmailVerification(token);
+      return true;
+    }
+    return false;
+  }
+
   // SaaS Email & Password Login Submission
   if (adminAuthForm) {
     adminAuthForm.addEventListener('submit', async (e) => {
@@ -3055,6 +3319,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!email || !password) {
         if (adminAuthError) {
           adminAuthError.textContent = 'Please enter both email and password.';
+          adminAuthError.className = 'p-2.5 rounded-xl text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200';
           adminAuthError.classList.remove('hidden');
         }
         return;
@@ -3088,12 +3353,14 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
           if (adminAuthError) {
             adminAuthError.textContent = data.error || 'Invalid email or password.';
+            adminAuthError.className = 'p-2.5 rounded-xl text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200';
             adminAuthError.classList.remove('hidden');
           }
         }
       } catch {
         if (adminAuthError) {
           adminAuthError.textContent = 'Connection error. Please try again.';
+          adminAuthError.className = 'p-2.5 rounded-xl text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200';
           adminAuthError.classList.remove('hidden');
         }
       } finally {
@@ -3864,17 +4131,26 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
           currentCsrfToken = null;
           updateAuthUI(false);
-          showAuthModal(Boolean(data.isDev));
+          const hasToken = checkUrlVerificationToken();
+          if (!hasToken) {
+            showAuthModal(Boolean(data.isDev));
+          }
           return;
         }
       }
       currentCsrfToken = null;
       updateAuthUI(false);
-      showAuthModal(true);
+      const hasToken = checkUrlVerificationToken();
+      if (!hasToken) {
+        showAuthModal(true);
+      }
     } catch {
       currentCsrfToken = null;
       updateAuthUI(false);
-      showAuthModal(true);
+      const hasToken = checkUrlVerificationToken();
+      if (!hasToken) {
+        showAuthModal(true);
+      }
     }
   }
 
