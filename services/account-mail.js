@@ -79,6 +79,7 @@ async function drain() {
   for (const row of rows.rows) await dispatch(row.id);
 }
 function takeTestMessages() { settings(); const result = [...messages.values()]; messages.clear(); return result; }
+function peekTestMessages() { settings(); return [...messages.values()]; }
 function configureTestFailure(value) { settings(); failDelivery = Boolean(value); }
 function resetTestMailbox() { settings(); messages.clear(); delivered.clear(); failDelivery = false; }
-module.exports = { enabled, settings, enqueue, dispatch, drain, takeTestMessages, configureTestFailure, resetTestMailbox };
+module.exports = { enabled, settings, enqueue, dispatch, drain, takeTestMessages, peekTestMessages, configureTestFailure, resetTestMailbox };

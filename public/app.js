@@ -3078,8 +3078,37 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       if (adminModalTitle) adminModalTitle.textContent = 'ইমেইল ভেরিফিকেশন (Email Verification)';
       if (adminModalSubtitle) adminModalSubtitle.textContent = 'আপনার ভেরিফিকেশন টোকেন প্রবেশ করিয়ে অ্যাকাউন্ট সক্রিয় করুন।';
+      checkDevMailbox();
     }
     refreshIcons();
+  }
+
+  async function checkDevMailbox() {
+    try {
+      const res = await fetch('/api/auth/dev-mailbox');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data && Array.isArray(data.messages) && data.messages.length > 0) {
+        const latest = data.messages[data.messages.length - 1];
+        if (latest && latest.link && latest.link.includes('#token=')) {
+          const token = latest.link.split('#token=')[1];
+          const container = document.getElementById('devAutoFillTokenContainer');
+          const btn = document.getElementById('devAutoFillTokenBtn');
+          if (container && btn && token) {
+            container.classList.remove('hidden');
+            btn.onclick = () => {
+              const input = document.getElementById('adminVerifyTokenInput');
+              if (input) {
+                input.value = token;
+                if (adminVerifyError) adminVerifyError.classList.add('hidden');
+              }
+            };
+          }
+        }
+      }
+    } catch {
+      // Non-blocking dev helper
+    }
   }
 
   function showAuthModal(isDev = false, tab = 'login') {

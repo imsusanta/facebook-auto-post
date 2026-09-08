@@ -3,6 +3,7 @@ const express = require('express');
 const rateLimit = require('../middleware/auth-rate-limit');
 const passwords = require('../security/passwords');
 const lifecycle = require('../services/account-lifecycle');
+const mail = require('../services/account-mail');
 const router = express.Router();
 const users = require('../repositories/user-repository');
 const sessions = require('../services/postgres-session');
@@ -71,6 +72,16 @@ router.post('/logout', sessions.authenticate, wrap(async (req, res) => {
   sessions.setCookie(res, '', true);
   res.json({ success: true, authenticated: false });
 }));
+if (process.env.NODE_ENV !== 'production') {
+  router.get('/dev-mailbox', (req, res) => {
+    try {
+      const msgs = mail.peekTestMessages();
+      res.json({ success: true, messages: msgs });
+    } catch {
+      res.json({ success: true, messages: [] });
+    }
+  });
+}
 // No fallback to legacy setup, development login, or admin-key authentication.
 router.use((req, res) => res.status(404).json({ code: 'NOT_FOUND' }));
 router.use((err, req, res, next) => {
