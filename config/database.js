@@ -32,8 +32,8 @@ function getDatabaseConfig() {
   validateDatabaseConfig();
 
   let ssl = false;
-  if (DATABASE_SSL) {
-    ssl = { rejectUnauthorized: process.env.NODE_ENV === 'production' };
+  if (DATABASE_SSL || (DATABASE_URL && (DATABASE_URL.includes('sslmode=require') || DATABASE_URL.includes('neon.tech')))) {
+    ssl = { rejectUnauthorized: false };
   }
 
   return {
