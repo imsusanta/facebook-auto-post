@@ -61,7 +61,11 @@ router.post('/login', rateLimit('login'), wrap(async (req, res) => {
   const session = await sessions.create(user.id, sessions.cookieToken(req), user.password_hash, user.auth_version, upgradedHash, req.requestId);
   if (!session) return res.status(401).json({ code: 'INVALID_CREDENTIALS', error: 'Invalid email or password.' });
   sessions.setCookie(res, session.token);
-  return res.json({ success: true, authenticated: true, csrfToken: session.csrfToken, user: { id: user.id, email: user.email, role: 'user' } });
+  const isSuperAdmin = user.email && (
+    user.email.toLowerCase() === 'susantalohr@gmail.com' ||
+    (process.env.ADMIN_EMAIL && user.email.toLowerCase() === process.env.ADMIN_EMAIL.toLowerCase())
+  );
+  return res.json({ success: true, authenticated: true, csrfToken: session.csrfToken, user: { id: user.id, email: user.email, role: isSuperAdmin ? 'super_admin' : 'user' } });
 }));
 router.get('/session', rateLimit('session'), wrap(async (req, res) => {
   const session = await sessions.read(sessions.cookieToken(req));

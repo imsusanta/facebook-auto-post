@@ -38,7 +38,12 @@ async function read(token) {
   const { rows } = await query(`SELECT s.csrf_token, u.id, u.email FROM auth_sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = $1 AND s.auth_version = u.auth_version AND s.expires_at > clock_timestamp() AND u.status = 'active' AND u.deleted_at IS NULL AND u.email_verified_at IS NOT NULL`, [digest(token)]);
   if (!rows[0]) return null;
-  return { csrfToken: rows[0].csrf_token, user: { id: rows[0].id, email: rows[0].email, role: 'user' } };
+  const email = rows[0].email;
+  const isSuperAdmin = email && (
+    email.toLowerCase() === 'susantalohr@gmail.com' ||
+    (process.env.ADMIN_EMAIL && email.toLowerCase() === process.env.ADMIN_EMAIL.toLowerCase())
+  );
+  return { csrfToken: rows[0].csrf_token, user: { id: rows[0].id, email: rows[0].email, role: isSuperAdmin ? 'super_admin' : 'user' } };
 }
 async function destroy(token) {
   if (TOKEN.test(token || '')) await query('DELETE FROM auth_sessions WHERE token_hash = $1', [digest(token)]);
