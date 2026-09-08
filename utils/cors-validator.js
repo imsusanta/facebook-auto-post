@@ -22,7 +22,7 @@ function isValidOriginFormat(origin) {
  */
 function getAllowedOrigins() {
   const isProduction = process.env.NODE_ENV === 'production';
-  const isDev = process.env.NODE_ENV === 'development';
+  const isDev = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV || process.env.NODE_ENV === 'test';
   const raw = process.env.ALLOWED_ORIGINS;
 
   if (typeof raw === 'string' && raw.trim().length > 0) {
@@ -32,8 +32,14 @@ function getAllowedOrigins() {
   }
 
   // If in development mode and nothing is set, default to localhost
-  if (isDev) {
-    return ['http://localhost:3000', 'http://127.0.0.1:3000'];
+  if (isDev && !isProduction) {
+    const port = process.env.PORT || 3000;
+    return [
+      `http://localhost:${port}`,
+      `http://127.0.0.1:${port}`,
+      'http://localhost:3000',
+      'http://127.0.0.1:3000'
+    ];
   }
 
   // In production with no configured origins, fail closed: empty list
@@ -45,7 +51,8 @@ function getAllowedOrigins() {
  */
 function isOriginAllowed(origin) {
   if (!origin || typeof origin !== 'string') return false;
-  const isDev = process.env.NODE_ENV === 'development';
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isDev = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV || process.env.NODE_ENV === 'test';
   const allowed = getAllowedOrigins();
 
   const trimmed = origin.trim();
@@ -56,7 +63,7 @@ function isOriginAllowed(origin) {
   }
 
   // Development mode only: allow localhost on any port
-  if (isDev && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(trimmed)) {
+  if (isDev && !isProduction && /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?$/.test(trimmed)) {
     return true;
   }
 

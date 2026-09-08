@@ -3,7 +3,7 @@
  * Configures security middleware, body parsers, routes, and error handling
  * without auto-listening, enabling clean programmatic testing.
  */
-
+require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
