@@ -169,18 +169,29 @@ async function launchHeadlessChrome() {
         handled = true;
         clearTimeout(timeout);
         const port = match[2];
-        try {
-          const listRes = await fetch(`http://127.0.0.1:${port}/json/list`);
-          const pages = await listRes.json();
-          const page = pages.find((p) => p.type === 'page') || pages[0];
-          if (page && page.webSocketDebuggerUrl) {
-            resolve(page.webSocketDebuggerUrl);
-          } else {
-            resolve(match[1]);
-          }
-        } catch {
-          resolve(match[1]);
+        let pageTargetUrl = null;
+        for (let attempt = 0; attempt < 30; attempt++) {
+          try {
+            const listRes = await fetch(`http://127.0.0.1:${port}/json/list`);
+            const pages = await listRes.json();
+            const page = pages.find((p) => p.type === 'page');
+            if (page && page.webSocketDebuggerUrl) {
+              pageTargetUrl = page.webSocketDebuggerUrl;
+              break;
+            }
+          } catch (_) {}
+          await new Promise((r) => setTimeout(r, 100));
         }
+        if (!pageTargetUrl) {
+          try {
+            const newRes = await fetch(`http://127.0.0.1:${port}/json/new`, { method: 'PUT' });
+            const newPage = await newRes.json();
+            if (newPage && newPage.webSocketDebuggerUrl) {
+              pageTargetUrl = newPage.webSocketDebuggerUrl;
+            }
+          } catch (_) {}
+        }
+        resolve(pageTargetUrl || match[1]);
       }
     });
 
