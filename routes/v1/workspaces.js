@@ -12,6 +12,7 @@ const tenantScheduleRepository = require('../../repositories/tenant-schedule-rep
 const tenantTemplateRepository = require('../../repositories/tenant-template-repository');
 const tenantSettingsRepository = require('../../repositories/tenant-settings-repository');
 const tenantMediaRepository = require('../../repositories/tenant-media-repository');
+const tenantPublishingRepository = require('../../repositories/tenant-publishing-repository');
 const { publicError } = require('../../security/public-error');
 const {
   resolveWorkspaceContext,
@@ -708,6 +709,128 @@ router.get(
       return res.status(200).json({
         success: true,
         versions,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+// Publishing Pipeline Endpoints
+router.post(
+  '/:workspaceId/posts/:postId/publish-now',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('publish:trigger'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId, postId } = req.params;
+    const { idempotencyKey } = req.body || {};
+    try {
+      const job = await tenantPublishingRepository.enqueueJob({
+        workspaceId,
+        postId,
+        createdBy: req.user.id,
+        idempotencyKey,
+        requestId: req.requestId
+      });
+      return res.status(202).json({
+        success: true,
+        job,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.get(
+  '/:workspaceId/publish-jobs',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('drafts:read'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId } = req.params;
+    const { status, limit, offset } = req.query || {};
+    try {
+      const jobs = await tenantPublishingRepository.listJobs({
+        workspaceId,
+        status,
+        limit,
+        offset
+      });
+      return res.status(200).json({
+        success: true,
+        jobs,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.get(
+  '/:workspaceId/publish-jobs/:jobId',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('drafts:read'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId, jobId } = req.params;
+    try {
+      const job = await tenantPublishingRepository.getJobById({ workspaceId, jobId });
+      if (!job) {
+        throw publicError('RESOURCE_NOT_FOUND', 'Publish job not found in workspace.');
+      }
+      return res.status(200).json({
+        success: true,
+        job,
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.post(
+  '/:workspaceId/publish-jobs/:jobId/cancel',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('schedule:cancel'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId, jobId } = req.params;
+    try {
+      await tenantPublishingRepository.cancelJob({
+        workspaceId,
+        jobId,
+        actorUserId: req.user.id,
+        requestId: req.requestId
+      });
+      return res.status(200).json({
+        success: true,
+        message: 'Publish job cancelled successfully.',
+        requestId: req.requestId
+      });
+    } catch (err) {
+      return sendSafeError(res, req, err);
+    }
+  })
+);
+
+router.post(
+  '/:workspaceId/publish-jobs/:jobId/retry',
+  resolveWorkspaceContext,
+  requireWorkspacePermission('publish:retry'),
+  asyncHandler(async (req, res) => {
+    const { workspaceId, jobId } = req.params;
+    try {
+      const job = await tenantPublishingRepository.retryJob({
+        workspaceId,
+        jobId,
+        actorUserId: req.user.id,
+        requestId: req.requestId
+      });
+      return res.status(200).json({
+        success: true,
+        job,
         requestId: req.requestId
       });
     } catch (err) {
